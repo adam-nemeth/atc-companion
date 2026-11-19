@@ -67,6 +67,15 @@ details summary { cursor: pointer; font-weight: 600; }
 #log { font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; max-height: 260px; overflow: auto;
   background: var(--input); border-radius: 8px; padding: 8px; margin-top: 8px; }
 .hidden { display: none !important; }
+.tabs { position: sticky; top: 0; z-index: 5; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
+  background: var(--bg); padding: 6px 0 10px; }
+.tabs button { padding: 8px 4px; font-size: 14px; border-radius: 9px; }
+.tabs button.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+body[data-tab] section[data-tab] { display: none; }
+body[data-tab="single"] section[data-tab~="single"], body[data-tab="all"] section[data-tab~="all"],
+body[data-tab="history"] section[data-tab~="history"], body[data-tab="settings"] section[data-tab~="settings"] { display: block; }
+body[data-tab="all"] .only-single { display: none !important; }
+body:not([data-tab="all"]) .only-all { display: none !important; }
 .ks { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); }
 .ks:first-child { border-top: 0; }
 .ks .nm { font-weight: 600; }
@@ -78,6 +87,13 @@ details summary { cursor: pointer; font-weight: 600; }
 <body>
 <main>
   <h1>ATC Thermometers <span class="muted" id="appVersionTop" style="font-weight:500;font-size:14px"></span></h1>
+  <nav class="tabs" id="tabs">
+    <button data-go="single">Sensor</button>
+    <button data-go="all">All sensors</button>
+    <button data-go="history">History</button>
+    <button data-go="settings">Settings</button>
+  </nav>
+  <div id="statusBar" class="muted" style="margin:-4px 0 10px"></div>
 
   <div id="noBle" class="banner hidden">
     <b>Web Bluetooth isn't available in this browser.</b><br>
@@ -86,7 +102,7 @@ details summary { cursor: pointer; font-weight: 600; }
   </div>
 
   <!-- Connection -->
-  <section class="card">
+  <section class="card" data-tab="single">
     <h2>Device</h2>
     <div class="row">
       <button id="btnConnect" class="primary">Connect…</button>
@@ -118,7 +134,7 @@ details summary { cursor: pointer; font-weight: 600; }
   </section>
 
   <!-- Known sensors -->
-  <section class="card">
+  <section class="card" data-tab="all">
     <h2>Known sensors</h2>
     <div class="row">
       <button id="btnScan">Scan nearby (live values)</button>
@@ -126,11 +142,33 @@ details summary { cursor: pointer; font-weight: 600; }
     </div>
     <div id="knownList" style="margin-top:10px"></div>
     <p class="muted">“Picker ID” is the code Bluefy shows in its device list for sensors whose name it doesn't know. It's learned here when you scan or connect.</p>
+
+    <h2 style="margin-top:14px">All sensors at once</h2>
+    <p class="muted">Ticked sensors are handled one after another: connect, do the job, disconnect, next. A sensor must be <b>ready</b> first - the iPhone only lets this page reach sensors you've picked or scanned since the page was opened.</p>
+    <div class="row">
+      <button id="btnAddSensors">Add sensors…</button>
+      <button id="btnSelAll" class="seg">Tick all</button>
+      <button id="btnSelNone" class="seg">Untick all</button>
+      <span id="readyMsg" class="muted"></span>
+    </div>
+    <div class="row">
+      <button id="bDump" class="primary">Download all</button>
+      <button id="bGetTime">Read clocks</button>
+      <button id="bSetTime">Set clocks</button>
+      <button id="bGetCfg">Read configs</button>
+      <button id="bSetCfg">Write config…</button>
+      <button id="bSendCfg">Send configs…</button>
+      <button id="bStop" class="danger hidden">Stop</button>
+    </div>
+    <p class="muted">“Download all” uses the options in the History download section (samples, sync clock, delete). “Write config” copies the settings in the Device configuration editor to every ticked sensor, keeping each sensor's own hardware‑specific bits and calibration offsets.</p>
+    <div class="progress" id="batchProg"><div></div></div>
+    <div id="batchOut" style="margin-top:8px"></div>
   </section>
 
   <!-- Actions -->
-  <section class="card">
+  <section class="card" data-tab="single all">
     <h2>History download</h2>
+    <p class="muted only-all">These options also apply to “Download all”.</p>
     <div class="row">
       <label>Samples
         <select id="dumpCount">
@@ -143,16 +181,17 @@ details summary { cursor: pointer; font-weight: 600; }
       <label><input type="checkbox" id="optSync" checked> <span id="optSyncLabel">Sync clock after (UTC)</span></label>
       <label><input type="checkbox" id="optDelete"> Delete on device after</label>
     </div>
-    <div class="row">
+    <div class="row only-single">
       <button id="btnDump" class="primary" disabled>Download history</button>
-      <span id="dumpStatus" class="muted"></span>
     </div>
+    <div class="row"><span id="dumpStatus" class="muted"></span></div>
     <div class="progress" id="dumpProg"><div></div></div>
   </section>
 
   <!-- Clock -->
-  <section class="card">
+  <section class="card" data-tab="single all">
     <h2>Sensor clock</h2>
+    <p class="muted only-all">The time zone here is also used by “Set clocks”, “Read clocks” and the clock sync after “Download all”.</p>
     <div class="row">
       <label>Time zone
         <select id="timeMode">
@@ -160,18 +199,18 @@ details summary { cursor: pointer; font-weight: 600; }
           <option value="local">Local</option>
         </select>
       </label>
-      <button id="btnTime" disabled>Set clock now</button>
-      <button id="btnGetTime" disabled>Read clock</button>
+      <button id="btnTime" class="only-single" disabled>Set clock now</button>
+      <button id="btnGetTime" class="only-single" disabled>Read clock</button>
     </div>
-    <div class="row"><span id="clockMsg" class="muted"></span></div>
+    <div class="row only-single"><span id="clockMsg" class="muted"></span></div>
     <p class="muted" id="tzHelp"></p>
-    <div class="row">
+    <div class="row only-single">
       <button id="btnDeleteLog" class="danger" disabled>Delete device history…</button>
     </div>
   </section>
 
   <!-- History -->
-  <section class="card">
+  <section class="card" data-tab="history">
     <h2>Stored history</h2>
     <p class="muted" id="storageInfo"></p>
     <div class="row">
@@ -205,7 +244,7 @@ details summary { cursor: pointer; font-weight: 600; }
   </section>
 
   <!-- Config -->
-  <section class="card">
+  <section class="card" data-tab="single">
     <details id="cfgDetails">
       <summary>Device configuration</summary>
       <p class="muted">Read on connect. Change values, then “Write config”. Fields marked hardware‑specific mean different things per model; leave them unless you know.</p>
@@ -223,8 +262,8 @@ details summary { cursor: pointer; font-weight: 600; }
   </section>
 
   <!-- Settings -->
-  <section class="card">
-    <details>
+  <section class="card" data-tab="settings">
+    <details open>
       <summary>Settings</summary>
       <div class="row" style="margin-top:10px">
         <label>CSV format
@@ -240,8 +279,8 @@ details summary { cursor: pointer; font-weight: 600; }
     </details>
   </section>
 
-  <section class="card">
-    <details>
+  <section class="card" data-tab="settings">
+    <details open>
       <summary>Debug log</summary>
       <p class="muted">Records every Bluetooth packet and step. Kept across reloads. If something goes wrong, tap “Send log” and email it.</p>
       <div class="row">
@@ -328,7 +367,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 10;
+const APP_VERSION = 11;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -503,24 +542,35 @@ function rememberSensor(name, data) {
 let renderPending = false;
 function scheduleKnownRender() { if (renderPending) return; renderPending = true; setTimeout(() => { renderPending = false; renderKnown(); }, 300); }
 function ago(ms) { const s = Math.round((Date.now() - ms) / 1000); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; }
+const batchSel = new Set(lsGet("batchSel", null) || Object.keys(DEFAULT_ROOMS));
+const saveSel = () => lsSet("batchSel", [...batchSel]);
 function renderKnown() {
   const box = $("knownList"); box.innerHTML = "";
+  let ready = 0, ticked = 0;
   for (const name of knownNames()) {
     const k = known[name] || {}, room = rooms[name] || "";
-    const row = document.createElement("div"); row.className = "ks" + (chr && sensorName === name ? " current" : "");
+    const isCur = !!chr && sensorName === name;
+    const dev = reachable.get(name);
+    if (dev) ready++; if (batchSel.has(name)) ticked++;
+    const row = document.createElement("div"); row.className = "ks" + (isCur ? " current" : "");
     const left = document.createElement("div");
-    left.innerHTML = `<div class="nm"></div><div class="vals"></div>`;
-    left.querySelector(".nm").textContent = room ? `${room} · ${name}` : name;
+    left.innerHTML = `<label class="nm"><input type="checkbox"> <span></span></label><div class="vals"></div>`;
+    const cb = left.querySelector("input"); cb.checked = batchSel.has(name);
+    cb.onchange = () => { cb.checked ? batchSel.add(name) : batchSel.delete(name); saveSel(); renderKnown(); };
+    left.querySelector(".nm span").textContent = room ? `${room} · ${name}` : name;
     left.querySelector(".vals").textContent = k.t != null
       ? `${k.t.toFixed(2)} °C · ${k.h.toFixed(1)} %${k.b != null ? ` · 🔋${k.b}%` : ""}${k.seen ? ` · ${ago(k.seen)}` : ""}` : "no live data yet";
-    const btn = document.createElement("button"); btn.textContent = "Connect";
-    const dev = reachable.get(name);
-    btn.disabled = !dev || !!chr || busy;
-    btn.onclick = () => withBusy(() => connectDevice(dev, name));
+    const btn = document.createElement("button");
+    btn.textContent = isCur ? "Connected" : chr ? "Switch" : "Connect";
+    btn.disabled = !dev || isCur || busy;
+    btn.onclick = () => withBusy(async () => { if (await connectDevice(dev, name)) showTab("single"); });
     const meta = document.createElement("div"); meta.className = "meta";
-    meta.textContent = `MAC ${k.mac || macFromName(name) || "?"}` + (k.btName && k.btName !== name ? ` · Bluetooth name ${k.btName}` : "") + (k.id ? ` · Picker ID ${k.id.slice(0, 8)}…` : "");
+    meta.textContent = (dev ? "✓ ready" : "not ready - use Add sensors… or Scan") +
+      ` · MAC ${k.mac || macFromName(name) || "?"}` + (k.btName && k.btName !== name ? ` · Bluetooth name ${k.btName}` : "") + (k.id ? ` · Picker ID ${k.id.slice(0, 8)}…` : "");
     row.append(left, btn, meta); box.appendChild(row);
   }
+  const rm = $("readyMsg"); if (rm) rm.textContent = `${ready} ready · ${ticked} ticked`;
+  for (const id of ["bDump", "bGetTime", "bSetTime", "bGetCfg", "bSetCfg", "btnAddSensors"]) { const b = $(id); if (b) b.disabled = busy || (id !== "btnAddSensors" && !ticked); }
 }
 // Parse sensor advertisements. pvvx "custom" format (service data 0x181A, 15+ bytes):
 // MAC[6] reversed, temp int16 x0.01, hum uint16 x0.01, batt mV uint16, batt %, counter, flags (all little-endian).
@@ -614,7 +664,9 @@ async function connect(showAll) {
   if (!device) { showError("Device picker", "returned no device"); return; }
   await connectDevice(device);
 }
-async function connectDevice(dev, expectedName) {
+// Returns true when connected. opts.batch skips the extras (name read, live values) to save time.
+async function connectDevice(dev, expectedName, opts = {}) {
+  if (chr && device && device !== dev) { log(`Switching from ${sensorName} to ${expectedName || dev.name || dev.id}`); await disconnectAndWait(); }
   device = dev; sensorName = null;
   showInfo("");
   if (!device._atcListener) { device.addEventListener("gattserverdisconnected", onDisconnected); device._atcListener = true; }
@@ -658,7 +710,7 @@ async function connectDevice(dev, expectedName) {
     step = "identifying the sensor";
     sensorName = (await identifySensor()) || expectedName || device.name || "unknown";
     rememberSensor(sensorName, { id: device.id, mac: macFromName(sensorName) || undefined });
-    await readBtName();
+    if (!opts.batch) await readBtName();
     reachable.set(sensorName, device);
     const room = rooms[sensorName];
     showInfo(`Connected to ${room ? room + " · " : ""}${sensorName}${macFromName(sensorName) ? " (" + macFromName(sensorName) + ")" : ""}` +
@@ -667,19 +719,34 @@ async function connectDevice(dev, expectedName) {
     $("devName").textContent = sensorName;
     $("roomName").value = room || ""; $("roomName").disabled = false;
     setButtons(true); renderKnown();
-    readLive(server);
+    if (!opts.batch) readLive(server);
+    return true;
   } catch (e) {
     showError(`Connect failed while ${step}`, e); setStatus("Connect failed", "err");
     chr = null;
     try { device.gatt.disconnect(); } catch {}
+    return false;
   }
+}
+// Disconnect the current sensor and wait (max 4 s) until the iPhone reports it's gone.
+async function disconnectAndWait() {
+  const d = device;
+  if (!d || !d.gatt || !d.gatt.connected) { chr = null; return; }
+  const gone = new Promise(res => { d.addEventListener("gattserverdisconnected", res, { once: true }); setTimeout(res, 4000); });
+  dbg(`Disconnecting ${sensorName || d.name}`);
+  try { d.gatt.disconnect(); } catch (e) { dbg(`disconnect() threw: ${describeErr(e)}`); }
+  await gone;
+  chr = null; listeners.clear();
+  await sleep(500); // give the radio a moment before the next connection
 }
 function pickerFailed(e) {
   if (e && e.name === "NotFoundError" && /cancel/i.test(e.message || "")) { showInfo("Picker cancelled."); return; }
   showError("Device picker", e);
   $("connMsg").textContent += " - try “Connect (all devices)”, and check that Bluetooth is on and Bluefy is allowed to use it (iPhone Settings → Privacy & Security → Bluetooth).";
 }
-function onDisconnected() {
+function onDisconnected(ev) {
+  // Events from a sensor we already switched away from must not tear down the current connection.
+  if (ev && ev.target && ev.target !== device) { dbg(`Disconnect event from previous sensor ${ev.target.name || ev.target.id} (ignored)`); return; }
   log(`Disconnected (gattserverdisconnected); busy=${busy}, ${rxCount} notifications this session, last BLE traffic ${Math.round((Date.now() - lastActivity) / 1000)} s ago, page ${document.hidden ? "hidden" : "visible"}`, "warn");
   chr = null; listeners.clear(); setStatus("Disconnected", "warn"); setButtons(false); renderKnown();
 }
@@ -732,10 +799,12 @@ function devKey() {
   const n = sensorName || "device"; const r = rooms[n];
   return r ? `${n}__${r}` : n;
 }
-async function dump() {
+// Returns { n, total, finished, deleted } (or null if cancelled). opts.skipConfirm: batch already asked.
+async function dump(opts = {}) {
   const cnt = parseInt($("dumpCount").value, 10) & 0xffff;
   const del = $("optDelete").checked;
-  if (del && !confirm("After a successful download, PERMANENTLY erase the history stored on the device?")) return;
+  if (del && !opts.skipConfirm && !confirm("After a successful download, PERMANENTLY erase the history stored on the device?")) return null;
+  const result = { n: 0, total: 0, finished: false, deleted: false };
   const raw = []; let done = false;
   const prog = $("dumpProg"), bar = prog.firstElementChild; prog.style.display = "block"; bar.style.width = "0";
   const l = b => {
@@ -771,8 +840,10 @@ async function dump() {
       if (del) {
         const r = await request([0x36, 0x12, 0x34], b => b[0] === 0x36);
         log(r ? "Device confirmed: history deleted." : "No reply to delete; check with another download.");
+        result.deleted = !!r;
       }
     }
+    result.finished = finished;
     if (del && !finished) log("Download incomplete - skipped delete for safety.");
     raw.sort((a, b) => a[0] - b[0]);
     const offStr = prefs.timeMode === "utc" ? "+00:00" : fmtOffset(localOffsetSec());
@@ -786,6 +857,8 @@ async function dump() {
     showLatestSample(raw[raw.length - 1] && [0, ...raw[raw.length - 1].slice(1)]);
     bar.style.width = "100%";
     await refreshDeviceList(key);
+    result.n = raw.length; result.total = total;
+    return result;
   } finally { clearInterval(ui); listeners.delete(l); setTimeout(() => prog.style.display = "none", 1500); }
 }
 const le32 = t => [t & 0xff, (t >>> 8) & 0xff, (t >>> 16) & 0xff, (t >>> 24) & 0xff];
@@ -835,6 +908,145 @@ async function resetBtName() {
   await setBtName(null);
 }
 
+// ===== Batch ("All sensors") =====
+// Handles ticked sensors one at a time: connect → job → disconnect → next. Web Bluetooth can only
+// reach sensors the user picked or scanned since the page loaded ("ready" = in `reachable`).
+let batchAbort = false;
+const batchTargets = () => knownNames().filter(n => batchSel.has(n));
+function sensorLabel(n) { return rooms[n] ? `${rooms[n]} · ${n}` : n; }
+async function runBatch(label, fn) {
+  const targets = batchTargets();
+  if (!targets.length) return;
+  batchAbort = false;
+  const out = $("batchOut"); out.innerHTML = "";
+  const head = document.createElement("div"); head.className = "status"; head.textContent = `${label}: 0/${targets.length}`; out.appendChild(head);
+  const rowEls = {};
+  for (const n of targets) {
+    const r = document.createElement("div"); r.className = "ks";
+    r.innerHTML = `<div class="nm"></div><div class="muted">waiting</div>`;
+    r.querySelector(".nm").textContent = sensorLabel(n); out.appendChild(r); rowEls[n] = r.lastChild;
+  }
+  const setRow = (n, text, cls) => { rowEls[n].textContent = text; rowEls[n].className = cls ? "status " + cls : "muted"; };
+  const prog = $("batchProg"), bar = prog.firstElementChild; prog.style.display = "block"; bar.style.width = "0";
+  $("bStop").classList.remove("hidden");
+  log(`==== Batch "${label}" on ${targets.length} sensor(s): ${targets.join(", ")} ====`);
+  let okCount = 0;
+  try {
+    for (let i = 0; i < targets.length; i++) {
+      const name = targets[i];
+      if (batchAbort) { for (const n of targets.slice(i)) setRow(n, "skipped (stopped)", "warn"); log("Batch stopped by user", "warn"); break; }
+      head.textContent = `${label}: ${i + 1}/${targets.length} - ${sensorLabel(name)}`;
+      const dev = reachable.get(name);
+      if (!dev) { setRow(name, "not ready - tap “Add sensors…” and pick it, or Scan", "err"); log(`Batch: ${name} not ready, skipped`, "warn"); continue; }
+      setRow(name, "connecting…", "warn");
+      log(`---- [${i + 1}/${targets.length}] ${name} ----`);
+      let ok = false, text = "";
+      try {
+        if (!(await connectDevice(dev, name, { batch: true }))) text = "couldn't connect - " + $("connMsg").textContent.replace(/^Connect failed while /, "");
+        else if (sensorName !== name) text = `reached ${sensorName} instead - skipped`;
+        else { setRow(name, "working…", "warn"); const r = await fn(name); ok = !!(r && r.ok); text = r ? r.text : "cancelled"; }
+      } catch (e) { text = "error: " + describeErr(e); log(`Batch error on ${name}: ${errDetail(e)}`, "err"); }
+      await disconnectAndWait();
+      if (ok) okCount++;
+      setRow(name, text, ok ? "ok" : "err");
+      log(`Batch result ${name}: ${ok ? "OK" : "FAILED"} - ${text}`, ok ? undefined : "warn");
+      bar.style.width = ((i + 1) / targets.length * 100) + "%";
+    }
+  } finally {
+    head.textContent = `${label}: ${okCount}/${targets.length} succeeded${batchAbort ? " (stopped)" : ""}`;
+    head.className = "status " + (okCount === targets.length ? "ok" : "warn");
+    log(`==== Batch "${label}" done: ${okCount}/${targets.length} OK ====`);
+    $("bStop").classList.add("hidden"); setTimeout(() => prog.style.display = "none", 1500);
+    renderKnown();
+  }
+}
+// "Add sensors…": pick one sensor so it becomes ready. Identifies it from its name when possible,
+// otherwise connects briefly to find out which one it is.
+async function addSensor() {
+  const opts = { filters: NAME_PREFIXES.map(p => ({ namePrefix: p })), optionalServices: [SVC, ES_SVC, BATT_SVC] };
+  let dev;
+  try { dev = await navigator.bluetooth.requestDevice(opts); }
+  catch (e) { if (!(e && e.name === "NotFoundError" && /cancel/i.test(e.message || ""))) { log("Add sensor picker: " + errDetail(e), "err"); $("readyMsg").textContent = "Picker failed: " + describeErr(e); } return; }
+  dbg(`Add sensor picked name="${dev.name}" id=${dev.id}`);
+  let name = sensorFromBtName(dev.name) || Object.keys(known).find(k => known[k].id === dev.id);
+  if (!name) {
+    $("readyMsg").textContent = "Identifying the sensor…";
+    if (await connectDevice(dev, null, { batch: true })) { name = sensorName; await disconnectAndWait(); }
+  }
+  if (!name) { $("readyMsg").textContent = "Couldn't identify that sensor."; return; }
+  reachable.set(name, dev); rememberSensor(name, { id: dev.id });
+  renderKnown();
+  $("readyMsg").textContent = `${sensorLabel(name)} is ready. ` + $("readyMsg").textContent;
+}
+function cfgSummary(c) {
+  const types = ["ATC1441", "pvvx", "Mi", "BTHome"];
+  return `${types[c.flg.bits.advertising_type]} adv every ${c.advertising_interval_ms_info} ms, measure ×${c.measure_interval_raw}` +
+    (c.av_meas_mem_raw != null ? `, log every ${c.av_meas_mem_raw}` : "") + `, TX ${c.rf_tx_power_raw}, fw ${c.device_info.protocol_version_str}`;
+}
+async function readCfgNow() {
+  const r = await request([0x55], b => b[0] === 0x55 && b.length - 1 >= 9, 8000);
+  return r ? decodeCfg(r) : null;
+}
+// Copy the editor's settings onto one sensor's config, keeping what belongs to that sensor.
+function mergeCfg(tpl, own) {
+  const m = JSON.parse(JSON.stringify(tpl));
+  m.device_info = own.device_info;
+  m.flg.bits.hardware_specific_bit3 = own.flg.bits.hardware_specific_bit3;
+  m.flg.bits.hardware_specific_bit5 = own.flg.bits.hardware_specific_bit5;
+  m.flg2.bits.smiley_or_screen_type = own.flg2.bits.smiley_or_screen_type;
+  if (own.hw_ver_raw != null) m.hw_ver_raw = own.hw_ver_raw; else delete m.hw_ver_raw;
+  if (own.lcd_tint_raw == null) { delete m.lcd_tint_raw; delete m.hw_ver_raw; delete m.av_meas_mem_raw; }
+  if (own.device_info.protocol_version_raw < CFG_NEW_LAYOUT_VER) { m.temp_offset_raw = own.temp_offset_raw; m.humi_offset_raw = own.humi_offset_raw; } // calibration
+  return m;
+}
+const BATCH = {
+  async dump() {
+    if ($("optDelete").checked && !confirm(`Download from ${batchTargets().length} sensor(s) and then PERMANENTLY erase the history stored on each one (only where the download finished)?`)) return;
+    await runBatch("Download all", async () => {
+      const r = await dump({ skipConfirm: true });
+      if (!r) return null;
+      return { ok: r.finished, text: `${r.n} samples downloaded · ${r.total} stored${r.deleted ? " · erased on sensor" : ""}${r.finished ? "" : " · INCOMPLETE (idle timeout)"}` };
+    });
+  },
+  async getTime() { await runBatch("Read clocks", () => getTime()); },
+  async setTime() { await runBatch(`Set clocks (${prefs.timeMode === "utc" ? "UTC" : "local"})`, () => setTime()); },
+  async getCfg() {
+    await runBatch("Read configs", async name => {
+      const c = await readCfgNow();
+      if (!c) return { ok: false, text: "no config reply" };
+      rememberSensor(name, { cfg: c, cfgRead: Date.now() });
+      return { ok: true, text: cfgSummary(c) };
+    });
+    $("bSendCfg").disabled = !Object.values(known).some(k => k.cfg);
+  },
+  async setCfg() {
+    if (!currentCfg) { alert("First load a config into the editor: connect to a sensor in the Sensor tab (or use Load JSON there), adjust it, then come back."); return; }
+    const tpl = JSON.parse(JSON.stringify(currentCfg));
+    if (!confirm(`Write these settings to ${batchTargets().length} sensor(s)?\n\n${cfgSummary(tpl)}\n\nEach sensor keeps its own hardware-specific bits and calibration offsets.`)) return;
+    log(`Batch config template: ${JSON.stringify(tpl)}`);
+    await runBatch("Write config", async name => {
+      const own = await readCfgNow();
+      if (!own) return { ok: false, text: "couldn't read its current config" };
+      const merged = mergeCfg(tpl, own), payload = encodeCfg(merged), before = encodeCfg(own);
+      dbg(`${name} config before ${hex(before)} → after ${hex(payload)}`);
+      if (hex(payload) === hex(before)) return { ok: true, text: "already up to date" };
+      const r = await request([0x55, ...payload], b => b[0] === 0x55 && b.length - 1 >= 9, 8000);
+      if (!r) return { ok: false, text: "no reply - re-read to check" };
+      const after = decodeCfg(r);
+      rememberSensor(name, { cfg: after, cfgRead: Date.now() });
+      const same = hex(encodeCfg(after)) === hex(payload);
+      return { ok: same, text: same ? "written: " + cfgSummary(after) : "sensor reports different values: " + cfgSummary(after) };
+    });
+  },
+  sendCfg() {
+    const items = knownNames().filter(n => known[n] && known[n].cfg).map(n => {
+      const text = JSON.stringify(known[n].cfg, null, 2);
+      return { name: `config_${n}${rooms[n] ? "_" + fileSafe(rooms[n]) : ""}.json`, rows: 1, text, type: "application/json" };
+    });
+    shareFiles(items, `Thermometer configs: ${items.length} sensor(s)`);
+  },
+};
+
 const tzName = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "local"; } catch { return "local"; } };
 const modeLabel = m => m === "utc" ? "UTC" : `${tzName()} (UTC${fmtOffset(localOffsetSec())})`;
 function updateTzLabels() {
@@ -852,13 +1064,16 @@ async function setTime() {
     const got = new DataView(r.buffer).getUint32(1, true);
     log("Device confirmed clock: " + faceValue(got));
     $("clockMsg").textContent = `Clock set to ${faceValue(got)} (${modeLabel(prefs.timeMode)}).`; $("clockMsg").className = "status ok";
-  } else { log("No reply (idle timeout).", "warn"); $("clockMsg").textContent = "No reply from the sensor."; $("clockMsg").className = "status err"; }
+    return { ok: true, text: `set to ${faceValue(got)} ${prefs.timeMode === "utc" ? "UTC" : "local"}` };
+  }
+  log("No reply (idle timeout).", "warn"); $("clockMsg").textContent = "No reply from the sensor."; $("clockMsg").className = "status err";
+  return { ok: false, text: "no reply" };
 }
 // Read the sensor clock (0x23 with no payload) and compare with the phone in the selected time zone.
 async function getTime() {
   const s = t0();
   const r = await request([0x23], b => b[0] === 0x23 && b.length >= 5, 8000);
-  if (!r) { $("clockMsg").textContent = "No reply from the sensor."; $("clockMsg").className = "status err"; return; }
+  if (!r) { $("clockMsg").textContent = "No reply from the sensor."; $("clockMsg").className = "status err"; return { ok: false, text: "no reply" }; }
   const dev = new DataView(r.buffer).getUint32(1, true);
   const rtt = performance.now() - s;
   const ref = deviceEpochNow(prefs.timeMode) - rtt / 2000;
@@ -870,6 +1085,7 @@ async function getTime() {
   else if (Math.abs(other) <= 120) txt += `matches ${prefs.timeMode === "utc" ? "local time" : "UTC"} instead (${other} s) - it was set with the other time zone setting.`;
   else txt += `${Math.abs(diff)} s ${diff > 0 ? "ahead of" : "behind"} ${modeLabel(prefs.timeMode)}${Math.abs(diff) >= 3600 ? ` (${(diff / 3600).toFixed(1)} h)` : ""}.`;
   $("clockMsg").textContent = txt; $("clockMsg").className = Math.abs(diff) <= 60 ? "status ok" : "status warn";
+  return { ok: Math.abs(diff) <= 60, text: txt.replace(/^Sensor clock: /, "") };
 }
 // Where history lives: IndexedDB in this browser's storage for this website, on the phone only.
 async function updateStorageInfo() {
@@ -1007,7 +1223,7 @@ function shareMsg(text, cls) { const m = $("shareMsg"); m.textContent = text; m.
 // from in-memory data - no awaits before navigator.share().
 function shareFiles(items, subject) {
   if (!items.length) { shareMsg("Nothing to send yet.", "status warn"); return; }
-  const files = items.map(it => new File([it.text], it.name, { type: "text/csv" }));
+  const files = items.map(it => new File([it.text], it.name, { type: it.type || "text/csv" }));
   const rows = items.reduce((n, it) => n + it.rows, 0);
   const body = `${subject}\n${items.map(it => `${it.name} (${it.rows} rows)`).join("\n")}`;
   const done = () => { dbg("Share completed"); shareMsg(`Shared ${files.length} file(s), ${rows} rows.`, "status ok"); };
@@ -1032,7 +1248,7 @@ function shareFiles(items, subject) {
 }
 function downloadFiles(items) {
   for (const it of items) {
-    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([it.text], { type: "text/csv" }));
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([it.text], { type: it.type || "text/csv" }));
     a.download = it.name; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 15000);
   }
@@ -1211,7 +1427,25 @@ async function copyLog() {
   }
 }
 
+function showTab(t) {
+  if (!["single", "all", "history", "settings"].includes(t)) t = "single";
+  document.body.dataset.tab = t;
+  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.go === t));
+  lsSet("tab", t);
+  if (t === "history") drawChart();
+  if (t === "settings") { const el = $("log"); el.scrollTop = el.scrollHeight; }
+}
+// One-line connection status shown under the tabs on every tab.
+function updateStatusBar() {
+  const s = $("statusBar"); if (!s) return;
+  s.textContent = chr && sensorName ? `● Connected: ${sensorLabel(sensorName)}` : busy ? "Working…" : "Not connected";
+  s.className = chr ? "status ok" : "muted";
+}
+
 (async function init() {
+  document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => showTab(b.dataset.go));
+  showTab(lsGet("tab", "single"));
+  setInterval(updateStatusBar, 1000);
   $("appVersion").textContent = `App version ${APP_VERSION}`;
   $("appVersionTop").textContent = `v${APP_VERSION}`;
   logEnvironment(); flushLog();
@@ -1259,6 +1493,17 @@ async function copyLog() {
     if ($("btNameNew").dataset.auto) $("btNameNew").value = suggestBtName();
   };
   $("btnScan").onclick = toggleScan;
+  $("btnAddSensors").onclick = () => withBusy(addSensor);
+  $("btnSelAll").onclick = () => { knownNames().forEach(n => batchSel.add(n)); saveSel(); renderKnown(); };
+  $("btnSelNone").onclick = () => { batchSel.clear(); saveSel(); renderKnown(); };
+  $("bDump").onclick = () => withBusy(BATCH.dump);
+  $("bGetTime").onclick = () => withBusy(BATCH.getTime);
+  $("bSetTime").onclick = () => withBusy(BATCH.setTime);
+  $("bGetCfg").onclick = () => withBusy(BATCH.getCfg);
+  $("bSetCfg").onclick = () => withBusy(BATCH.setCfg);
+  $("bSendCfg").onclick = BATCH.sendCfg;
+  $("bSendCfg").disabled = !Object.values(known).some(k => k.cfg);
+  $("bStop").onclick = () => { batchAbort = true; $("bStop").textContent = "Stopping after this sensor…"; setTimeout(() => $("bStop").textContent = "Stop", 4000); };
   if (navigator.bluetooth && navigator.bluetooth.addEventListener) navigator.bluetooth.addEventListener("advertisementreceived", onAdvertisement);
   // Devices this site was already allowed to use can be reconnected without the picker (if supported).
   if (navigator.bluetooth && navigator.bluetooth.getDevices) {
