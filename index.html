@@ -104,7 +104,7 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
   </div>
 
   <!-- Connection -->
-  <section class="card" data-tab="single">
+  <section class="card" data-tab="single" id="deviceCard" style="scroll-margin-top:70px">
     <h2>Device</h2>
     <div class="row">
       <button id="btnConnect" class="primary">Connect…</button>
@@ -372,7 +372,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 13;
+const APP_VERSION = 14;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -568,7 +568,16 @@ function renderKnown() {
     const btn = document.createElement("button");
     btn.textContent = isCur ? "Connected" : chr ? "Switch" : "Connect";
     btn.disabled = !dev || isCur || busy;
-    btn.onclick = () => withBusy(async () => { if (await connectDevice(dev, name)) { showTab("single"); window.scrollTo({ top: 0, behavior: "smooth" }); } });
+    btn.onclick = () => {
+      // Show the Device card (where connection progress and errors appear) straight away.
+      showTab("single");
+      $("deviceCard").scrollIntoView({ behavior: "smooth", block: "start" });
+      withBusy(async () => {
+        if (!(await connectDevice(dev, name))) {
+          $("connMsg").textContent += ` - if this keeps failing, tap “Connect…” above and pick ${rooms[name] ? rooms[name] + " (" + name + ")" : name} in the list.`;
+        }
+      });
+    };
     const meta = document.createElement("div"); meta.className = "meta";
     meta.textContent = (dev ? "✓ ready" : "not ready - use Add sensors… or Scan") +
       ` · MAC ${k.mac || macFromName(name) || "?"}` + (k.btName && k.btName !== name ? ` · Bluetooth name ${k.btName}` : "") + (k.id ? ` · Picker ID ${k.id.slice(0, 8)}…` : "");
@@ -674,6 +683,9 @@ async function connectDevice(dev, expectedName, opts = {}) {
   if (chr && device && device !== dev) { log(`Switching from ${sensorName} to ${expectedName || dev.name || dev.id}`); await disconnectAndWait(); }
   device = dev; sensorName = null;
   showInfo("");
+  // Diagnostics: is this a fresh handle from the picker/scan, or one reused from an earlier connection?
+  dev._uses = (dev._uses || 0) + 1;
+  dbg(`Device handle ${dev._uses === 1 ? "fresh (first use)" : `reused (use #${dev._uses})`}; gatt.connected=${dev.gatt.connected}`);
   if (!device._atcListener) { device.addEventListener("gattserverdisconnected", onDisconnected); device._atcListener = true; }
   setStatus("Connecting…", "warn"); log(`Connecting to ${expectedName || device.name || device.id} (id ${device.id})…`);
   let step = "connecting";
@@ -772,7 +784,7 @@ function setButtons(on) {
 }
 async function withBusy(fn) {
   if (busy) return; busy = true; setButtons(!!chr);
-  try { await fn(); } catch (e) { showError("Error", e); } finally { busy = false; setButtons(!!chr); }
+  try { await fn(); } catch (e) { showError("Error", e); } finally { busy = false; setButtons(!!chr); renderKnown(); }
 }
 
 // Live values via the standard Environmental Sensing / Battery services (best effort).
