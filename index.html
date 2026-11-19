@@ -294,8 +294,8 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
     <h2>Sensor list</h2>
     <p class="muted">Your sensors and room names are saved only in this browser on this phone - not in the web page. Load them from the <code>devices.json</code> your Windows scripts use (name, description = room, address), or let them be added as you connect.</p>
     <div class="row">
-      <button id="btnSensorsImport" class="primary">Load sensors from JSON…</button>
-      <button id="btnSensorsExport">Save sensors as JSON…</button>
+      <button id="btnSensorsImport" class="primary">Import sensors from JSON…</button>
+      <button id="btnSensorsExport">Export sensors to JSON…</button>
       <button id="btnSensorsClear" class="danger">Clear list…</button>
       <input type="file" id="fileSensors" accept=".json,application/json" class="hidden">
     </div>
@@ -408,7 +408,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 25;
+const APP_VERSION = 26;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
