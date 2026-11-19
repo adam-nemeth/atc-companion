@@ -67,6 +67,12 @@ details summary { cursor: pointer; font-weight: 600; }
 #log { font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; max-height: 260px; overflow: auto;
   background: var(--input); border-radius: 8px; padding: 8px; margin-top: 8px; }
 .hidden { display: none !important; }
+.ks { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); }
+.ks:first-child { border-top: 0; }
+.ks .nm { font-weight: 600; }
+.ks .vals { font-variant-numeric: tabular-nums; }
+.ks .meta { grid-column: 1 / -1; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; word-break: break-all; }
+.ks.current .nm::after { content: "  ● connected"; color: var(--ok); font-weight: 500; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -99,6 +105,17 @@ details summary { cursor: pointer; font-weight: 600; }
       <div class="tile"><div class="k">Battery</div><div class="v" id="liveB">–</div></div>
     </div>
     <div class="row"><span class="muted" id="liveNote"></span></div>
+  </section>
+
+  <!-- Known sensors -->
+  <section class="card">
+    <h2>Known sensors</h2>
+    <div class="row">
+      <button id="btnScan">Scan nearby (live values)</button>
+      <span id="scanMsg" class="muted"></span>
+    </div>
+    <div id="knownList" style="margin-top:10px"></div>
+    <p class="muted">“Picker ID” is the code Bluefy shows in its device list for sensors whose name it doesn't know. It's learned here when you scan or connect.</p>
   </section>
 
   <!-- Actions -->
@@ -211,7 +228,7 @@ details summary { cursor: pointer; font-weight: 600; }
       <div id="log"></div>
     </details>
   </section>
-  <p class="muted" style="text-align:center">App version 4</p>
+  <p class="muted" style="text-align:center">App version 6</p>
 </main>
 
 <script>
@@ -335,6 +352,7 @@ function stamp() {
 let device = null, chr = null, lastActivity = Date.now(), currentCfg = null, busy = false;
 const listeners = new Set();
 let writeChain = Promise.resolve();
+let writeMode = "auto";
 
 function onNotify(ev) {
   const dv = ev.target.value;
@@ -346,7 +364,10 @@ function write(bytes) {
   const data = new Uint8Array(bytes);
   writeChain = writeChain.then(async () => {
     if (!chr) throw new Error("Not connected");
-    if (chr.writeValueWithResponse) await chr.writeValueWithResponse(data); else await chr.writeValue(data);
+    // Use the write type the characteristic actually supports; iOS rejects the wrong one.
+    if (writeMode === "withoutResponse" && chr.writeValueWithoutResponse) await chr.writeValueWithoutResponse(data);
+    else if (writeMode === "withResponse" && chr.writeValueWithResponse) await chr.writeValueWithResponse(data);
+    else await chr.writeValue(data);
     lastActivity = Date.now();
   });
   return writeChain;
@@ -361,13 +382,106 @@ function waitIdle(check) {
     }, 100);
   });
 }
-// Send cmd, wait for a reply packet matching pred.
-async function request(bytes, pred) {
-  let got = null;
+// Send cmd, wait for a reply packet matching pred (optional maxMs = hard limit).
+async function request(bytes, pred, maxMs) {
+  let got = null; const until = maxMs ? Date.now() + maxMs : Infinity;
   const l = b => { if (!got && pred(b)) got = b; };
   listeners.add(l);
-  try { await write(bytes); await waitIdle(() => got); return got; }
+  try { await write(bytes); await waitIdle(() => got || Date.now() > until); return got; }
   finally { listeners.delete(l); }
+}
+
+// ===== Known sensors: identification, advertisement scan =====
+// sensorName = the identified ATC_xxxxxx name of the connected sensor (iOS may show a different name).
+let sensorName = null;
+let known = lsGet("known", {}); // name -> { id, mac, t, h, mv, b, seen }
+const reachable = new Map();    // name -> BluetoothDevice usable for connecting without the picker
+const saveKnown = () => lsSet("known", known);
+const OUI = "A4:C1:38";
+function macFromName(n) { const m = /^ATC_([0-9A-F]{6})$/i.exec(n || ""); return m ? `${OUI}:${m[1].toUpperCase().match(/../g).join(":")}` : null; }
+function nameFromMac(mac) { return "ATC_" + mac.replace(/:/g, "").slice(6).toUpperCase(); }
+const macStr = bytes => [...bytes].map(x => x.toString(16).padStart(2, "0").toUpperCase()).join(":");
+function knownNames() {
+  return [...new Set([...Object.keys(DEFAULT_ROOMS), ...Object.keys(rooms), ...Object.keys(known)])].filter(n => /^ATC_/i.test(n)).sort();
+}
+function rememberSensor(name, data) {
+  known[name] = Object.assign(known[name] || {}, data); saveKnown(); scheduleKnownRender();
+}
+let renderPending = false;
+function scheduleKnownRender() { if (renderPending) return; renderPending = true; setTimeout(() => { renderPending = false; renderKnown(); }, 300); }
+function ago(ms) { const s = Math.round((Date.now() - ms) / 1000); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; }
+function renderKnown() {
+  const box = $("knownList"); box.innerHTML = "";
+  for (const name of knownNames()) {
+    const k = known[name] || {}, room = rooms[name] || "";
+    const row = document.createElement("div"); row.className = "ks" + (chr && sensorName === name ? " current" : "");
+    const left = document.createElement("div");
+    left.innerHTML = `<div class="nm"></div><div class="vals"></div>`;
+    left.querySelector(".nm").textContent = room ? `${room} · ${name}` : name;
+    left.querySelector(".vals").textContent = k.t != null
+      ? `${k.t.toFixed(2)} °C · ${k.h.toFixed(1)} %${k.b != null ? ` · 🔋${k.b}%` : ""}${k.seen ? ` · ${ago(k.seen)}` : ""}` : "no live data yet";
+    const btn = document.createElement("button"); btn.textContent = "Connect";
+    const dev = reachable.get(name);
+    btn.disabled = !dev || !!chr || busy;
+    btn.onclick = () => withBusy(() => connectDevice(dev, name));
+    const meta = document.createElement("div"); meta.className = "meta";
+    meta.textContent = `MAC ${k.mac || macFromName(name) || "?"}` + (k.id ? ` · Picker ID ${k.id.slice(0, 8)}…` : "");
+    row.append(left, btn, meta); box.appendChild(row);
+  }
+}
+// Parse sensor advertisements. pvvx "custom" format (service data 0x181A, 15+ bytes):
+// MAC[6] reversed, temp int16 x0.01, hum uint16 x0.01, batt mV uint16, batt %, counter, flags (all little-endian).
+// ATC1441 format (13 bytes): MAC[6] in order, temp int16 BE x0.1, hum %, batt %, batt mV uint16 BE, counter.
+function parseAdv(dv) {
+  const u = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+  if (u.length >= 15) return { mac: macStr(u.slice(0, 6).reverse()), t: dv.getInt16(6, true) / 100, h: dv.getUint16(8, true) / 100, mv: dv.getUint16(10, true), b: u[12] };
+  if (u.length === 13) return { mac: macStr(u.slice(0, 6)), t: dv.getInt16(6, false) / 10, h: u[8], b: u[9], mv: dv.getUint16(10, false) };
+  return null;
+}
+function onAdvertisement(ev) {
+  let sd = null;
+  if (ev.serviceData) for (const [k, v] of ev.serviceData) if (String(k).toLowerCase().startsWith("0000181a")) sd = v;
+  const advName = ev.name || (ev.device && ev.device.name) || "";
+  const p = sd ? parseAdv(sd) : null;
+  let name = p && p.mac.startsWith(OUI) ? nameFromMac(p.mac) : /^ATC_/i.test(advName) ? advName.toUpperCase().replace(/^ATC_/, "ATC_") : null;
+  if (!name) return;
+  if (ev.device) reachable.set(name, ev.device);
+  rememberSensor(name, Object.assign({ seen: Date.now() }, ev.device && ev.device.id ? { id: ev.device.id } : {}, p || {}));
+}
+let leScan = null, scanTimer = null;
+async function toggleScan() {
+  if (leScan) { stopScan(); return; }
+  if (!navigator.bluetooth || !navigator.bluetooth.requestLEScan) {
+    $("scanMsg").textContent = "This browser can't scan advertisements. Connect to each sensor instead; it's remembered here."; return;
+  }
+  try {
+    leScan = await navigator.bluetooth.requestLEScan({ acceptAllAdvertisements: true, keepRepeatedDevices: true });
+  } catch (e) { leScan = null; $("scanMsg").textContent = "Scan failed: " + describeErr(e); return; }
+  $("btnScan").textContent = "Stop scan"; $("scanMsg").textContent = "Scanning for 60 s…";
+  scanTimer = setTimeout(stopScan, 60000);
+}
+function stopScan() {
+  try { leScan && leScan.stop(); } catch {}
+  leScan = null; clearTimeout(scanTimer);
+  $("btnScan").textContent = "Scan nearby (live values)"; $("scanMsg").textContent = "Scan stopped."; renderKnown();
+}
+// Work out which sensor we're connected to: from the name (ATC_xxxxxx) or, if iOS shows another
+// name (e.g. LYWSD03MMC), by asking the pvvx firmware for its MAC (command 0x10, read-only).
+async function identifySensor() {
+  if (/^ATC_[0-9A-F]{6}$/i.test(device.name || "")) return device.name.toUpperCase().replace(/^ATC_/, "ATC_");
+  const byId = Object.keys(known).find(n => known[n].id && known[n].id === device.id);
+  if (byId) return byId;
+  const r = await request([0x10], b => b[0] === 0x10 && b.length >= 7, 4000);
+  if (r) {
+    log("MAC reply: " + macStr(r));
+    // Try both plausible layouts ([0x10][len][mac6] and [0x10][mac6]); accept one with the Xiaomi prefix.
+    for (const off of [2, 1]) {
+      if (r.length < off + 6) continue;
+      const mac = macStr(r.slice(off, off + 6).reverse());
+      if (mac.startsWith(OUI)) return nameFromMac(mac);
+    }
+  }
+  return null;
 }
 
 const cfgListener = b => { if (b[0] === 0x55 && b.length - 1 >= 9) { try { currentCfg = decodeCfg(b); renderCfg(); } catch (e) { log("Config decode failed: " + e.message); } } };
@@ -383,25 +497,55 @@ async function connect(showAll) {
     device = await navigator.bluetooth.requestDevice(opts);
   } catch (e) { pickerFailed(e); return; }
   if (!device) { showError("Device picker", "returned no device"); return; }
+  await connectDevice(device);
+}
+async function connectDevice(dev, expectedName) {
+  device = dev; sensorName = null;
   showInfo("");
-  device.addEventListener("gattserverdisconnected", onDisconnected);
-  setStatus("Connecting…", "warn"); log(`Connecting to ${device.name}…`);
+  if (!device._atcListener) { device.addEventListener("gattserverdisconnected", onDisconnected); device._atcListener = true; }
+  setStatus("Connecting…", "warn"); log(`Connecting to ${expectedName || device.name || device.id}…`);
+  let step = "connecting";
   try {
-    const server = await device.gatt.connect();
-    const svc = await server.getPrimaryService(SVC);
-    chr = await svc.getCharacteristic(CHR);
-    chr.addEventListener("characteristicvaluechanged", onNotify);
-    await chr.startNotifications();
+    // iOS often fails the first GATT connect to a sensor; retry a couple of times.
+    let server = null;
+    for (let attempt = 1; attempt <= 3 && !server; attempt++) {
+      try { server = await device.gatt.connect(); }
+      catch (e) { log(`Connect attempt ${attempt} failed: ${describeErr(e)}`); if (attempt === 3) throw e; showInfo(`Retrying connection (${attempt + 1}/3)…`); await sleep(1000); }
+    }
+    step = "finding service 0x1F10";
+    let svc;
+    try { svc = await server.getPrimaryService(SVC); }
+    catch (e) {
+      throw new Error(`${describeErr(e)}. “${device.name || device.id}” doesn't offer the pvvx service - it's probably running the original Xiaomi firmware or isn't one of your sensors.`);
+    }
+    step = "finding characteristic 0x1F1F";
+    const c = await svc.getCharacteristic(CHR);
+    const p = c.properties || {};
+    writeMode = p.write ? "withResponse" : p.writeWithoutResponse ? "withoutResponse" : "auto";
+    log(`Characteristic properties: ${["read", "write", "writeWithoutResponse", "notify", "indicate"].filter(k => p[k]).join(", ") || "unknown"} → write ${writeMode}`);
+    step = "enabling notifications";
+    c.addEventListener("characteristicvaluechanged", onNotify);
+    await c.startNotifications();
+    chr = c;
     listeners.add(cfgListener);
+    step = "sending first command";
     // Warm-up: harmless "get config" + pause (see NOTE ON BLE NOTIFICATION TIMING); also fills config.
     await write([0x55]); await sleep(1500);
-    setStatus("Connected", "ok"); log("Connected.");
-    $("devName").textContent = device.name || "";
-    $("roomName").value = rooms[device.name] || ""; $("roomName").disabled = false;
-    setButtons(true);
+    step = "identifying the sensor";
+    sensorName = (await identifySensor()) || expectedName || device.name || "unknown";
+    rememberSensor(sensorName, { id: device.id, mac: macFromName(sensorName) || undefined });
+    reachable.set(sensorName, device);
+    const room = rooms[sensorName];
+    showInfo(`Connected to ${room ? room + " · " : ""}${sensorName}${macFromName(sensorName) ? " (" + macFromName(sensorName) + ")" : ""}` +
+      (device.name && device.name !== sensorName ? ` - iPhone lists it as “${device.name}”` : ""));
+    setStatus("Connected", "ok"); log(`Connected to ${sensorName}.`);
+    $("devName").textContent = sensorName;
+    $("roomName").value = room || ""; $("roomName").disabled = false;
+    setButtons(true); renderKnown();
     readLive(server);
   } catch (e) {
-    showError("Connect failed", e); setStatus("Connect failed", "err");
+    showError(`Connect failed while ${step}`, e); setStatus("Connect failed", "err");
+    chr = null;
     try { device.gatt.disconnect(); } catch {}
   }
 }
@@ -411,7 +555,7 @@ function pickerFailed(e) {
   $("connMsg").textContent += " - try “Connect (all devices)”, and check that Bluetooth is on and Bluefy is allowed to use it (iPhone Settings → Privacy & Security → Bluetooth).";
 }
 function onDisconnected() {
-  chr = null; listeners.clear(); setStatus("Disconnected", "warn"); log("Disconnected."); setButtons(false);
+  chr = null; listeners.clear(); setStatus("Disconnected", "warn"); log("Disconnected."); setButtons(false); renderKnown();
 }
 function disconnect() { if (device && device.gatt.connected) device.gatt.disconnect(); }
 function setButtons(on) {
@@ -452,7 +596,7 @@ function showLatestSample(s) {
 // ===== History download (0x35) =====
 let lastRaw = null; // {dev, rows:[rawEpoch,t,h,v], offset}
 function devKey() {
-  const n = device ? device.name : "device"; const r = rooms[n];
+  const n = sensorName || "device"; const r = rooms[n];
   return r ? `${n}__${r}` : n;
 }
 async function dump() {
@@ -517,7 +661,7 @@ async function setTime() {
   else log("No reply (idle timeout).");
 }
 async function deleteLog() {
-  if (!confirm(`PERMANENTLY erase all recorded history on ${device.name}? This cannot be undone.`)) return;
+  if (!confirm(`PERMANENTLY erase all recorded history on ${devKey().replace("__", " · ")}? This cannot be undone.`)) return;
   const r = await request([0x36, 0x12, 0x34], b => b[0] === 0x36);
   log(r ? "Device confirmed: history deleted." : "No reply (idle timeout); it may still have deleted.");
 }
@@ -618,7 +762,7 @@ async function getCfg() {
 }
 async function setCfg() {
   const payload = encodeCfg(currentCfg);
-  if (!confirm(`Write ${payload.length} config bytes to ${device.name}?`)) return;
+  if (!confirm(`Write ${payload.length} config bytes to ${devKey().replace("__", " · ")}?`)) return;
   const r = await request([0x55, ...payload], b => b[0] === 0x55 && b.length - 1 >= 9);
   log(r ? "Device confirmed the new config." : "No reply (idle timeout); re-read to check.");
 }
@@ -845,7 +989,21 @@ function onChartPointer(ev) {
     catch (err) { log("Invalid config JSON: " + err.message); }
     e.target.value = "";
   };
-  $("roomName").onchange = e => { if (!device) return; rooms[device.name] = e.target.value.trim(); lsSet("rooms", rooms); };
+  $("roomName").onchange = e => { if (!sensorName) return; rooms[sensorName] = e.target.value.trim(); lsSet("rooms", rooms); renderKnown(); };
+  $("btnScan").onclick = toggleScan;
+  if (navigator.bluetooth && navigator.bluetooth.addEventListener) navigator.bluetooth.addEventListener("advertisementreceived", onAdvertisement);
+  // Devices this site was already allowed to use can be reconnected without the picker (if supported).
+  if (navigator.bluetooth && navigator.bluetooth.getDevices) {
+    navigator.bluetooth.getDevices().then(devs => {
+      for (const d of devs) {
+        const n = /^ATC_/i.test(d.name || "") ? d.name.toUpperCase().replace(/^ATC_/, "ATC_") : Object.keys(known).find(k => known[k].id === d.id);
+        if (n) reachable.set(n, d);
+      }
+      renderKnown();
+    }).catch(() => {});
+  }
+  setInterval(() => { if (!document.hidden) renderKnown(); }, 30000);
+  renderKnown();
   $("histDev").onchange = loadChart;
   $("btnShareSel").onclick = shareSelected;
   $("btnShareAll").onclick = shareAllDevices;
