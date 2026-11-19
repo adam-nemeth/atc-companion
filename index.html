@@ -140,7 +140,7 @@ details summary { cursor: pointer; font-weight: 600; }
           <option value="2000">Last 2000</option>
         </select>
       </label>
-      <label><input type="checkbox" id="optSync" checked> Sync clock after</label>
+      <label><input type="checkbox" id="optSync" checked> <span id="optSyncLabel">Sync clock after (UTC)</span></label>
       <label><input type="checkbox" id="optDelete"> Delete on device after</label>
     </div>
     <div class="row">
@@ -156,8 +156,8 @@ details summary { cursor: pointer; font-weight: 600; }
     <div class="row">
       <label>Time zone
         <select id="timeMode">
+          <option value="utc">UTC (default)</option>
           <option value="local">Local</option>
-          <option value="utc">UTC</option>
         </select>
       </label>
       <button id="btnTime" disabled>Set clock now</button>
@@ -275,7 +275,10 @@ function lsGet(k, d) { try { const v = localStorage.getItem(k); return v == null
 function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 
 let rooms = Object.assign({}, DEFAULT_ROOMS, lsGet("rooms", {}));
-const prefs = Object.assign({ timeMode: "local", csvLocale: "en", idleTimeout: 30, range: 168 }, lsGet("prefs", {}));
+const prefs = Object.assign({ timeMode: "utc", csvLocale: "en", idleTimeout: 30, range: 168 }, lsGet("prefs", {}));
+// v10: UTC became the default (matching the Windows scripts' --time-mode utc). Older versions saved
+// "local" as the default whenever any setting was stored, so switch once; later choices are kept.
+if (!prefs.utcDefaultApplied) { prefs.timeMode = "utc"; prefs.utcDefaultApplied = true; lsSet("prefs", prefs); }
 function savePrefs() { lsSet("prefs", prefs); }
 
 const memDB = new Map(); // fallback if IndexedDB is unavailable
@@ -325,7 +328,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 9;
+const APP_VERSION = 10;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -835,10 +838,11 @@ async function resetBtName() {
 const tzName = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "local"; } catch { return "local"; } };
 const modeLabel = m => m === "utc" ? "UTC" : `${tzName()} (UTC${fmtOffset(localOffsetSec())})`;
 function updateTzLabels() {
-  $("timeMode").options[0].textContent = `Local - ${modeLabel("local")}`;
+  $("timeMode").options[1].textContent = `Local - ${modeLabel("local")}`;
+  $("optSyncLabel").textContent = `Sync clock after (${prefs.timeMode === "utc" ? "UTC" : modeLabel("local")})`;
   $("tzHelp").textContent = prefs.timeMode === "utc"
-    ? "The sensor clock is set to UTC. Use the same choice as your Windows scripts (--time-mode utc)."
-    : `The sensor clock is set to the phone's local time, ${modeLabel("local")}; it shifts by an hour at daylight-saving changes, so set the clock again then. Use the same choice as your Windows scripts (--time-mode local).`;
+    ? "Set clock, Read clock and “Sync clock after” all use UTC - the same as your Windows scripts (--time-mode utc). Charts still show your local time."
+    : `Set clock, Read clock and “Sync clock after” use the phone's local time, ${modeLabel("local")}. Your Windows scripts use UTC, so a sensor set here will be an hour off for them; it also shifts at daylight-saving changes.`;
 }
 async function setTime() {
   const t = deviceEpochNow(prefs.timeMode);
