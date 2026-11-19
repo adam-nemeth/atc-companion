@@ -408,7 +408,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 26;
+const APP_VERSION = 27;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -676,7 +676,9 @@ function renderKnown() {
     const cb = left.querySelector("input"); cb.checked = batchSel.has(name);
     cb.onchange = () => { cb.checked ? batchSel.add(name) : batchSel.delete(name); saveSel(); renderKnown(); };
     const nameEl = left.querySelector(".nm span");
-    nameEl.textContent = room ? `${room} · ${name}` : name;
+    // Main line shows the Bluetooth name (what the picker shows); the fixed ATC_xxxxxx ID moves to the details.
+    const btName = k.btName || name;
+    nameEl.textContent = room ? `${room} · ${btName}` : btName;
     // Green = available, bold = the connected one.
     nameEl.style.color = dev ? "var(--ok)" : "";
     nameEl.style.fontWeight = isCur ? "700" : "400";
@@ -703,7 +705,7 @@ function renderKnown() {
     avail.style.fontWeight = dev ? "600" : "";
     meta.append(avail);
     meta.append(
-      ` · MAC ${k.mac || macFromName(name) || "?"}` + (k.btName && k.btName !== name ? ` · Bluetooth name ${k.btName}` : "") + (k.id ? ` · Picker ID ${k.id.slice(0, 8)}…` : ""));
+      (btName !== name ? ` · ID ${name}` : "") + ` · MAC ${k.mac || macFromName(name) || "?"}` + (k.id ? ` · Picker ID ${k.id.slice(0, 8)}…` : ""));
     row.append(left, btn, meta); box.appendChild(row);
   }
   const rm = $("readyMsg"); if (rm) rm.textContent = `${ready} available · ${ticked} ticked`;
