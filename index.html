@@ -139,12 +139,8 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
   <!-- Known sensors -->
   <section class="card" data-tab="single all">
     <h2>Known sensors</h2>
-    <div class="row">
-      <button id="btnScan">Scan nearby (live values)</button>
-      <span id="scanMsg" class="muted"></span>
-    </div>
     <div id="knownList" style="margin-top:10px"></div>
-    <p class="muted">“Picker ID” is the code Bluefy shows in its device list for sensors whose name it doesn't know. It's learned here when you scan or connect.</p>
+    <p class="muted">“Picker ID” is the code Bluefy shows in its device list for sensors whose name it doesn't know. It's learned here when you connect.</p>
 
     <div class="only-single row"><button class="seg" onclick="showTab('all')">Batch operations for all sensors →</button></div>
     <div class="only-all">
@@ -408,7 +404,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 28;
+const APP_VERSION = 30;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -688,7 +684,7 @@ function renderKnown() {
     nameEl.style.color = dev ? "var(--ok)" : "";
     nameEl.style.fontWeight = isCur ? "700" : "400";
     left.querySelector(".vals").textContent = k.t != null
-      ? `${k.t.toFixed(2)} °C · ${k.h.toFixed(1)} %${k.b != null ? ` · 🔋${k.b}%` : ""}${k.seen ? ` · ${ago(k.seen)}` : ""}` : "no live data yet";
+      ? `${k.t.toFixed(2)} °C · ${k.h.toFixed(1)} %${k.b != null ? ` · 🔋${k.b}%` : ""}${k.seen ? ` · ${ago(k.seen)}` : ""}` : "";
     const btn = document.createElement("button");
     btn.textContent = isCur ? "Connected" : chr ? "Switch" : "Connect";
     btn.disabled = !dev || isCur || busy;
@@ -745,27 +741,6 @@ function onAdvertisement(ev) {
   if (!name) return;
   if (ev.device) reachable.set(name, ev.device);
   rememberSensor(name, Object.assign({ seen: Date.now() }, ev.device && ev.device.id ? { id: ev.device.id } : {}, p || {}));
-}
-let leScan = null, scanTimer = null;
-async function toggleScan() {
-  if (leScan) { stopScan(); return; }
-  if (!navigator.bluetooth || !navigator.bluetooth.requestLEScan) {
-    $("scanMsg").textContent = "This browser can't scan advertisements. Connect to each sensor instead; it's remembered here."; return;
-  }
-  dbg("requestLEScan({acceptAllAdvertisements, keepRepeatedDevices})");
-  try {
-    leScan = await navigator.bluetooth.requestLEScan({ acceptAllAdvertisements: true, keepRepeatedDevices: true });
-    dbg(`Scan started: ${JSON.stringify({ active: leScan && leScan.active, acceptAll: leScan && leScan.acceptAllAdvertisements })}`);
-  } catch (e) { leScan = null; log("Scan failed: " + errDetail(e), "err"); $("scanMsg").textContent = "Scan failed: " + describeErr(e); return; }
-  advTotal = 0;
-  $("btnScan").textContent = "Stop scan"; $("scanMsg").textContent = "Scanning for 60 s…";
-  scanTimer = setTimeout(stopScan, 60000);
-}
-function stopScan() {
-  try { leScan && leScan.stop(); } catch {}
-  leScan = null; clearTimeout(scanTimer);
-  dbg(`Scan stopped; ${advTotal} advertisements received`);
-  $("btnScan").textContent = "Scan nearby (live values)"; $("scanMsg").textContent = "Scan stopped."; renderKnown();
 }
 // Work out which sensor we're connected to: from the name (ATC_xxxxxx) or, if iOS shows another
 // name (e.g. LYWSD03MMC), by asking the pvvx firmware for its MAC (command 0x10, read-only).
@@ -887,10 +862,12 @@ async function connectDevice(dev, expectedName, opts = {}) {
     if (!opts.batch) await readBtName();
     reachable.set(sensorName, device);
     const room = rooms[sensorName];
-    showInfo(`Connected to ${room ? room + " · " : ""}${sensorName}${macFromName(sensorName) ? " (" + macFromName(sensorName) + ")" : ""}` +
-      (device.name && device.name !== sensorName ? ` - iPhone lists it as “${device.name}”` : ""));
+    const shown = shownName(sensorName);
+    showInfo(`Connected to ${shown}` + (shown.endsWith(sensorName) ? "" : ` (ID ${sensorName})`) +
+      (macFromName(sensorName) ? ` · MAC ${macFromName(sensorName)}` : "") +
+      (device.name && device.name !== sensorName && device.name !== (known[sensorName] || {}).btName ? ` - iPhone lists it as “${device.name}”` : ""));
     setStatus("Connected", "ok"); log(`Connected to ${sensorName} (total ${since(sAll)}).`);
-    $("devName").textContent = sensorName;
+    $("devName").textContent = (known[sensorName] && known[sensorName].btName) || sensorName;
     $("roomName").value = room || ""; $("roomName").disabled = false;
     setButtons(true); renderKnown();
     if (!opts.batch) readLive(server);
@@ -1831,7 +1808,6 @@ function updateStatusBar() {
     if (!sensorName) return; rooms[sensorName] = e.target.value.trim(); lsSet("rooms", rooms); renderKnown();
     if ($("btNameNew").dataset.auto) $("btNameNew").value = suggestBtName();
   };
-  $("btnScan").onclick = toggleScan;
   $("btnAddSensors").onclick = () => withBusy(addSensor);
   $("btnSelAll").onclick = () => { knownNames().forEach(n => batchSel.add(n)); saveSel(); renderKnown(); };
   $("btnSelNone").onclick = () => { batchSel.clear(); saveSel(); renderKnown(); };
