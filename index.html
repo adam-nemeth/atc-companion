@@ -189,6 +189,7 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
     </div>
     <div class="row only-single">
       <button id="btnDump" class="primary" disabled>Download history</button>
+      <button id="btnDeleteLog" class="danger" disabled>Erase history on sensor…</button>
     </div>
     <div class="row"><span id="dumpStatus" class="muted"></span></div>
     <div class="progress" id="dumpProg"><div></div></div>
@@ -210,9 +211,6 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
     </div>
     <div class="row only-single"><span id="clockMsg" class="muted"></span></div>
     <p class="muted" id="tzHelp"></p>
-    <div class="row only-single">
-      <button id="btnDeleteLog" class="danger" disabled>Delete device history…</button>
-    </div>
   </section>
 
   <!-- History -->
@@ -377,7 +375,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 21;
+const APP_VERSION = 22;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -544,7 +542,10 @@ function sensorFromBtName(btName) {
 }
 const macStr = bytes => [...bytes].map(x => x.toString(16).padStart(2, "0").toUpperCase()).join(":");
 function knownNames() {
-  return [...new Set([...Object.keys(DEFAULT_ROOMS), ...Object.keys(rooms), ...Object.keys(known)])].filter(n => /^ATC_/i.test(n)).sort();
+  // Sorted by what's shown: room name first (sensors without a room after them, by their ATC_ name).
+  const label = n => rooms[n] ? `0${rooms[n]}` : `1${n}`;
+  return [...new Set([...Object.keys(DEFAULT_ROOMS), ...Object.keys(rooms), ...Object.keys(known)])].filter(n => /^ATC_/i.test(n))
+    .sort((a, b) => label(a).localeCompare(label(b), undefined, { sensitivity: "base" }));
 }
 function rememberSensor(name, data) {
   known[name] = Object.assign(known[name] || {}, data); saveKnown(); scheduleKnownRender();
@@ -1216,7 +1217,7 @@ async function updateStorageInfo() {
   $("storageInfo").textContent = txt;
 }
 async function deleteLog() {
-  if (!confirm(`PERMANENTLY erase all recorded history on ${devKey().replace("__", " · ")}? This cannot be undone.`)) return;
+  if (!confirm(`PERMANENTLY erase all recorded history on the sensor ${devKey().replace("__", " · ")}? This cannot be undone. (Data already downloaded to this phone is kept.)`)) return;
   const r = await request([0x36, 0x12, 0x34], b => b[0] === 0x36);
   log(r ? "Device confirmed: history deleted." : "No reply (idle timeout); it may still have deleted.");
 }
