@@ -99,6 +99,16 @@ details summary { cursor: pointer; font-weight: 600; }
       <label>Room <input id="roomName" placeholder="e.g. Kitchen" size="14" disabled></label>
       <span class="muted" id="devName"></span>
     </div>
+    <details id="renameBox" style="margin-top:8px">
+      <summary>Bluetooth name (shown in the device picker)</summary>
+      <p class="muted" id="btNameCur">Connect to a sensor to see its Bluetooth name.</p>
+      <div class="row">
+        <input id="btNameNew" maxlength="20" size="18" placeholder="ATC_Kitchen" autocapitalize="off" autocorrect="off" spellcheck="false" disabled>
+        <button id="btnRename" disabled>Rename</button>
+        <button id="btnRenameReset" disabled>Reset to default</button>
+      </div>
+      <p class="muted">Must start with ATC_ (so the Connect picker still lists it), up to 20 letters, digits, _ or -. The sensor applies the new name after you disconnect; the iPhone may keep showing the old name until Bluetooth is turned off and on. Your Windows scripts are unaffected (they use the address).</p>
+    </details>
     <div class="live" id="liveTiles">
       <div class="tile"><div class="k">Temperature</div><div class="v" id="liveT">–</div></div>
       <div class="tile"><div class="k">Humidity</div><div class="v" id="liveH">–</div></div>
@@ -315,7 +325,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 8;
+const APP_VERSION = 9;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -473,6 +483,13 @@ const saveKnown = () => lsSet("known", known);
 const OUI = "A4:C1:38";
 function macFromName(n) { const m = /^ATC_([0-9A-F]{6})$/i.exec(n || ""); return m ? `${OUI}:${m[1].toUpperCase().match(/../g).join(":")}` : null; }
 function nameFromMac(mac) { return "ATC_" + mac.replace(/:/g, "").slice(6).toUpperCase(); }
+// Map a Bluetooth name to the sensor's identity (its default ATC_xxxxxx name): either the default
+// name itself, or a custom name given with "Rename" (remembered in known[...].btName).
+function sensorFromBtName(btName) {
+  if (!btName) return null;
+  if (/^ATC_[0-9A-F]{6}$/i.test(btName)) return "ATC_" + btName.slice(4).toUpperCase();
+  return Object.keys(known).find(n => known[n].btName && known[n].btName === btName) || null;
+}
 const macStr = bytes => [...bytes].map(x => x.toString(16).padStart(2, "0").toUpperCase()).join(":");
 function knownNames() {
   return [...new Set([...Object.keys(DEFAULT_ROOMS), ...Object.keys(rooms), ...Object.keys(known)])].filter(n => /^ATC_/i.test(n)).sort();
@@ -498,7 +515,7 @@ function renderKnown() {
     btn.disabled = !dev || !!chr || busy;
     btn.onclick = () => withBusy(() => connectDevice(dev, name));
     const meta = document.createElement("div"); meta.className = "meta";
-    meta.textContent = `MAC ${k.mac || macFromName(name) || "?"}` + (k.id ? ` · Picker ID ${k.id.slice(0, 8)}…` : "");
+    meta.textContent = `MAC ${k.mac || macFromName(name) || "?"}` + (k.btName && k.btName !== name ? ` · Bluetooth name ${k.btName}` : "") + (k.id ? ` · Picker ID ${k.id.slice(0, 8)}…` : "");
     row.append(left, btn, meta); box.appendChild(row);
   }
 }
@@ -518,7 +535,7 @@ function onAdvertisement(ev) {
   if (ev.serviceData) for (const [k, v] of ev.serviceData) if (String(k).toLowerCase().startsWith("0000181a")) sd = v;
   const advName = ev.name || (ev.device && ev.device.name) || "";
   const p = sd ? parseAdv(sd) : null;
-  let name = p && p.mac.startsWith(OUI) ? nameFromMac(p.mac) : /^ATC_/i.test(advName) ? advName.toUpperCase().replace(/^ATC_/, "ATC_") : null;
+  let name = p && p.mac.startsWith(OUI) ? nameFromMac(p.mac) : sensorFromBtName(advName);
   // Log each advertiser at most every 15 s, with all service data in hex.
   const id = (ev.device && ev.device.id) || advName || "?";
   if (Date.now() - (advLogged.get(id) || 0) > 15000) {
@@ -556,7 +573,8 @@ function stopScan() {
 // Work out which sensor we're connected to: from the name (ATC_xxxxxx) or, if iOS shows another
 // name (e.g. LYWSD03MMC), by asking the pvvx firmware for its MAC (command 0x10, read-only).
 async function identifySensor() {
-  if (/^ATC_[0-9A-F]{6}$/i.test(device.name || "")) { dbg(`Identified by name ${device.name}`); return device.name.toUpperCase().replace(/^ATC_/, "ATC_"); }
+  const byName = sensorFromBtName(device.name);
+  if (byName) { dbg(`Identified by name ${device.name} → ${byName}`); return byName; }
   const byId = Object.keys(known).find(n => known[n].id && known[n].id === device.id);
   if (byId) { dbg(`Identified by remembered picker ID → ${byId}`); return byId; }
   dbg("Name doesn't identify the sensor; asking for its MAC (0x10)");
@@ -637,6 +655,7 @@ async function connectDevice(dev, expectedName) {
     step = "identifying the sensor";
     sensorName = (await identifySensor()) || expectedName || device.name || "unknown";
     rememberSensor(sensorName, { id: device.id, mac: macFromName(sensorName) || undefined });
+    await readBtName();
     reachable.set(sensorName, device);
     const room = rooms[sensorName];
     showInfo(`Connected to ${room ? room + " · " : ""}${sensorName}${macFromName(sensorName) ? " (" + macFromName(sensorName) + ")" : ""}` +
@@ -663,7 +682,8 @@ function onDisconnected() {
 }
 function disconnect() { dbg("Disconnect requested by user"); if (device && device.gatt.connected) device.gatt.disconnect(); }
 function setButtons(on) {
-  for (const id of ["btnDisconnect", "btnDump", "btnTime", "btnGetTime", "btnDeleteLog", "btnGetCfg"]) $(id).disabled = !on || busy;
+  for (const id of ["btnDisconnect", "btnDump", "btnTime", "btnGetTime", "btnDeleteLog", "btnGetCfg", "btnRename", "btnRenameReset"]) $(id).disabled = !on || busy;
+  $("btNameNew").disabled = !on;
   $("btnSetCfg").disabled = !on || busy || !currentCfg;
   $("btnConnect").disabled = $("btnConnectAll").disabled = on || busy || !navigator.bluetooth;
 }
@@ -766,6 +786,51 @@ async function dump() {
   } finally { clearInterval(ui); listeners.delete(l); setTimeout(() => prog.style.display = "none", 1500); }
 }
 const le32 = t => [t & 0xff, (t >>> 8) & 0xff, (t >>> 16) & 0xff, (t >>> 24) & 0xff];
+
+// ===== Bluetooth name (pvvx CMD_ID_DNAME 0x01) =====
+// [0x01] → reply [0x01][name]; [0x01][name…] sets it (saved in the sensor, used after disconnect);
+// [0x01][0x00] restores the default ATC_xxxxxx name.
+const decodeName = r => String.fromCharCode(...r.slice(1)).replace(/\0.*$/s, "");
+function suggestBtName() {
+  const room = (rooms[sensorName] || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9_-]+/g, "");
+  return room ? ("ATC_" + room).slice(0, 20) : "";
+}
+async function readBtName() {
+  const r = await request([0x01], b => b[0] === 0x01, 4000);
+  const cur = r ? decodeName(r) : null;
+  dbg(`Bluetooth name reply: ${r ? hex(r) + ` = "${cur}"` : "none"}`);
+  if (cur && sensorName) rememberSensor(sensorName, { btName: cur });
+  $("btNameCur").textContent = cur
+    ? `Current Bluetooth name: ${cur}${cur === sensorName ? " (default)" : ""}`
+    : "Couldn't read the Bluetooth name from this sensor.";
+  if (!$("btNameNew").value || $("btNameNew").dataset.auto) { $("btNameNew").value = suggestBtName(); $("btNameNew").dataset.auto = "1"; }
+}
+async function setBtName(name) {
+  const isReset = name === null;
+  const bytes = isReset ? [0x01, 0x00] : [0x01, ...[...name].map(ch => ch.charCodeAt(0))];
+  log(isReset ? `Resetting Bluetooth name of ${sensorName} to default` : `Renaming ${sensorName} to "${name}"`);
+  const r = await request(bytes, b => b[0] === 0x01, 6000);
+  if (!r) { $("btNameCur").textContent = "No reply from the sensor - the name may not have changed. Reconnect to check."; return; }
+  const got = decodeName(r);
+  dbg(`Rename reply ${hex(r)} = "${got}"`);
+  rememberSensor(sensorName, { btName: isReset ? sensorName : name });
+  $("btNameCur").textContent = `Sensor replied: ${got || "(empty)"}. Disconnect to apply - the sensor restarts with the new name.`;
+  renderKnown();
+  if (confirm(`Bluetooth name set to “${isReset ? sensorName : name}”. Disconnect now so the sensor applies it?`)) disconnect();
+}
+async function renameSensor() {
+  const name = $("btNameNew").value.trim();
+  if (!/^ATC_[A-Za-z0-9_-]{1,16}$/.test(name)) { alert("Use ATC_ followed by 1-16 letters, digits, _ or - (no spaces or accents), e.g. ATC_Kitchen."); return; }
+  if (/^ATC_[0-9A-Fa-f]{6}$/.test(name) && name.toUpperCase() !== sensorName) { alert("That looks like another sensor's default name - pick a different one."); return; }
+  const clash = Object.keys(known).find(n => n !== sensorName && known[n].btName === name);
+  if (clash) { alert(`${clash} already uses that name.`); return; }
+  if (!confirm(`Rename ${devKey().replace("__", " · ")} to “${name}”? It's saved in the sensor and can be reset later.`)) return;
+  await setBtName(name);
+}
+async function resetBtName() {
+  if (!confirm(`Restore the default Bluetooth name (${sensorName})?`)) return;
+  await setBtName(null);
+}
 
 const tzName = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "local"; } catch { return "local"; } };
 const modeLabel = m => m === "utc" ? "UTC" : `${tzName()} (UTC${fmtOffset(localOffsetSec())})`;
@@ -1154,6 +1219,9 @@ async function copyLog() {
   $("timeMode").onchange = e => { prefs.timeMode = e.target.value; savePrefs(); updateTzLabels(); dbg(`Time zone setting → ${prefs.timeMode}`); };
   updateTzLabels();
   $("btnGetTime").onclick = () => withBusy(getTime);
+  $("btnRename").onclick = () => withBusy(renameSensor);
+  $("btnRenameReset").onclick = () => withBusy(resetBtName);
+  $("btNameNew").oninput = () => delete $("btNameNew").dataset.auto;
   $("csvLocale").onchange = e => { prefs.csvLocale = e.target.value; savePrefs(); };
   $("idleTimeout").onchange = e => { prefs.idleTimeout = Math.max(5, parseInt(e.target.value) || 30); savePrefs(); };
   document.querySelectorAll("#rangeBtns .seg").forEach(b => {
@@ -1182,14 +1250,17 @@ async function copyLog() {
     catch (err) { log("Invalid config JSON: " + err.message); }
     e.target.value = "";
   };
-  $("roomName").onchange = e => { if (!sensorName) return; rooms[sensorName] = e.target.value.trim(); lsSet("rooms", rooms); renderKnown(); };
+  $("roomName").onchange = e => {
+    if (!sensorName) return; rooms[sensorName] = e.target.value.trim(); lsSet("rooms", rooms); renderKnown();
+    if ($("btNameNew").dataset.auto) $("btNameNew").value = suggestBtName();
+  };
   $("btnScan").onclick = toggleScan;
   if (navigator.bluetooth && navigator.bluetooth.addEventListener) navigator.bluetooth.addEventListener("advertisementreceived", onAdvertisement);
   // Devices this site was already allowed to use can be reconnected without the picker (if supported).
   if (navigator.bluetooth && navigator.bluetooth.getDevices) {
     navigator.bluetooth.getDevices().then(devs => {
       for (const d of devs) {
-        const n = /^ATC_/i.test(d.name || "") ? d.name.toUpperCase().replace(/^ATC_/, "ATC_") : Object.keys(known).find(k => known[k].id === d.id);
+        const n = sensorFromBtName(d.name) || Object.keys(known).find(k => known[k].id === d.id);
         if (n) reachable.set(n, d);
       }
       renderKnown();
