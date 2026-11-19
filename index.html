@@ -224,11 +224,18 @@ details summary { cursor: pointer; font-weight: 600; }
 
   <section class="card">
     <details>
-      <summary>Log</summary>
+      <summary>Debug log</summary>
+      <p class="muted">Records every Bluetooth packet and step. Kept across reloads. If something goes wrong, tap “Send log” and email it.</p>
+      <div class="row">
+        <button id="btnLogSend" class="primary">Send log…</button>
+        <button id="btnLogCopy">Copy log</button>
+        <button id="btnLogClear" class="danger">Clear</button>
+        <span id="logMsg" class="muted"></span>
+      </div>
       <div id="log"></div>
     </details>
   </section>
-  <p class="muted" style="text-align:center">App version 6</p>
+  <p class="muted" style="text-align:center" id="appVersion"></p>
 </main>
 
 <script>
@@ -298,12 +305,44 @@ async function mergeInto(dev, newSamples) {
 }
 
 // ===== Logging =====
-function log(msg) {
-  const d = new Date(); const p = n => String(n).padStart(2, "0");
-  const line = `[${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}] ${msg}`;
-  const el = $("log"); el.textContent += line + "\n"; el.scrollTop = el.scrollHeight;
+// Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
+// with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
+const APP_VERSION = 7;
+const LOG_MAX = 4000;
+const logLines = lsGet("debugLog", []);
+let logDirty = false;
+function log(msg, level) {
+  const d = new Date(), p = (n, w = 2) => String(n).padStart(w, "0");
+  const line = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)} ${level ? level.toUpperCase() + " " : ""}${msg}`;
+  logLines.push(line);
+  if (logLines.length > LOG_MAX) logLines.splice(0, logLines.length - LOG_MAX);
   console.log(line);
+  if (!logDirty) { logDirty = true; setTimeout(flushLog, 400); }
 }
+const dbg = msg => log(msg, "dbg");
+function flushLog() {
+  logDirty = false;
+  const el = $("log"); if (el) { const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 20; el.textContent = logLines.join("\n"); if (atEnd) el.scrollTop = el.scrollHeight; }
+  lsSet("debugLog", logLines);
+}
+const hex = u8 => [...u8].map(x => x.toString(16).padStart(2, "0")).join(" ");
+const t0 = () => performance.now();
+const since = s => `${Math.round(performance.now() - s)} ms`;
+function logEnvironment() {
+  const bt = navigator.bluetooth;
+  const ch = typeof BluetoothRemoteGATTCharacteristic !== "undefined" ? BluetoothRemoteGATTCharacteristic.prototype : null;
+  log(`==== App version ${APP_VERSION} loaded ${new Date().toString()} ====`);
+  dbg(`URL ${location.href.slice(0, 200)}`);
+  dbg(`User agent: ${navigator.userAgent}`);
+  dbg(`Screen ${screen.width}x${screen.height} @${devicePixelRatio}x, viewport ${innerWidth}x${innerHeight}, TZ ${Intl.DateTimeFormat().resolvedOptions().timeZone} (UTC${fmtOffset(localOffsetSec())})`);
+  dbg(`Web Bluetooth: ${!!bt}; requestDevice ${!!(bt && bt.requestDevice)}, getAvailability ${!!(bt && bt.getAvailability)}, getDevices ${!!(bt && bt.getDevices)}, requestLEScan ${!!(bt && bt.requestLEScan)}, events ${!!(bt && bt.addEventListener)}`);
+  if (ch) dbg(`Characteristic API: writeValue ${!!ch.writeValue}, writeValueWithResponse ${!!ch.writeValueWithResponse}, writeValueWithoutResponse ${!!ch.writeValueWithoutResponse}`);
+  dbg(`Share: share ${!!navigator.share}, canShare ${!!navigator.canShare}, clipboard ${!!(navigator.clipboard && navigator.clipboard.writeText)}; IndexedDB ${typeof indexedDB !== "undefined"}; secure context ${window.isSecureContext}`);
+  dbg(`Prefs ${JSON.stringify(prefs)}; known sensors ${JSON.stringify(lsGet("known", {}))}`);
+  if (bt && bt.getAvailability) bt.getAvailability().then(a => dbg(`Bluetooth availability: ${a}`), e => dbg(`getAvailability error: ${describeErr(e)}`));
+}
+document.addEventListener("visibilitychange", () => dbg(`Page ${document.hidden ? "hidden (backgrounded)" : "visible"}${chr ? " - BLE connected" : ""}`));
+window.addEventListener("pagehide", () => { dbg("pagehide"); flushLog(); });
 function setStatus(text, cls) { const s = $("connStatus"); s.textContent = text; s.className = "status " + (cls || ""); }
 function describeErr(e) {
   if (e == null) return String(e);
@@ -315,12 +354,18 @@ function describeErr(e) {
   if (!parts.length) { try { parts.push(JSON.stringify(e)); } catch { parts.push(String(e)); } }
   return parts.join(" - ");
 }
+function errDetail(e) {
+  let s = describeErr(e);
+  try { if (e && typeof e === "object") { const own = {}; for (const k of Object.getOwnPropertyNames(e)) if (k !== "stack") own[k] = e[k]; s += ` | props ${JSON.stringify(own)} | ctor ${e.constructor && e.constructor.name}`; } } catch {}
+  if (e && e.stack) s += `\n    stack: ${String(e.stack).split("\n").slice(0, 6).join("\n    ")}`;
+  return s;
+}
 function showError(where, e) {
   const msg = `${where}: ${describeErr(e)}`;
-  log(msg); $("connMsg").textContent = msg; $("connMsg").className = "status err";
+  log(`${where}: ${errDetail(e)}`, "err"); $("connMsg").textContent = msg; $("connMsg").className = "status err";
 }
 function showInfo(msg) { $("connMsg").textContent = msg; $("connMsg").className = "muted"; }
-window.addEventListener("error", e => showError("Script error", e.error || e.message));
+window.addEventListener("error", e => showError(`Script error at ${e.filename || "?"}:${e.lineno}:${e.colno}`, e.error || e.message));
 window.addEventListener("unhandledrejection", e => showError("Unhandled error", e.reason));
 
 // ===== Time conventions =====
@@ -354,23 +399,35 @@ const listeners = new Set();
 let writeChain = Promise.resolve();
 let writeMode = "auto";
 
+let rxCount = 0, rx35 = 0;
 function onNotify(ev) {
   const dv = ev.target.value;
   const b = new Uint8Array(dv.buffer.slice(dv.byteOffset, dv.byteOffset + dv.byteLength));
-  lastActivity = Date.now();
-  for (const l of [...listeners]) { try { l(b); } catch (e) { console.error(e); } }
+  lastActivity = Date.now(); rxCount++;
+  // History samples arrive by the thousand: log the first few, every 500th and every short (end) packet.
+  if (b[0] === 0x35 && b.length >= 13) { rx35++; if (rx35 <= 5 || rx35 % 500 === 0) dbg(`RX #${rxCount} [${b.length}] ${hex(b)} (sample ${rx35})`); }
+  else dbg(`RX #${rxCount} [${b.length}] ${hex(b)}`);
+  for (const l of [...listeners]) { try { l(b); } catch (e) { log("Listener error: " + errDetail(e), "err"); } }
 }
 function write(bytes) {
   const data = new Uint8Array(bytes);
-  writeChain = writeChain.then(async () => {
+  const p = writeChain.catch(() => {}).then(async () => {
     if (!chr) throw new Error("Not connected");
+    const s = t0();
     // Use the write type the characteristic actually supports; iOS rejects the wrong one.
-    if (writeMode === "withoutResponse" && chr.writeValueWithoutResponse) await chr.writeValueWithoutResponse(data);
-    else if (writeMode === "withResponse" && chr.writeValueWithResponse) await chr.writeValueWithResponse(data);
-    else await chr.writeValue(data);
+    const how = writeMode === "withoutResponse" && chr.writeValueWithoutResponse ? "withoutResponse"
+      : writeMode === "withResponse" && chr.writeValueWithResponse ? "withResponse" : "writeValue";
+    dbg(`TX [${data.length}] ${hex(data)} via ${how}`);
+    try {
+      if (how === "withoutResponse") await chr.writeValueWithoutResponse(data);
+      else if (how === "withResponse") await chr.writeValueWithResponse(data);
+      else await chr.writeValue(data);
+    } catch (e) { log(`TX failed after ${since(s)}: ${errDetail(e)}`, "err"); throw e; }
+    dbg(`TX done in ${since(s)}`);
     lastActivity = Date.now();
   });
-  return writeChain;
+  writeChain = p;
+  return p;
 }
 // Resolve true when check() becomes true, false after `idle` seconds with no BLE traffic.
 function waitIdle(check) {
@@ -378,16 +435,24 @@ function waitIdle(check) {
   return new Promise(res => {
     const iv = setInterval(() => {
       if (check()) { clearInterval(iv); res(true); }
-      else if (!chr || Date.now() - lastActivity > idleMs) { clearInterval(iv); res(false); }
+      else if (!chr || Date.now() - lastActivity > idleMs) {
+        clearInterval(iv);
+        dbg(!chr ? "Wait aborted: not connected" : `Wait ended: idle ${Math.round((Date.now() - lastActivity) / 1000)} s (limit ${idleMs / 1000} s)`);
+        res(false);
+      }
     }, 100);
   });
 }
 // Send cmd, wait for a reply packet matching pred (optional maxMs = hard limit).
 async function request(bytes, pred, maxMs) {
-  let got = null; const until = maxMs ? Date.now() + maxMs : Infinity;
+  let got = null; const until = maxMs ? Date.now() + maxMs : Infinity; const s = t0();
   const l = b => { if (!got && pred(b)) got = b; };
   listeners.add(l);
-  try { await write(bytes); await waitIdle(() => got || Date.now() > until); return got; }
+  try {
+    await write(bytes); await waitIdle(() => got || Date.now() > until);
+    dbg(got ? `Reply to 0x${bytes[0].toString(16)} after ${since(s)}` : `No reply to 0x${bytes[0].toString(16)} after ${since(s)}`);
+    return got;
+  }
   finally { listeners.delete(l); }
 }
 
@@ -438,12 +503,23 @@ function parseAdv(dv) {
   if (u.length === 13) return { mac: macStr(u.slice(0, 6)), t: dv.getInt16(6, false) / 10, h: u[8], b: u[9], mv: dv.getUint16(10, false) };
   return null;
 }
+const advLogged = new Map(); let advTotal = 0;
 function onAdvertisement(ev) {
+  advTotal++;
   let sd = null;
   if (ev.serviceData) for (const [k, v] of ev.serviceData) if (String(k).toLowerCase().startsWith("0000181a")) sd = v;
   const advName = ev.name || (ev.device && ev.device.name) || "";
   const p = sd ? parseAdv(sd) : null;
   let name = p && p.mac.startsWith(OUI) ? nameFromMac(p.mac) : /^ATC_/i.test(advName) ? advName.toUpperCase().replace(/^ATC_/, "ATC_") : null;
+  // Log each advertiser at most every 15 s, with all service data in hex.
+  const id = (ev.device && ev.device.id) || advName || "?";
+  if (Date.now() - (advLogged.get(id) || 0) > 15000) {
+    advLogged.set(id, Date.now());
+    let sdTxt = "";
+    try { if (ev.serviceData) for (const [k, v] of ev.serviceData) sdTxt += ` sd[${String(k).slice(4, 8)}]=${hex(new Uint8Array(v.buffer, v.byteOffset, v.byteLength))}`; } catch {}
+    let uu = ""; try { uu = (ev.uuids || []).join(","); } catch {}
+    dbg(`ADV "${advName}" id=${id} rssi=${ev.rssi} tx=${ev.txPower}${uu ? " uuids=" + uu : ""}${sdTxt} → ${name ? name + (p ? ` ${JSON.stringify(p)}` : "") : "not a known sensor"}`);
+  }
   if (!name) return;
   if (ev.device) reachable.set(name, ev.device);
   rememberSensor(name, Object.assign({ seen: Date.now() }, ev.device && ev.device.id ? { id: ev.device.id } : {}, p || {}));
@@ -454,33 +530,41 @@ async function toggleScan() {
   if (!navigator.bluetooth || !navigator.bluetooth.requestLEScan) {
     $("scanMsg").textContent = "This browser can't scan advertisements. Connect to each sensor instead; it's remembered here."; return;
   }
+  dbg("requestLEScan({acceptAllAdvertisements, keepRepeatedDevices})");
   try {
     leScan = await navigator.bluetooth.requestLEScan({ acceptAllAdvertisements: true, keepRepeatedDevices: true });
-  } catch (e) { leScan = null; $("scanMsg").textContent = "Scan failed: " + describeErr(e); return; }
+    dbg(`Scan started: ${JSON.stringify({ active: leScan && leScan.active, acceptAll: leScan && leScan.acceptAllAdvertisements })}`);
+  } catch (e) { leScan = null; log("Scan failed: " + errDetail(e), "err"); $("scanMsg").textContent = "Scan failed: " + describeErr(e); return; }
+  advTotal = 0;
   $("btnScan").textContent = "Stop scan"; $("scanMsg").textContent = "Scanning for 60 s…";
   scanTimer = setTimeout(stopScan, 60000);
 }
 function stopScan() {
   try { leScan && leScan.stop(); } catch {}
   leScan = null; clearTimeout(scanTimer);
+  dbg(`Scan stopped; ${advTotal} advertisements received`);
   $("btnScan").textContent = "Scan nearby (live values)"; $("scanMsg").textContent = "Scan stopped."; renderKnown();
 }
 // Work out which sensor we're connected to: from the name (ATC_xxxxxx) or, if iOS shows another
 // name (e.g. LYWSD03MMC), by asking the pvvx firmware for its MAC (command 0x10, read-only).
 async function identifySensor() {
-  if (/^ATC_[0-9A-F]{6}$/i.test(device.name || "")) return device.name.toUpperCase().replace(/^ATC_/, "ATC_");
+  if (/^ATC_[0-9A-F]{6}$/i.test(device.name || "")) { dbg(`Identified by name ${device.name}`); return device.name.toUpperCase().replace(/^ATC_/, "ATC_"); }
   const byId = Object.keys(known).find(n => known[n].id && known[n].id === device.id);
-  if (byId) return byId;
+  if (byId) { dbg(`Identified by remembered picker ID → ${byId}`); return byId; }
+  dbg("Name doesn't identify the sensor; asking for its MAC (0x10)");
   const r = await request([0x10], b => b[0] === 0x10 && b.length >= 7, 4000);
+  if (!r) dbg("No MAC reply");
   if (r) {
-    log("MAC reply: " + macStr(r));
+    log("MAC reply: " + hex(r));
     // Try both plausible layouts ([0x10][len][mac6] and [0x10][mac6]); accept one with the Xiaomi prefix.
     for (const off of [2, 1]) {
       if (r.length < off + 6) continue;
       const mac = macStr(r.slice(off, off + 6).reverse());
+      dbg(`MAC candidate at offset ${off}: ${mac}`);
       if (mac.startsWith(OUI)) return nameFromMac(mac);
     }
   }
+  dbg("Could not identify the sensor");
   return null;
 }
 
@@ -491,11 +575,13 @@ async function connect(showAll) {
   const optionalServices = [SVC, ES_SVC, BATT_SVC];
   const opts = showAll ? { acceptAllDevices: true, optionalServices }
     : { filters: NAME_PREFIXES.map(p => ({ namePrefix: p })), optionalServices };
-  log(`requestDevice(${showAll ? "all devices" : "name filters"})`);
+  log(`requestDevice ${JSON.stringify(opts)}`);
+  const s = t0();
   try {
     // Must be called straight from the tap (no awaits before it) or the browser blocks the picker.
     device = await navigator.bluetooth.requestDevice(opts);
-  } catch (e) { pickerFailed(e); return; }
+  } catch (e) { dbg(`Picker returned error after ${since(s)}`); pickerFailed(e); return; }
+  dbg(`Picker returned after ${since(s)}: name="${device && device.name}" id=${device && device.id}`);
   if (!device) { showError("Device picker", "returned no device"); return; }
   await connectDevice(device);
 }
@@ -503,34 +589,43 @@ async function connectDevice(dev, expectedName) {
   device = dev; sensorName = null;
   showInfo("");
   if (!device._atcListener) { device.addEventListener("gattserverdisconnected", onDisconnected); device._atcListener = true; }
-  setStatus("Connecting…", "warn"); log(`Connecting to ${expectedName || device.name || device.id}…`);
+  setStatus("Connecting…", "warn"); log(`Connecting to ${expectedName || device.name || device.id} (id ${device.id})…`);
   let step = "connecting";
+  const sAll = t0();
   try {
     // iOS often fails the first GATT connect to a sensor; retry a couple of times.
     let server = null;
     for (let attempt = 1; attempt <= 3 && !server; attempt++) {
-      try { server = await device.gatt.connect(); }
-      catch (e) { log(`Connect attempt ${attempt} failed: ${describeErr(e)}`); if (attempt === 3) throw e; showInfo(`Retrying connection (${attempt + 1}/3)…`); await sleep(1000); }
+      const s = t0();
+      try { dbg(`gatt.connect() attempt ${attempt}, gatt.connected=${device.gatt.connected}`); server = await device.gatt.connect(); dbg(`gatt.connect() ok in ${since(s)}, connected=${device.gatt.connected}`); }
+      catch (e) { log(`Connect attempt ${attempt} failed after ${since(s)}: ${errDetail(e)}`, "warn"); if (attempt === 3) throw e; showInfo(`Retrying connection (${attempt + 1}/3)…`); await sleep(1000); }
     }
     step = "finding service 0x1F10";
-    let svc;
-    try { svc = await server.getPrimaryService(SVC); }
+    let svc, s = t0();
+    try { svc = await server.getPrimaryService(SVC); dbg(`Service 0x1F10 found in ${since(s)}`); }
     catch (e) {
+      log(`getPrimaryService(0x1F10) failed after ${since(s)}: ${errDetail(e)}`, "err");
+      try { s = t0(); const all = await server.getPrimaryServices(); dbg(`Services offered (${since(s)}): ${all.map(x => x.uuid).join(", ") || "none"}`); }
+      catch (e2) { dbg(`getPrimaryServices() failed: ${errDetail(e2)}`); }
       throw new Error(`${describeErr(e)}. “${device.name || device.id}” doesn't offer the pvvx service - it's probably running the original Xiaomi firmware or isn't one of your sensors.`);
     }
     step = "finding characteristic 0x1F1F";
+    s = t0();
     const c = await svc.getCharacteristic(CHR);
     const p = c.properties || {};
     writeMode = p.write ? "withResponse" : p.writeWithoutResponse ? "withoutResponse" : "auto";
-    log(`Characteristic properties: ${["read", "write", "writeWithoutResponse", "notify", "indicate"].filter(k => p[k]).join(", ") || "unknown"} → write ${writeMode}`);
+    log(`Characteristic 0x1F1F found in ${since(s)}; properties: ${["broadcast", "read", "write", "writeWithoutResponse", "notify", "indicate", "authenticatedSignedWrites", "reliableWrite", "writableAuxiliaries"].filter(k => p[k]).join(", ") || "unknown"} → write ${writeMode}`);
     step = "enabling notifications";
     c.addEventListener("characteristicvaluechanged", onNotify);
+    s = t0();
     await c.startNotifications();
-    chr = c;
+    dbg(`startNotifications ok in ${since(s)}`);
+    chr = c; rxCount = 0;
     listeners.add(cfgListener);
     step = "sending first command";
     // Warm-up: harmless "get config" + pause (see NOTE ON BLE NOTIFICATION TIMING); also fills config.
     await write([0x55]); await sleep(1500);
+    dbg(`Warm-up done; ${rxCount} notification(s) so far; config ${currentCfg ? "received" : "NOT received"}`);
     step = "identifying the sensor";
     sensorName = (await identifySensor()) || expectedName || device.name || "unknown";
     rememberSensor(sensorName, { id: device.id, mac: macFromName(sensorName) || undefined });
@@ -538,7 +633,7 @@ async function connectDevice(dev, expectedName) {
     const room = rooms[sensorName];
     showInfo(`Connected to ${room ? room + " · " : ""}${sensorName}${macFromName(sensorName) ? " (" + macFromName(sensorName) + ")" : ""}` +
       (device.name && device.name !== sensorName ? ` - iPhone lists it as “${device.name}”` : ""));
-    setStatus("Connected", "ok"); log(`Connected to ${sensorName}.`);
+    setStatus("Connected", "ok"); log(`Connected to ${sensorName} (total ${since(sAll)}).`);
     $("devName").textContent = sensorName;
     $("roomName").value = room || ""; $("roomName").disabled = false;
     setButtons(true); renderKnown();
@@ -555,9 +650,10 @@ function pickerFailed(e) {
   $("connMsg").textContent += " - try “Connect (all devices)”, and check that Bluetooth is on and Bluefy is allowed to use it (iPhone Settings → Privacy & Security → Bluetooth).";
 }
 function onDisconnected() {
-  chr = null; listeners.clear(); setStatus("Disconnected", "warn"); log("Disconnected."); setButtons(false); renderKnown();
+  log(`Disconnected (gattserverdisconnected); busy=${busy}, ${rxCount} notifications this session, last BLE traffic ${Math.round((Date.now() - lastActivity) / 1000)} s ago, page ${document.hidden ? "hidden" : "visible"}`, "warn");
+  chr = null; listeners.clear(); setStatus("Disconnected", "warn"); setButtons(false); renderKnown();
 }
-function disconnect() { if (device && device.gatt.connected) device.gatt.disconnect(); }
+function disconnect() { dbg("Disconnect requested by user"); if (device && device.gatt.connected) device.gatt.disconnect(); }
 function setButtons(on) {
   for (const id of ["btnDisconnect", "btnDump", "btnTime", "btnDeleteLog", "btnGetCfg"]) $(id).disabled = !on || busy;
   $("btnSetCfg").disabled = !on || busy || !currentCfg;
@@ -565,22 +661,28 @@ function setButtons(on) {
 }
 async function withBusy(fn) {
   if (busy) return; busy = true; setButtons(!!chr);
-  try { await fn(); } catch (e) { log("Error: " + e.message); } finally { busy = false; setButtons(!!chr); }
+  try { await fn(); } catch (e) { showError("Error", e); } finally { busy = false; setButtons(!!chr); }
 }
 
 // Live values via the standard Environmental Sensing / Battery services (best effort).
 async function readLive(server) {
   const out = {};
+  const rd = async (svc, id) => {
+    const s = t0();
+    try { const v = await (await svc.getCharacteristic(uuid16(id))).readValue(); dbg(`Read 0x${id.toString(16)} in ${since(s)}: ${hex(new Uint8Array(v.buffer, v.byteOffset, v.byteLength))}`); return v; }
+    catch (e) { dbg(`Read 0x${id.toString(16)} failed after ${since(s)}: ${describeErr(e)}`); return null; }
+  };
   try {
     const es = await server.getPrimaryService(ES_SVC);
-    try { const v = await (await es.getCharacteristic(uuid16(0x2a6e))).readValue(); out.t = v.getInt16(0, true) / 100; } catch {}
-    if (out.t == null) { try { const v = await (await es.getCharacteristic(uuid16(0x2a1f))).readValue(); out.t = v.getInt16(0, true) / 10; } catch {} }
-    try { const v = await (await es.getCharacteristic(uuid16(0x2a6f))).readValue(); out.h = v.getUint16(0, true) / 100; } catch {}
-  } catch {}
+    let v = await rd(es, 0x2a6e); if (v) out.t = v.getInt16(0, true) / 100;
+    if (out.t == null) { v = await rd(es, 0x2a1f); if (v) out.t = v.getInt16(0, true) / 10; }
+    v = await rd(es, 0x2a6f); if (v) out.h = v.getUint16(0, true) / 100;
+  } catch (e) { dbg(`Environmental Sensing service 0x181A unavailable: ${describeErr(e)}`); }
   try {
     const bs = await server.getPrimaryService(BATT_SVC);
-    const v = await (await bs.getCharacteristic(uuid16(0x2a19))).readValue(); out.b = v.getUint8(0);
-  } catch {}
+    const v = await rd(bs, 0x2a19); if (v) out.b = v.getUint8(0);
+  } catch (e) { dbg(`Battery service 0x180F unavailable: ${describeErr(e)}`); }
+  dbg(`Live values: ${JSON.stringify(out)}`);
   if (out.t != null) $("liveT").textContent = out.t.toFixed(2) + "°";
   if (out.h != null) $("liveH").textContent = out.h.toFixed(1) + "%";
   if (out.b != null) $("liveB").textContent = out.b + "%";
@@ -618,12 +720,16 @@ async function dump() {
     else bar.style.width = (raw.length ? 50 + 45 * (1 - Math.exp(-raw.length / 3000)) : 5) + "%";
   }, 250);
   listeners.add(l);
+  const sDump = t0(); rx35 = 0;
   try {
-    log(`Requesting ${cnt === 0xffff ? "all stored" : cnt} samples…`);
+    log(`Requesting ${cnt === 0xffff ? "all stored" : cnt} samples (sensor ${devKey()}, clock mode ${prefs.timeMode}, sync ${$("optSync").checked}, delete ${del})…`);
     await write([0x35, cnt & 0xff, cnt >> 8, 0, 0]);
     const finished = await waitIdle(() => done);
     listeners.delete(l);
-    if (!finished) log(`Idle timeout; keeping the ${raw.length} sample(s) received so far.`);
+    const secs = (performance.now() - sDump) / 1000;
+    dbg(`Transfer stats: ${raw.length} samples in ${secs.toFixed(1)} s (${(raw.length / Math.max(secs, 0.001)).toFixed(0)}/s)` +
+      (raw.length ? `; device times ${faceValue(Math.min(...raw.map(r => r[0])))} … ${faceValue(Math.max(...raw.map(r => r[0])))}` : ""));
+    if (!finished) log(`Idle timeout; keeping the ${raw.length} sample(s) received so far.`, "warn");
     else {
       log(`Transfer complete: ${raw.length} samples.`);
       if ($("optSync").checked) {
@@ -784,14 +890,16 @@ function shareFiles(items, subject) {
   const files = items.map(it => new File([it.text], it.name, { type: "text/csv" }));
   const rows = items.reduce((n, it) => n + it.rows, 0);
   const body = `${subject}\n${items.map(it => `${it.name} (${it.rows} rows)`).join("\n")}`;
-  const done = () => shareMsg(`Shared ${files.length} file(s), ${rows} rows.`, "status ok");
+  const done = () => { dbg("Share completed"); shareMsg(`Shared ${files.length} file(s), ${rows} rows.`, "status ok"); };
   const failed = e => {
+    dbg(`Share result: ${errDetail(e)}`);
     if (e && e.name === "AbortError") { shareMsg("Sharing cancelled."); return; }
     shareMsg("Share sheet failed: " + describeErr(e) + " - downloading instead.", "status err");
     downloadFiles(items);
   };
   let canFiles = false;
-  try { canFiles = !!(navigator.canShare && navigator.canShare({ files })); } catch {}
+  try { canFiles = !!(navigator.canShare && navigator.canShare({ files })); } catch (e) { dbg(`canShare threw: ${describeErr(e)}`); }
+  dbg(`Share "${subject}": ${items.map(it => `${it.name} ${it.rows} rows ${it.text.length} B`).join("; ")}; canShare(files)=${canFiles}, share=${!!navigator.share}`);
   if (canFiles) {
     navigator.share({ files, title: subject, text: body }).then(done, failed);
   } else if (navigator.share && items.length === 1) {
@@ -957,7 +1065,38 @@ function onChartPointer(ev) {
 }
 
 // ===== Wire up =====
+function logText() { return `ATC Thermometers debug log (app version ${APP_VERSION}, exported ${new Date().toString()})\n${navigator.userAgent}\n\n${logLines.join("\n")}\n`; }
+function sendLog() {
+  const name = `atc_debug_log_${stamp()}.txt`, text = logText();
+  const file = new File([text], name, { type: "text/plain" });
+  let canFiles = false; try { canFiles = !!(navigator.canShare && navigator.canShare({ files: [file] })); } catch {}
+  const ok = () => { $("logMsg").textContent = "Log shared."; };
+  const fail = e => {
+    if (e && e.name === "AbortError") { $("logMsg").textContent = "Cancelled."; return; }
+    $("logMsg").textContent = "Share failed (" + describeErr(e) + "); use Copy log instead.";
+  };
+  if (canFiles) navigator.share({ files: [file], title: "ATC debug log", text: "ATC Thermometers debug log attached." }).then(ok, fail);
+  else if (navigator.share) navigator.share({ title: "ATC debug log", text }).then(ok, fail);
+  else downloadFiles([{ name, text }]);
+}
+async function copyLog() {
+  const text = logText();
+  try { await navigator.clipboard.writeText(text); $("logMsg").textContent = `Copied ${logLines.length} lines.`; }
+  catch (e) {
+    // Fallback for browsers without the async clipboard API.
+    const ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand && document.execCommand("copy"); ta.remove();
+    $("logMsg").textContent = ok ? `Copied ${logLines.length} lines.` : "Copy failed: " + describeErr(e);
+  }
+}
+
 (async function init() {
+  $("appVersion").textContent = `App version ${APP_VERSION}`;
+  logEnvironment(); flushLog();
+  $("btnLogSend").onclick = sendLog;
+  $("btnLogCopy").onclick = copyLog;
+  $("btnLogClear").onclick = () => { if (confirm("Clear the debug log?")) { logLines.length = 0; log("Log cleared"); flushLog(); } };
   if (!navigator.bluetooth) { $("noBle").classList.remove("hidden"); $("btnConnect").disabled = $("btnConnectAll").disabled = true; }
   $("timeMode").value = prefs.timeMode; $("csvLocale").value = prefs.csvLocale; $("idleTimeout").value = prefs.idleTimeout;
   $("timeMode").onchange = e => { prefs.timeMode = e.target.value; savePrefs(); };
@@ -1019,7 +1158,8 @@ function onChartPointer(ev) {
   window.addEventListener("resize", () => drawChart());
   if (window.matchMedia) matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", drawChart);
   idb = await openDB();
-  if (!idb) log("IndexedDB unavailable - history is kept only until the page is closed.");
+  if (!idb) log("IndexedDB unavailable - history is kept only until the page is closed.", "warn");
+  else dbg("IndexedDB opened");
   await refreshDeviceList();
   setButtons(false);
 })();
