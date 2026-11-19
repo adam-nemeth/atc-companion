@@ -372,7 +372,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 15;
+const APP_VERSION = 16;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -547,6 +547,38 @@ function rememberSensor(name, data) {
 let renderPending = false;
 function scheduleKnownRender() { if (renderPending) return; renderPending = true; setTimeout(() => { renderPending = false; renderKnown(); }, 300); }
 function ago(ms) { const s = Math.round((Date.now() - ms) / 1000); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; }
+// ===== Remembered sensors (picked on an earlier visit) =====
+const remembered = new Map(); // name -> BluetoothDevice from getDevices()
+// Listen for one advertisement from a remembered sensor so its handle becomes usable.
+// Resolves true if one was heard within timeoutMs.
+async function wakeRemembered(name, d, timeoutMs) {
+  if (typeof d.watchAdvertisements !== "function") { if (!d._noWatchLogged) { dbg(`${name}: watchAdvertisements not supported - can't wake remembered sensor`); d._noWatchLogged = true; } return false; }
+  if (d._advSeen && Date.now() - d._advSeen < 10000) return true;
+  d._waking = true; scheduleKnownRender();
+  const s = t0();
+  let ctrl = null; try { ctrl = new AbortController(); } catch {}
+  const heard = new Promise(res => {
+    const onAdv = ev => {
+      d._advSeen = Date.now();
+      let p = null;
+      try { if (ev.serviceData) for (const [k, v] of ev.serviceData) if (String(k).toLowerCase().startsWith("0000181a")) p = parseAdv(v); } catch {}
+      dbg(`${name}: advertisement heard after ${since(s)} (rssi ${ev.rssi})${p ? " " + JSON.stringify(p) : ""}`);
+      if (p) rememberSensor(name, Object.assign({ seen: Date.now() }, p));
+      d.removeEventListener("advertisementreceived", onAdv);
+      res(true);
+    };
+    d.addEventListener("advertisementreceived", onAdv);
+    setTimeout(() => { d.removeEventListener("advertisementreceived", onAdv); res(false); }, timeoutMs);
+  });
+  try { await d.watchAdvertisements(ctrl ? { signal: ctrl.signal } : undefined); dbg(`${name}: watchAdvertisements started (${since(s)})`); }
+  catch (e) { dbg(`${name}: watchAdvertisements failed: ${errDetail(e)}`); d._waking = false; scheduleKnownRender(); return false; }
+  const ok = await heard;
+  try { if (ctrl) ctrl.abort(); else if (d.unwatchAdvertisements) d.unwatchAdvertisements(); } catch {}
+  d._waking = false; scheduleKnownRender();
+  if (!ok) dbg(`${name}: no advertisement within ${timeoutMs / 1000} s`);
+  return ok;
+}
+
 const batchSel = new Set(lsGet("batchSel", null) || Object.keys(DEFAULT_ROOMS));
 const saveSel = () => lsSet("batchSel", [...batchSel]);
 function renderKnown() {
@@ -579,7 +611,9 @@ function renderKnown() {
       });
     };
     const meta = document.createElement("div"); meta.className = "meta";
-    meta.textContent = (dev ? "✓ ready" : "not ready - use Add sensors… or Scan") +
+    const rem = remembered.get(name);
+    meta.textContent = (dev ? (dev._remembered ? "✓ ready (remembered)" : "✓ ready")
+      : rem && rem._waking ? "waking remembered sensor…" : "not ready - use Add sensors… or Scan") +
       ` · MAC ${k.mac || macFromName(name) || "?"}` + (k.btName && k.btName !== name ? ` · Bluetooth name ${k.btName}` : "") + (k.id ? ` · Picker ID ${k.id.slice(0, 8)}…` : "");
     row.append(left, btn, meta); box.appendChild(row);
   }
@@ -685,7 +719,12 @@ async function connectDevice(dev, expectedName, opts = {}) {
   showInfo("");
   // Diagnostics: is this a fresh handle from the picker/scan, or one reused from an earlier connection?
   dev._uses = (dev._uses || 0) + 1;
-  dbg(`Device handle ${dev._uses === 1 ? "fresh (first use)" : `reused (use #${dev._uses})`}; gatt.connected=${dev.gatt.connected}`);
+  dbg(`Device handle ${dev._remembered ? "remembered from an earlier visit, " : ""}${dev._uses === 1 ? "first use" : `reused (use #${dev._uses})`}; gatt.connected=${dev.gatt.connected}`);
+  if (dev._remembered && !dev.gatt.connected) {
+    showInfo("Waiting to hear the remembered sensor…");
+    const heard = await wakeRemembered(expectedName || dev.name, dev, 8000);
+    log(`Remembered sensor ${expectedName || dev.name}: ${heard ? "advertisement heard, connecting" : "not heard - trying to connect anyway"}`);
+  }
   if (!device._atcListener) { device.addEventListener("gattserverdisconnected", onDisconnected); device._atcListener = true; }
   setStatus("Connecting…", "warn"); log(`Connecting to ${expectedName || device.name || device.id} (id ${device.id})…`);
   let step = "connecting";
@@ -705,6 +744,7 @@ async function connectDevice(dev, expectedName, opts = {}) {
           // retrying won't help - the sensor has to be picked again.
           if (instantFails === 3) {
             for (const [k, v] of reachable) if (v === dev) reachable.delete(k);
+            if (dev._remembered) { log(`Remembered sensor still not connectable after waking (advertisement ${dev._advSeen ? "was" : "was NOT"} heard)`, "warn"); for (const [k, v] of remembered) if (v === dev) remembered.delete(k); }
             renderKnown();
             throw new Error("this sensor needs to be picked again - tap “Connect…” (or “Add sensors…”) and choose it");
           }
@@ -1555,10 +1595,19 @@ function updateStatusBar() {
   if (navigator.bluetooth && navigator.bluetooth.addEventListener) navigator.bluetooth.addEventListener("advertisementreceived", onAdvertisement);
   // Devices this site was already allowed to use can be reconnected without the picker (if supported).
   if (navigator.bluetooth && navigator.bluetooth.getDevices) {
-    // Bluefy 3.9 returns these, but connecting through them always fails at once with error 2
-    // (seen in the v13/v14 logs), so they are only logged - sensors must be picked each session.
+    // Sensors picked on earlier visits. Connecting to them directly failed with error 2 in Bluefy
+    // (v13/v14 logs). In Chrome such handles must first "see" an advertisement (watchAdvertisements)
+    // before they can connect, so try that: a sensor becomes ready only once it has been heard.
     navigator.bluetooth.getDevices().then(devs => {
-      dbg(`getDevices(): ${devs.map(d => `${d.name}/${String(d.id).slice(0, 8)}`).join(", ") || "none"} (not used - not connectable in Bluefy)`);
+      dbg(`getDevices(): ${devs.map(d => `${d.name}/${String(d.id).slice(0, 8)}`).join(", ") || "none"}; watchAdvertisements ${devs[0] ? typeof devs[0].watchAdvertisements : "n/a"}`);
+      for (const d of devs) {
+        const n = sensorFromBtName(d.name) || Object.keys(known).find(k => known[k].id === d.id);
+        if (!n) continue;
+        d._remembered = true;
+        remembered.set(n, d);
+        wakeRemembered(n, d, 20000).then(ok => { if (ok && !reachable.has(n)) { reachable.set(n, d); renderKnown(); } });
+      }
+      renderKnown();
     }).catch(e => dbg(`getDevices() error: ${describeErr(e)}`));
   }
   setInterval(() => { if (!document.hidden) renderKnown(); }, 30000);
