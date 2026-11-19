@@ -77,7 +77,7 @@ details summary { cursor: pointer; font-weight: 600; }
 </head>
 <body>
 <main>
-  <h1>ATC Thermometers</h1>
+  <h1>ATC Thermometers <span class="muted" id="appVersionTop" style="font-weight:500;font-size:14px"></span></h1>
 
   <div id="noBle" class="banner hidden">
     <b>Web Bluetooth isn't available in this browser.</b><br>
@@ -138,8 +138,24 @@ details summary { cursor: pointer; font-weight: 600; }
       <span id="dumpStatus" class="muted"></span>
     </div>
     <div class="progress" id="dumpProg"><div></div></div>
-    <div class="row" style="margin-top:12px">
+  </section>
+
+  <!-- Clock -->
+  <section class="card">
+    <h2>Sensor clock</h2>
+    <div class="row">
+      <label>Time zone
+        <select id="timeMode">
+          <option value="local">Local</option>
+          <option value="utc">UTC</option>
+        </select>
+      </label>
       <button id="btnTime" disabled>Set clock now</button>
+      <button id="btnGetTime" disabled>Read clock</button>
+    </div>
+    <div class="row"><span id="clockMsg" class="muted"></span></div>
+    <p class="muted" id="tzHelp"></p>
+    <div class="row">
       <button id="btnDeleteLog" class="danger" disabled>Delete device history…</button>
     </div>
   </section>
@@ -147,6 +163,7 @@ details summary { cursor: pointer; font-weight: 600; }
   <!-- History -->
   <section class="card">
     <h2>Stored history</h2>
+    <p class="muted" id="storageInfo"></p>
     <div class="row">
       <select id="histDev"><option value="">(no data yet)</option></select>
       <span class="muted" id="histCount"></span>
@@ -200,15 +217,6 @@ details summary { cursor: pointer; font-weight: 600; }
     <details>
       <summary>Settings</summary>
       <div class="row" style="margin-top:10px">
-        <label>Clock mode
-          <select id="timeMode">
-            <option value="local">local (pvvx convention)</option>
-            <option value="utc">utc</option>
-          </select>
-        </label>
-      </div>
-      <p class="muted">Use the same mode as your Windows scripts (--time-mode). “local” writes local wall‑clock time into the device; “utc” writes true UTC.</p>
-      <div class="row">
         <label>CSV format
           <select id="csvLocale">
             <option value="en">en: comma, dot decimals</option>
@@ -307,7 +315,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 7;
+const APP_VERSION = 8;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -655,7 +663,7 @@ function onDisconnected() {
 }
 function disconnect() { dbg("Disconnect requested by user"); if (device && device.gatt.connected) device.gatt.disconnect(); }
 function setButtons(on) {
-  for (const id of ["btnDisconnect", "btnDump", "btnTime", "btnDeleteLog", "btnGetCfg"]) $(id).disabled = !on || busy;
+  for (const id of ["btnDisconnect", "btnDump", "btnTime", "btnGetTime", "btnDeleteLog", "btnGetCfg"]) $(id).disabled = !on || busy;
   $("btnSetCfg").disabled = !on || busy || !currentCfg;
   $("btnConnect").disabled = $("btnConnectAll").disabled = on || busy || !navigator.bluetooth;
 }
@@ -759,12 +767,55 @@ async function dump() {
 }
 const le32 = t => [t & 0xff, (t >>> 8) & 0xff, (t >>> 16) & 0xff, (t >>> 24) & 0xff];
 
+const tzName = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "local"; } catch { return "local"; } };
+const modeLabel = m => m === "utc" ? "UTC" : `${tzName()} (UTC${fmtOffset(localOffsetSec())})`;
+function updateTzLabels() {
+  $("timeMode").options[0].textContent = `Local - ${modeLabel("local")}`;
+  $("tzHelp").textContent = prefs.timeMode === "utc"
+    ? "The sensor clock is set to UTC. Use the same choice as your Windows scripts (--time-mode utc)."
+    : `The sensor clock is set to the phone's local time, ${modeLabel("local")}; it shifts by an hour at daylight-saving changes, so set the clock again then. Use the same choice as your Windows scripts (--time-mode local).`;
+}
 async function setTime() {
   const t = deviceEpochNow(prefs.timeMode);
-  log(`Setting clock to ${faceValue(t)} [${prefs.timeMode}]…`);
+  log(`Setting clock to ${faceValue(t)} [${modeLabel(prefs.timeMode)}]…`);
   const r = await request([0x23, ...le32(t)], b => b[0] === 0x23 && b.length >= 5);
-  if (r) log("Device confirmed clock: " + faceValue(new DataView(r.buffer).getUint32(1, true)));
-  else log("No reply (idle timeout).");
+  if (r) {
+    const got = new DataView(r.buffer).getUint32(1, true);
+    log("Device confirmed clock: " + faceValue(got));
+    $("clockMsg").textContent = `Clock set to ${faceValue(got)} (${modeLabel(prefs.timeMode)}).`; $("clockMsg").className = "status ok";
+  } else { log("No reply (idle timeout).", "warn"); $("clockMsg").textContent = "No reply from the sensor."; $("clockMsg").className = "status err"; }
+}
+// Read the sensor clock (0x23 with no payload) and compare with the phone in the selected time zone.
+async function getTime() {
+  const s = t0();
+  const r = await request([0x23], b => b[0] === 0x23 && b.length >= 5, 8000);
+  if (!r) { $("clockMsg").textContent = "No reply from the sensor."; $("clockMsg").className = "status err"; return; }
+  const dev = new DataView(r.buffer).getUint32(1, true);
+  const rtt = performance.now() - s;
+  const ref = deviceEpochNow(prefs.timeMode) - rtt / 2000;
+  const diff = Math.round(dev - ref);
+  const other = Math.round(dev - deviceEpochNow(prefs.timeMode === "utc" ? "local" : "utc"));
+  log(`Device clock ${faceValue(dev)}; phone (${modeLabel(prefs.timeMode)}) ${faceValue(Math.round(ref))}; difference ${diff} s (vs ${prefs.timeMode === "utc" ? "local" : "UTC"}: ${other} s); reply ${Math.round(rtt)} ms`);
+  let txt = `Sensor clock: ${faceValue(dev)} - `;
+  if (Math.abs(diff) <= 2) txt += `matches ${modeLabel(prefs.timeMode)}.`;
+  else if (Math.abs(other) <= 120) txt += `matches ${prefs.timeMode === "utc" ? "local time" : "UTC"} instead (${other} s) - it was set with the other time zone setting.`;
+  else txt += `${Math.abs(diff)} s ${diff > 0 ? "ahead of" : "behind"} ${modeLabel(prefs.timeMode)}${Math.abs(diff) >= 3600 ? ` (${(diff / 3600).toFixed(1)} h)` : ""}.`;
+  $("clockMsg").textContent = txt; $("clockMsg").className = Math.abs(diff) <= 60 ? "status ok" : "status warn";
+}
+// Where history lives: IndexedDB in this browser's storage for this website, on the phone only.
+async function updateStorageInfo() {
+  let txt = `Saved only on this phone, inside Bluefy's website storage for ${location.host || "this page"} (IndexedDB${idb ? "" : " unavailable - kept in memory until the page closes"}).`;
+  try {
+    if (navigator.storage && navigator.storage.estimate) {
+      const e = await navigator.storage.estimate();
+      txt += ` Using ${(e.usage / 1048576).toFixed(1)} MB.`;
+    }
+    if (navigator.storage && navigator.storage.persisted) {
+      const p = await navigator.storage.persisted();
+      txt += p ? " Marked persistent." : " Not marked persistent: clearing Bluefy's website data, deleting Bluefy, or iOS clean-up can erase it - use “Send all devices” now and then as a backup.";
+    }
+  } catch (e) { dbg(`storage info error: ${describeErr(e)}`); }
+  $("storageInfo").textContent = txt;
 }
 async function deleteLog() {
   if (!confirm(`PERMANENTLY erase all recorded history on ${devKey().replace("__", " · ")}? This cannot be undone.`)) return;
@@ -1093,13 +1144,16 @@ async function copyLog() {
 
 (async function init() {
   $("appVersion").textContent = `App version ${APP_VERSION}`;
+  $("appVersionTop").textContent = `v${APP_VERSION}`;
   logEnvironment(); flushLog();
   $("btnLogSend").onclick = sendLog;
   $("btnLogCopy").onclick = copyLog;
   $("btnLogClear").onclick = () => { if (confirm("Clear the debug log?")) { logLines.length = 0; log("Log cleared"); flushLog(); } };
   if (!navigator.bluetooth) { $("noBle").classList.remove("hidden"); $("btnConnect").disabled = $("btnConnectAll").disabled = true; }
   $("timeMode").value = prefs.timeMode; $("csvLocale").value = prefs.csvLocale; $("idleTimeout").value = prefs.idleTimeout;
-  $("timeMode").onchange = e => { prefs.timeMode = e.target.value; savePrefs(); };
+  $("timeMode").onchange = e => { prefs.timeMode = e.target.value; savePrefs(); updateTzLabels(); dbg(`Time zone setting → ${prefs.timeMode}`); };
+  updateTzLabels();
+  $("btnGetTime").onclick = () => withBusy(getTime);
   $("csvLocale").onchange = e => { prefs.csvLocale = e.target.value; savePrefs(); };
   $("idleTimeout").onchange = e => { prefs.idleTimeout = Math.max(5, parseInt(e.target.value) || 30); savePrefs(); };
   document.querySelectorAll("#rangeBtns .seg").forEach(b => {
@@ -1160,6 +1214,9 @@ async function copyLog() {
   idb = await openDB();
   if (!idb) log("IndexedDB unavailable - history is kept only until the page is closed.", "warn");
   else dbg("IndexedDB opened");
+  // Ask the browser not to evict our data under storage pressure (may be ignored).
+  try { if (navigator.storage && navigator.storage.persist) dbg(`storage.persist() → ${await navigator.storage.persist()}`); } catch (e) { dbg(`storage.persist() error: ${describeErr(e)}`); }
+  updateStorageInfo();
   await refreshDeviceList();
   setButtons(false);
 })();
