@@ -205,8 +205,8 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
           <option value="local">Local</option>
         </select>
       </label>
-      <button id="btnTime" class="only-single" disabled>Set clock now</button>
       <button id="btnGetTime" class="only-single" disabled>Read clock</button>
+      <button id="btnTime" class="only-single" disabled>Set clock now</button>
     </div>
     <div class="row only-single"><span id="clockMsg" class="muted"></span></div>
     <p class="muted" id="tzHelp"></p>
@@ -377,7 +377,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 20;
+const APP_VERSION = 21;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
