@@ -157,6 +157,7 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
     </div>
     <div class="row">
       <button id="bDump" class="primary">Download all</button>
+      <button id="bDumpSyncErase" class="danger">Download, set clock &amp; erase…</button>
       <button id="bGetTime">Read clocks</button>
       <button id="bSetTime">Set clocks</button>
       <button id="bGetCfg">Read configs</button>
@@ -376,7 +377,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 19;
+const APP_VERSION = 20;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -630,7 +631,7 @@ function renderKnown() {
     row.append(left, btn, meta); box.appendChild(row);
   }
   const rm = $("readyMsg"); if (rm) rm.textContent = `${ready} available · ${ticked} ticked`;
-  for (const id of ["bDump", "bGetTime", "bSetTime", "bGetCfg", "bSetCfg", "btnAddSensors"]) { const b = $(id); if (b) b.disabled = busy || (id !== "btnAddSensors" && !ticked); }
+  for (const id of ["bDump", "bDumpSyncErase", "bGetTime", "bSetTime", "bGetCfg", "bSetCfg", "btnAddSensors"]) { const b = $(id); if (b) b.disabled = busy || (id !== "btnAddSensors" && !ticked); }
 }
 // Parse sensor advertisements. pvvx "custom" format (service data 0x181A, 15+ bytes):
 // MAC[6] reversed, temp int16 x0.01, hum uint16 x0.01, batt mV uint16, batt %, counter, flags (all little-endian).
@@ -892,8 +893,10 @@ function devKey() {
 }
 // Returns { n, total, finished, deleted } (or null if cancelled). opts.skipConfirm: batch already asked.
 async function dump(opts = {}) {
-  const cnt = parseInt($("dumpCount").value, 10) & 0xffff;
-  const del = $("optDelete").checked;
+  const cnt = opts.all ? 0xffff : parseInt($("dumpCount").value, 10) & 0xffff;
+  // opts.sync / opts.del override the checkboxes (used by the combined batch button).
+  const del = opts.del != null ? opts.del : $("optDelete").checked;
+  const sync = opts.sync != null ? opts.sync : $("optSync").checked;
   if (del && !opts.skipConfirm && !confirm("After a successful download, PERMANENTLY erase the history stored on the device?")) return null;
   const result = { n: 0, total: 0, finished: false, deleted: false };
   const raw = []; let done = false;
@@ -913,7 +916,7 @@ async function dump(opts = {}) {
   listeners.add(l);
   const sDump = t0(); rx35 = 0;
   try {
-    log(`Requesting ${cnt === 0xffff ? "all stored" : cnt} samples (sensor ${devKey()}, clock mode ${prefs.timeMode}, sync ${$("optSync").checked}, delete ${del})…`);
+    log(`Requesting ${cnt === 0xffff ? "all stored" : cnt} samples (sensor ${devKey()}, clock mode ${prefs.timeMode}, sync ${sync}, delete ${del})…`);
     await write([0x35, cnt & 0xff, cnt >> 8, 0, 0]);
     const finished = await waitIdle(() => done);
     listeners.delete(l);
@@ -923,9 +926,9 @@ async function dump(opts = {}) {
     if (!finished) log(`Idle timeout; keeping the ${raw.length} sample(s) received so far.`, "warn");
     else {
       log(`Transfer complete: ${raw.length} samples.`);
-      if ($("optSync").checked) {
+      if (sync) {
         const t = deviceEpochNow(prefs.timeMode);
-        try { await write([0x23, ...le32(t)]); log(`Clock synced to ${faceValue(t)} [${prefs.timeMode}]`); }
+        try { await write([0x23, ...le32(t)]); log(`Clock synced to ${faceValue(t)} [${prefs.timeMode}]`); result.synced = true; }
         catch (e) { log("(non-fatal) clock sync failed: " + e.message); }
       }
       if (del) {
@@ -1100,12 +1103,22 @@ function mergeCfg(tpl, own) {
   return m;
 }
 const BATCH = {
+  // Download + set clock + erase, regardless of the History download checkboxes.
+  async dumpSyncErase() {
+    if (!confirm(`For ${batchTargets().length} sensor(s): download all stored history, set the clock (${prefs.timeMode === "utc" ? "UTC" : "local time"}), then PERMANENTLY erase the history on the sensor.\n\nA sensor is only erased if its download finished completely.`)) return;
+    await runBatch("Download, set clock & erase", async () => {
+      const r = await dump({ skipConfirm: true, sync: true, del: true, all: true });
+      if (!r) return null;
+      const ok = r.finished && r.synced && r.deleted;
+      return { ok, text: `${r.n} samples downloaded · ${r.total} stored · ${r.synced ? "clock set" : "clock NOT set"} · ${r.deleted ? "erased on sensor" : "NOT erased"}${r.finished ? "" : " · INCOMPLETE download (idle timeout)"}` };
+    });
+  },
   async dump() {
     if ($("optDelete").checked && !confirm(`Download from ${batchTargets().length} sensor(s) and then PERMANENTLY erase the history stored on each one (only where the download finished)?`)) return;
     await runBatch("Download all", async () => {
       const r = await dump({ skipConfirm: true });
       if (!r) return null;
-      return { ok: r.finished, text: `${r.n} samples downloaded · ${r.total} stored${r.deleted ? " · erased on sensor" : ""}${r.finished ? "" : " · INCOMPLETE (idle timeout)"}` };
+      return { ok: r.finished, text: `${r.n} samples downloaded · ${r.total} stored${r.synced ? " · clock set" : ""}${r.deleted ? " · erased on sensor" : ""}${r.finished ? "" : " · INCOMPLETE (idle timeout)"}` };
     });
   },
   async getTime() { await runBatch("Read clocks", () => getTime()); },
@@ -1695,6 +1708,7 @@ function updateStatusBar() {
   $("btnSelAll").onclick = () => { knownNames().forEach(n => batchSel.add(n)); saveSel(); renderKnown(); };
   $("btnSelNone").onclick = () => { batchSel.clear(); saveSel(); renderKnown(); };
   $("bDump").onclick = () => withBusy(BATCH.dump);
+  $("bDumpSyncErase").onclick = () => withBusy(BATCH.dumpSyncErase);
   $("bGetTime").onclick = () => withBusy(BATCH.getTime);
   $("bSetTime").onclick = () => withBusy(BATCH.setTime);
   $("bGetCfg").onclick = () => withBusy(BATCH.getCfg);
