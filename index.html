@@ -1,0 +1,794 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>ATC Thermometers</title>
+<style>
+:root {
+  --bg: #f4f5f7; --card: #ffffff; --text: #16181d; --muted: #6b7280; --line: #e3e5e9;
+  --accent: #2563eb; --accent-text: #ffffff; --temp: #e4572e; --hum: #2a7fd4;
+  --ok: #15803d; --warn: #b45309; --err: #b91c1c; --input: #f9fafb;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1115; --card: #181b21; --text: #e8eaee; --muted: #9aa1ad; --line: #2a2e36;
+    --accent: #4f8cff; --accent-text: #0b0d10; --temp: #ff7a52; --hum: #5aa9ff;
+    --ok: #4ade80; --warn: #fbbf24; --err: #f87171; --input: #11141a;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1115; --card: #181b21; --text: #e8eaee; --muted: #9aa1ad; --line: #2a2e36;
+  --accent: #4f8cff; --accent-text: #0b0d10; --temp: #ff7a52; --hum: #5aa9ff;
+  --ok: #4ade80; --warn: #fbbf24; --err: #f87171; --input: #11141a;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 760px; margin: 0 auto; padding: 12px 16px calc(32px + env(safe-area-inset-bottom)); }
+h1 { font-size: 20px; margin: 8px 0 12px; }
+h2 { font-size: 16px; margin: 0 0 10px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.row + .row { margin-top: 8px; }
+button { font: inherit; border: 1px solid var(--line); background: var(--input); color: var(--text);
+  border-radius: 9px; padding: 9px 14px; cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+button.danger { color: var(--err); border-color: var(--err); background: transparent; }
+button:disabled { opacity: .45; cursor: default; }
+button.seg { padding: 6px 11px; }
+button.seg.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+input, select { font: inherit; color: var(--text); background: var(--input); border: 1px solid var(--line);
+  border-radius: 8px; padding: 7px 9px; }
+input[type=number] { width: 90px; }
+input[type=checkbox] { width: 18px; height: 18px; vertical-align: middle; }
+label { display: inline-flex; gap: 6px; align-items: center; }
+.muted { color: var(--muted); font-size: 13px; }
+.status { font-weight: 600; }
+.status.ok { color: var(--ok); } .status.err { color: var(--err); } .status.warn { color: var(--warn); }
+.banner { background: var(--card); border: 2px solid var(--warn); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
+.live { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+.tile { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+.tile .v { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.tile .k { font-size: 12px; color: var(--muted); }
+.progress { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 8px; display: none; }
+.progress > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+#chartWrap { position: relative; margin-top: 10px; touch-action: pan-y; }
+#chart { width: 100%; height: 260px; display: block; }
+#readout { font-size: 13px; min-height: 20px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.legend { display: flex; gap: 14px; font-size: 13px; color: var(--muted); }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 3px; margin-right: 5px; vertical-align: middle; background: currentColor; }
+.legend .t { color: var(--temp); } .legend .h { color: var(--hum); }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; margin-top: 8px; font-size: 13px; }
+.cfg-grid { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center; }
+.cfg-grid .info { grid-column: 1 / -1; margin-top: -6px; }
+details summary { cursor: pointer; font-weight: 600; }
+#log { font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; max-height: 260px; overflow: auto;
+  background: var(--input); border-radius: 8px; padding: 8px; margin-top: 8px; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>ATC Thermometers</h1>
+
+  <div id="noBle" class="banner hidden">
+    <b>Web Bluetooth isn't available in this browser.</b><br>
+    On iPhone, open this page in the <b>Bluefy</b> browser (free on the App Store). Safari doesn't support Bluetooth.
+    You can still view stored history and import CSV files here.
+  </div>
+
+  <!-- Connection -->
+  <section class="card">
+    <h2>Device</h2>
+    <div class="row">
+      <button id="btnConnect" class="primary">Connect…</button>
+      <button id="btnDisconnect" disabled>Disconnect</button>
+      <span id="connStatus" class="status">Not connected</span>
+    </div>
+    <div class="row">
+      <label>Room <input id="roomName" placeholder="e.g. Kitchen" size="14" disabled></label>
+      <span class="muted" id="devName"></span>
+    </div>
+    <div class="live" id="liveTiles">
+      <div class="tile"><div class="k">Temperature</div><div class="v" id="liveT">–</div></div>
+      <div class="tile"><div class="k">Humidity</div><div class="v" id="liveH">–</div></div>
+      <div class="tile"><div class="k">Battery</div><div class="v" id="liveB">–</div></div>
+    </div>
+    <div class="row"><span class="muted" id="liveNote"></span></div>
+  </section>
+
+  <!-- Actions -->
+  <section class="card">
+    <h2>History download</h2>
+    <div class="row">
+      <label>Samples
+        <select id="dumpCount">
+          <option value="65535">All stored</option>
+          <option value="100">Last 100</option>
+          <option value="500">Last 500</option>
+          <option value="2000">Last 2000</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="optSync" checked> Sync clock after</label>
+      <label><input type="checkbox" id="optDelete"> Delete on device after</label>
+    </div>
+    <div class="row">
+      <button id="btnDump" class="primary" disabled>Download history</button>
+      <span id="dumpStatus" class="muted"></span>
+    </div>
+    <div class="progress" id="dumpProg"><div></div></div>
+    <div class="row" style="margin-top:12px">
+      <button id="btnTime" disabled>Set clock now</button>
+      <button id="btnDeleteLog" class="danger" disabled>Delete device history…</button>
+    </div>
+  </section>
+
+  <!-- History -->
+  <section class="card">
+    <h2>Stored history</h2>
+    <div class="row">
+      <select id="histDev"><option value="">(no data yet)</option></select>
+      <span class="muted" id="histCount"></span>
+    </div>
+    <div class="row" id="rangeBtns">
+      <button class="seg" data-h="24">24 h</button>
+      <button class="seg on" data-h="168">7 d</button>
+      <button class="seg" data-h="720">30 d</button>
+      <button class="seg" data-h="8760">1 y</button>
+      <button class="seg" data-h="0">All</button>
+    </div>
+    <div id="chartWrap">
+      <svg id="chart" role="img" aria-label="Temperature and humidity chart"></svg>
+    </div>
+    <div class="legend"><span class="t">Temperature °C</span><span class="h">Humidity %</span></div>
+    <div id="readout" class="muted"></div>
+    <div class="stats" id="stats"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="btnExportAll">Export CSV (all, UTC)</button>
+      <button id="btnExportRaw" disabled>Export last download (raw)</button>
+      <button id="btnImport">Import CSV…</button>
+      <input type="file" id="fileImport" accept=".csv,text/csv" multiple class="hidden">
+    </div>
+    <div class="row"><button id="btnForget" class="danger">Forget this device's stored data…</button></div>
+  </section>
+
+  <!-- Config -->
+  <section class="card">
+    <details id="cfgDetails">
+      <summary>Device configuration</summary>
+      <p class="muted">Read on connect. Change values, then “Write config”. Fields marked hardware‑specific mean different things per model; leave them unless you know.</p>
+      <div class="row">
+        <button id="btnGetCfg" disabled>Re-read config</button>
+        <button id="btnSetCfg" class="primary" disabled>Write config</button>
+      </div>
+      <div class="row">
+        <button id="btnCfgExport" disabled>Export JSON</button>
+        <button id="btnCfgImport">Load JSON…</button>
+        <input type="file" id="fileCfg" accept=".json,application/json" class="hidden">
+      </div>
+      <div id="cfgForm" class="cfg-grid" style="margin-top:12px"></div>
+    </details>
+  </section>
+
+  <!-- Settings -->
+  <section class="card">
+    <details>
+      <summary>Settings</summary>
+      <div class="row" style="margin-top:10px">
+        <label>Clock mode
+          <select id="timeMode">
+            <option value="local">local (pvvx convention)</option>
+            <option value="utc">utc</option>
+          </select>
+        </label>
+      </div>
+      <p class="muted">Use the same mode as your Windows scripts (--time-mode). “local” writes local wall‑clock time into the device; “utc” writes true UTC.</p>
+      <div class="row">
+        <label>CSV format
+          <select id="csvLocale">
+            <option value="en">en: comma, dot decimals</option>
+            <option value="hu">hu: semicolon, comma decimals</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <label>Idle timeout (s) <input type="number" id="idleTimeout" min="5" max="300" value="30"></label>
+      </div>
+    </details>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>Log</summary>
+      <div id="log"></div>
+    </details>
+  </section>
+</main>
+
+<script>
+"use strict";
+// ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
+const SVC = 0x1f10, CHR = 0x1f1f;
+const NAME_PREFIXES = ["ATC_", "LYWSD", "MHO", "CGG", "MJWSD"];
+const CFG_NEW_LAYOUT_VER = 0x47;
+const DEFAULT_ROOMS = { ATC_E3734E: "Office", ATC_7F605A: "Kitchen", ATC_14B6C2: "Bedroom", ATC_B3FB5E: "Hallway", ATC_A7FC74: "Cellar" };
+
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ===== Small storage helpers (localStorage for prefs, IndexedDB for history) =====
+function lsGet(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } }
+function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+
+let rooms = Object.assign({}, DEFAULT_ROOMS, lsGet("rooms", {}));
+const prefs = Object.assign({ timeMode: "local", csvLocale: "en", idleTimeout: 30, range: 168 }, lsGet("prefs", {}));
+function savePrefs() { lsSet("prefs", prefs); }
+
+const memDB = new Map(); // fallback if IndexedDB is unavailable
+let idb = null;
+function openDB() {
+  return new Promise(res => {
+    try {
+      const r = indexedDB.open("atc_history", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("history", { keyPath: "dev" });
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => res(null);
+    } catch { res(null); }
+  });
+}
+function dbOp(mode, fn) {
+  return new Promise((res, rej) => {
+    const tx = idb.transaction("history", mode); const st = tx.objectStore("history");
+    const req = fn(st); tx.oncomplete = () => res(req && req.result); tx.onerror = () => rej(tx.error);
+  });
+}
+async function loadHistory(dev) {
+  if (!idb) return memDB.get(dev) || [];
+  const rec = await dbOp("readonly", st => st.get(dev));
+  return rec ? rec.samples : [];
+}
+async function saveHistory(dev, samples) {
+  if (!idb) { memDB.set(dev, samples); return; }
+  await dbOp("readwrite", st => st.put({ dev, samples }));
+}
+async function deleteHistory(dev) {
+  if (!idb) { memDB.delete(dev); return; }
+  await dbOp("readwrite", st => st.delete(dev));
+}
+async function listDevices() {
+  if (!idb) return [...memDB.keys()];
+  return (await dbOp("readonly", st => st.getAllKeys())) || [];
+}
+// samples: array of [trueUtcSec, tempC, humPct, batteryMv]; merged & de-duplicated by instant
+async function mergeInto(dev, newSamples) {
+  const m = new Map((await loadHistory(dev)).map(s => [s[0], s]));
+  for (const s of newSamples) m.set(s[0], s);
+  const merged = [...m.values()].sort((a, b) => a[0] - b[0]);
+  await saveHistory(dev, merged);
+  return merged.length;
+}
+
+// ===== Logging =====
+function log(msg) {
+  const d = new Date(); const p = n => String(n).padStart(2, "0");
+  const line = `[${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}] ${msg}`;
+  const el = $("log"); el.textContent += line + "\n"; el.scrollTop = el.scrollHeight;
+  console.log(line);
+}
+function setStatus(text, cls) { const s = $("connStatus"); s.textContent = text; s.className = "status " + (cls || ""); }
+
+// ===== Time conventions =====
+const localOffsetSec = () => -new Date().getTimezoneOffset() * 60;
+const deviceEpochNow = mode => Math.floor(Date.now() / 1000) + (mode === "utc" ? 0 : localOffsetSec());
+function fmtOffset(sec) {
+  const m = Math.round(sec / 60), s = m >= 0 ? "+" : "-", a = Math.abs(m);
+  return `${s}${String(Math.floor(a / 60)).padStart(2, "0")}:${String(a % 60).padStart(2, "0")}`;
+}
+function parseOffset(s) {
+  if (!s) return 0; const mm = /^([+-])?(\d{1,2}):(\d{2})$/.exec(s.trim()); if (!mm) return 0;
+  return (mm[1] === "-" ? -1 : 1) * (parseInt(mm[2]) * 60 + parseInt(mm[3])) * 60;
+}
+// Epoch shown "at face value" (calendar fields of the number, no TZ shift) - like utcfromtimestamp()
+function faceValue(epoch) {
+  const d = new Date(epoch * 1000), p = n => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+}
+function localStr(epochUtc) {
+  const d = new Date(epochUtc * 1000), p = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function stamp() {
+  const d = new Date(), p = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+// ===== BLE connection & notification plumbing =====
+let device = null, chr = null, lastActivity = Date.now(), currentCfg = null, busy = false;
+const listeners = new Set();
+let writeChain = Promise.resolve();
+
+function onNotify(ev) {
+  const dv = ev.target.value;
+  const b = new Uint8Array(dv.buffer.slice(dv.byteOffset, dv.byteOffset + dv.byteLength));
+  lastActivity = Date.now();
+  for (const l of [...listeners]) { try { l(b); } catch (e) { console.error(e); } }
+}
+function write(bytes) {
+  const data = new Uint8Array(bytes);
+  writeChain = writeChain.then(async () => {
+    if (!chr) throw new Error("Not connected");
+    if (chr.writeValueWithResponse) await chr.writeValueWithResponse(data); else await chr.writeValue(data);
+    lastActivity = Date.now();
+  });
+  return writeChain;
+}
+// Resolve true when check() becomes true, false after `idle` seconds with no BLE traffic.
+function waitIdle(check) {
+  const idleMs = (prefs.idleTimeout || 30) * 1000;
+  return new Promise(res => {
+    const iv = setInterval(() => {
+      if (check()) { clearInterval(iv); res(true); }
+      else if (!chr || Date.now() - lastActivity > idleMs) { clearInterval(iv); res(false); }
+    }, 100);
+  });
+}
+// Send cmd, wait for a reply packet matching pred.
+async function request(bytes, pred) {
+  let got = null;
+  const l = b => { if (!got && pred(b)) got = b; };
+  listeners.add(l);
+  try { await write(bytes); await waitIdle(() => got); return got; }
+  finally { listeners.delete(l); }
+}
+
+const cfgListener = b => { if (b[0] === 0x55 && b.length - 1 >= 9) { try { currentCfg = decodeCfg(b); renderCfg(); } catch (e) { log("Config decode failed: " + e.message); } } };
+
+async function connect() {
+  try {
+    device = await navigator.bluetooth.requestDevice({
+      filters: NAME_PREFIXES.map(p => ({ namePrefix: p })),
+      optionalServices: [SVC, 0x181a, 0x180f]
+    });
+  } catch (e) { if (e.name !== "NotFoundError") log("Picker: " + e.message); return; }
+  device.addEventListener("gattserverdisconnected", onDisconnected);
+  setStatus("Connecting…", "warn"); log(`Connecting to ${device.name}…`);
+  try {
+    const server = await device.gatt.connect();
+    const svc = await server.getPrimaryService(SVC);
+    chr = await svc.getCharacteristic(CHR);
+    chr.addEventListener("characteristicvaluechanged", onNotify);
+    await chr.startNotifications();
+    listeners.add(cfgListener);
+    // Warm-up: harmless "get config" + pause (see NOTE ON BLE NOTIFICATION TIMING); also fills config.
+    await write([0x55]); await sleep(1500);
+    setStatus("Connected", "ok"); log("Connected.");
+    $("devName").textContent = device.name || "";
+    $("roomName").value = rooms[device.name] || ""; $("roomName").disabled = false;
+    setButtons(true);
+    readLive(server);
+  } catch (e) {
+    log("Connect failed: " + e.message); setStatus("Connect failed", "err");
+    try { device.gatt.disconnect(); } catch {}
+  }
+}
+function onDisconnected() {
+  chr = null; listeners.clear(); setStatus("Disconnected", "warn"); log("Disconnected."); setButtons(false);
+}
+function disconnect() { if (device && device.gatt.connected) device.gatt.disconnect(); }
+function setButtons(on) {
+  for (const id of ["btnDisconnect", "btnDump", "btnTime", "btnDeleteLog", "btnGetCfg"]) $(id).disabled = !on || busy;
+  $("btnSetCfg").disabled = !on || busy || !currentCfg;
+  $("btnConnect").disabled = on || busy || !navigator.bluetooth;
+}
+async function withBusy(fn) {
+  if (busy) return; busy = true; setButtons(!!chr);
+  try { await fn(); } catch (e) { log("Error: " + e.message); } finally { busy = false; setButtons(!!chr); }
+}
+
+// Live values via the standard Environmental Sensing / Battery services (best effort).
+async function readLive(server) {
+  const out = {};
+  try {
+    const es = await server.getPrimaryService(0x181a);
+    try { const v = await (await es.getCharacteristic(0x2a6e)).readValue(); out.t = v.getInt16(0, true) / 100; } catch {}
+    if (out.t == null) { try { const v = await (await es.getCharacteristic(0x2a1f)).readValue(); out.t = v.getInt16(0, true) / 10; } catch {} }
+    try { const v = await (await es.getCharacteristic(0x2a6f)).readValue(); out.h = v.getUint16(0, true) / 100; } catch {}
+  } catch {}
+  try {
+    const bs = await server.getPrimaryService(0x180f);
+    const v = await (await bs.getCharacteristic(0x2a19)).readValue(); out.b = v.getUint8(0);
+  } catch {}
+  if (out.t != null) $("liveT").textContent = out.t.toFixed(2) + "°";
+  if (out.h != null) $("liveH").textContent = out.h.toFixed(1) + "%";
+  if (out.b != null) $("liveB").textContent = out.b + "%";
+  $("liveNote").textContent = out.t == null ? "Live values not exposed; showing the latest downloaded sample once you download history." : "";
+}
+function showLatestSample(s) {
+  if (!s) return;
+  if ($("liveT").textContent === "–") $("liveT").textContent = s[1].toFixed(2) + "°";
+  if ($("liveH").textContent === "–") $("liveH").textContent = s[2].toFixed(1) + "%";
+  if ($("liveB").textContent === "–") $("liveB").textContent = (s[3] / 1000).toFixed(2) + " V";
+}
+
+// ===== History download (0x35) =====
+let lastRaw = null; // {dev, rows:[rawEpoch,t,h,v], offset}
+function devKey() {
+  const n = device ? device.name : "device"; const r = rooms[n];
+  return r ? `${n}__${r}` : n;
+}
+async function dump() {
+  const cnt = parseInt($("dumpCount").value, 10) & 0xffff;
+  const del = $("optDelete").checked;
+  if (del && !confirm("After a successful download, PERMANENTLY erase the history stored on the device?")) return;
+  const raw = []; let done = false;
+  const prog = $("dumpProg"), bar = prog.firstElementChild; prog.style.display = "block"; bar.style.width = "0";
+  const l = b => {
+    if (b[0] !== 0x35) return;
+    if (b.length >= 13) {
+      const dv = new DataView(b.buffer);
+      raw.push([dv.getUint32(3, true), dv.getInt16(7, true) / 100, dv.getUint16(9, true) / 100, dv.getUint16(11, true)]);
+    } else done = true;
+  };
+  const ui = setInterval(() => {
+    $("dumpStatus").textContent = `${raw.length} samples…`;
+    if (cnt !== 0xffff) bar.style.width = Math.min(100, raw.length / cnt * 100) + "%";
+    else bar.style.width = (raw.length ? 50 + 45 * (1 - Math.exp(-raw.length / 3000)) : 5) + "%";
+  }, 250);
+  listeners.add(l);
+  try {
+    log(`Requesting ${cnt === 0xffff ? "all stored" : cnt} samples…`);
+    await write([0x35, cnt & 0xff, cnt >> 8, 0, 0]);
+    const finished = await waitIdle(() => done);
+    listeners.delete(l);
+    if (!finished) log(`Idle timeout; keeping the ${raw.length} sample(s) received so far.`);
+    else {
+      log(`Transfer complete: ${raw.length} samples.`);
+      if ($("optSync").checked) {
+        const t = deviceEpochNow(prefs.timeMode);
+        try { await write([0x23, ...le32(t)]); log(`Clock synced to ${faceValue(t)} [${prefs.timeMode}]`); }
+        catch (e) { log("(non-fatal) clock sync failed: " + e.message); }
+      }
+      if (del) {
+        const r = await request([0x36, 0x12, 0x34], b => b[0] === 0x36);
+        log(r ? "Device confirmed: history deleted." : "No reply to delete; check with another download.");
+      }
+    }
+    if (del && !finished) log("Download incomplete - skipped delete for safety.");
+    raw.sort((a, b) => a[0] - b[0]);
+    const offStr = prefs.timeMode === "utc" ? "+00:00" : fmtOffset(localOffsetSec());
+    const offSec = parseOffset(offStr);
+    const key = devKey();
+    lastRaw = { dev: key, rows: raw, offset: offStr };
+    $("btnExportRaw").disabled = !raw.length;
+    const total = await mergeInto(key, raw.map(([e, t, h, v]) => [e - offSec, t, h, v]));
+    log(`Stored ${raw.length} new samples for ${key} (${total} total).`);
+    $("dumpStatus").textContent = `${raw.length} samples downloaded · ${total} stored`;
+    showLatestSample(raw[raw.length - 1] && [0, ...raw[raw.length - 1].slice(1)]);
+    bar.style.width = "100%";
+    await refreshDeviceList(key);
+  } finally { clearInterval(ui); listeners.delete(l); setTimeout(() => prog.style.display = "none", 1500); }
+}
+const le32 = t => [t & 0xff, (t >>> 8) & 0xff, (t >>> 16) & 0xff, (t >>> 24) & 0xff];
+
+async function setTime() {
+  const t = deviceEpochNow(prefs.timeMode);
+  log(`Setting clock to ${faceValue(t)} [${prefs.timeMode}]…`);
+  const r = await request([0x23, ...le32(t)], b => b[0] === 0x23 && b.length >= 5);
+  if (r) log("Device confirmed clock: " + faceValue(new DataView(r.buffer).getUint32(1, true)));
+  else log("No reply (idle timeout).");
+}
+async function deleteLog() {
+  if (!confirm(`PERMANENTLY erase all recorded history on ${device.name}? This cannot be undone.`)) return;
+  const r = await request([0x36, 0x12, 0x34], b => b[0] === 0x36);
+  log(r ? "Device confirmed: history deleted." : "No reply (idle timeout); it may still have deleted.");
+}
+
+// ===== Config (0x55) =====
+function decodeCfg(b) {
+  const len = b.length - 1; if (len < 9) throw new Error("config too short");
+  const ver = b[1], flg = b[2], flg2 = b[3], to = b[4], ho = b[5];
+  const cfg = {
+    _note: "Raw device config (CMD_ID_CFG 0x55). Fields ending '_raw', and the bit fields under flg/flg2, are what --set-config writes back. Fields ending '_info' or under 'device_info' are read-only / computed for convenience and are ignored on write. Bits labelled 'hardware_specific' mean different things on different screen/model variants of this firmware - leave them alone unless you know what your specific device does with them.",
+    device_info: { protocol_version_raw: ver, protocol_version_str: `${ver >> 4}.${ver & 15}` },
+    flg: { raw: flg, bits: {
+      advertising_type: flg & 3, comfort_smiley: !!(flg & 4), hardware_specific_bit3: !!(flg & 8),
+      temperature_unit_fahrenheit: !!(flg & 16), hardware_specific_bit5: !!(flg & 32),
+      tx_measures_when_connected: !!(flg & 64), low_power_measurements: !!(flg & 128) } },
+    flg2: { raw: flg2, bits: {
+      smiley_or_screen_type: flg2 & 7, adv_crypto: !!(flg2 & 8), adv_flags: !!(flg2 & 16),
+      bt5_phy: !!(flg2 & 32), long_range: !!(flg2 & 64), screen_off: !!(flg2 & 128) } },
+    advertising_interval_raw: b[6], advertising_interval_ms_info: Math.round(b[6] * 62.5 * 10) / 10,
+    measure_interval_raw: b[7], rf_tx_power_raw: b[8],
+    connect_latency_raw: b[9], connect_latency_ms_info: (b[9] + 1) * 20,
+  };
+  if (len >= 10) { cfg.lcd_tint_raw = b[10]; cfg.lcd_tint_seconds_info = Math.round(b[10] * 5) / 100; }
+  if (len >= 11) cfg.hw_ver_raw = b[11];
+  if (len >= 12) cfg.av_meas_mem_raw = b[12];
+  if (ver < CFG_NEW_LAYOUT_VER) {
+    const st = to > 127 ? to - 256 : to, sh = ho > 127 ? ho - 256 : ho;
+    Object.assign(cfg, { temp_offset_raw: st, temp_offset_c_info: st / 10, humi_offset_raw: sh, humi_offset_pct_info: sh / 10 });
+  } else {
+    Object.assign(cfg, { temp_offset_raw: to, adv_interval_delay_raw_info: to & 15, date_display_ddmm_info: !!(to & 64),
+      day_of_week_flag_info: !!(to & 128), humi_offset_raw: ho, event_adv_cnt_info: ho });
+  }
+  return cfg;
+}
+const FLG_BITS = [["advertising_type", 3, true], ["comfort_smiley", 4], ["hardware_specific_bit3", 8], ["temperature_unit_fahrenheit", 16],
+  ["hardware_specific_bit5", 32], ["tx_measures_when_connected", 64], ["low_power_measurements", 128]];
+const FLG2_BITS = [["smiley_or_screen_type", 7, true], ["adv_crypto", 8], ["adv_flags", 16], ["bt5_phy", 32], ["long_range", 64], ["screen_off", 128]];
+function byteFromBits(obj, map) {
+  if (!obj.bits) return obj.raw & 255;
+  let v = 0; for (const [k, m, multi] of map) { if (multi) v |= (parseInt(obj.bits[k]) || 0) & m; else if (obj.bits[k]) v |= m; } return v;
+}
+function encodeCfg(c) {
+  const p = [byteFromBits(c.flg, FLG_BITS), byteFromBits(c.flg2, FLG2_BITS), c.temp_offset_raw & 255, c.humi_offset_raw & 255,
+    c.advertising_interval_raw & 255, c.measure_interval_raw & 255, c.rf_tx_power_raw & 255, c.connect_latency_raw & 255];
+  if (c.lcd_tint_raw != null) {
+    p.push(c.lcd_tint_raw & 255);
+    if (c.hw_ver_raw != null) { p.push(c.hw_ver_raw & 255); p.push((c.av_meas_mem_raw || 0) & 255); }
+  }
+  return p;
+}
+const FIELD_HELP = {
+  advertising_type: "0 = ATC1441, 1 = Custom (pvvx), 2 = Mi, 3 = BTHome",
+  advertising_interval_raw: v => `× 62.5 ms = ${(v * 62.5).toFixed(0)} ms`,
+  measure_interval_raw: "measurements every N advertising intervals",
+  connect_latency_raw: v => `(N+1) × 20 ms = ${(v + 1) * 20} ms`,
+  lcd_tint_raw: v => `× 0.05 s = ${(v * 0.05).toFixed(2)} s`,
+  av_meas_mem_raw: "log one sample every N measurements",
+};
+function renderCfg() {
+  const f = $("cfgForm"); f.innerHTML = "";
+  $("btnSetCfg").disabled = !chr || busy || !currentCfg; $("btnCfgExport").disabled = !currentCfg;
+  if (!currentCfg) return;
+  const c = currentCfg;
+  const add = (label, input, help) => {
+    const l = document.createElement("div"); l.textContent = label; f.append(l, input);
+    if (help) { const h = document.createElement("div"); h.className = "muted info"; h.textContent = help; f.append(h); }
+  };
+  const num = (obj, key, min, max, path) => {
+    const i = document.createElement("input"); i.type = "number"; i.min = min; i.max = max; i.value = obj[key];
+    i.oninput = () => { obj[key] = parseInt(i.value) || 0; const h = FIELD_HELP[key]; if (typeof h === "function" && i.nextSibling) i.nextSibling.textContent = h(obj[key]); };
+    return i;
+  };
+  const chk = (obj, key) => { const i = document.createElement("input"); i.type = "checkbox"; i.checked = !!obj[key]; i.onchange = () => obj[key] = i.checked; return i; };
+  const help = (k, v) => { const h = FIELD_HELP[k]; return typeof h === "function" ? h(v) : h; };
+  add(`Firmware protocol ${c.device_info.protocol_version_str}`, document.createElement("span"));
+  const sel = document.createElement("select");
+  ["ATC1441", "Custom (pvvx)", "Mi", "BTHome"].forEach((n, i) => sel.add(new Option(`${i}: ${n}`, i)));
+  sel.value = c.flg.bits.advertising_type; sel.onchange = () => c.flg.bits.advertising_type = +sel.value;
+  add("Advertising type", sel);
+  for (const [k] of FLG_BITS.slice(1)) add(k.replace(/_/g, " "), chk(c.flg.bits, k));
+  add("smiley / screen type", num(c.flg2.bits, "smiley_or_screen_type", 0, 7));
+  for (const [k] of FLG2_BITS.slice(1)) add(k.replace(/_/g, " "), chk(c.flg2.bits, k));
+  const raws = ["advertising_interval_raw", "measure_interval_raw", "rf_tx_power_raw", "connect_latency_raw", "lcd_tint_raw", "hw_ver_raw", "av_meas_mem_raw"];
+  const signed = c.device_info.protocol_version_raw < CFG_NEW_LAYOUT_VER;
+  raws.push("temp_offset_raw", "humi_offset_raw");
+  for (const k of raws) {
+    if (c[k] == null) continue;
+    const lo = signed && /offset/.test(k) ? -128 : 0, hi = signed && /offset/.test(k) ? 127 : 255;
+    let h = help(k, c[k]);
+    if (k === "temp_offset_raw") h = signed ? "× 0.1 °C" : "repurposed on this firmware (adv delay / date flags)";
+    if (k === "humi_offset_raw") h = signed ? "× 0.1 %" : "repurposed on this firmware (event adv count)";
+    add(k.replace(/_raw$/, "").replace(/_/g, " "), num(c, k, lo, hi), h);
+  }
+}
+async function getCfg() {
+  const r = await request([0x55], b => b[0] === 0x55 && b.length - 1 >= 9);
+  log(r ? "Config read." : "No config reply (idle timeout).");
+}
+async function setCfg() {
+  const payload = encodeCfg(currentCfg);
+  if (!confirm(`Write ${payload.length} config bytes to ${device.name}?`)) return;
+  const r = await request([0x55, ...payload], b => b[0] === 0x55 && b.length - 1 >= 9);
+  log(r ? "Device confirmed the new config." : "No reply (idle timeout); re-read to check.");
+}
+
+// ===== CSV export / import =====
+const fmtNum = (v, loc) => { const s = v.toFixed(2); return loc === "hu" ? s.replace(".", ",") : s; };
+function toCsv(rows, loc) { // rows: [tsStr, offStr, t, h, v]
+  const d = loc === "hu" ? ";" : ",";
+  return ["timestamp", "utc_offset", "temperature_c", "humidity_pct", "battery_mv"].join(d) + "\r\n" +
+    rows.map(r => [r[0], r[1], fmtNum(r[2], loc), fmtNum(r[3], loc), r[4]].join(d)).join("\r\n") + "\r\n";
+}
+const safe = s => s.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "device";
+async function saveFile(name, text) {
+  const blob = new Blob([text], { type: "text/csv" });
+  try {
+    const file = new File([blob], name, { type: blob.type });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); return; }
+  } catch (e) { if (e.name === "AbortError") return; }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 15000);
+}
+async function exportAll() {
+  const dev = $("histDev").value; if (!dev) return;
+  const s = await loadHistory(dev);
+  await saveFile(`history_${dev.replace(/[^A-Za-z0-9._-]+/g, "_")}_all.csv`,
+    toCsv(s.map(([t, tm, hm, v]) => [faceValue(t), "+00:00", tm, hm, v]), prefs.csvLocale));
+}
+async function exportRaw() {
+  if (!lastRaw) return;
+  await saveFile(`history_${lastRaw.dev.replace(/[^A-Za-z0-9._-]+/g, "_")}_raw_${stamp()}.csv`,
+    toCsv(lastRaw.rows.map(([e, t, h, v]) => [faceValue(e), lastRaw.offset, t, h, v]), prefs.csvLocale));
+}
+function parseCsv(text) {
+  const lines = text.split(/\r?\n/).filter(Boolean); if (!lines.length) return [];
+  const hu = lines[0].includes(";"), d = hu ? ";" : ",";
+  const hdr = lines[0].split(d).map(h => h.trim().toLowerCase());
+  const ix = (...n) => { for (const x of n) { const i = hdr.indexOf(x); if (i >= 0) return i; } return -1; };
+  const iT = Math.max(0, ix("timestamp", "utc_timestamp", "local_timestamp")), iO = ix("utc_offset");
+  const iTm = ix("temperature_c"), iH = ix("humidity_pct"), iV = ix("battery_mv");
+  const out = [];
+  for (const ln of lines.slice(1)) {
+    const c = ln.split(d); const num = s => parseFloat(hu ? String(s).replace(",", ".") : s);
+    const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(c[iT] || ""); if (!m) continue;
+    const face = Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]) / 1000;
+    const t = face - parseOffset(iO >= 0 ? c[iO] : "+00:00");
+    const tm = num(c[iTm < 0 ? 1 : iTm]), hm = num(c[iH < 0 ? 2 : iH]), v = parseInt(c[iV < 0 ? 3 : iV]);
+    if (isFinite(tm) && isFinite(hm)) out.push([t, tm, hm, isFinite(v) ? v : 0]);
+  }
+  return out;
+}
+async function importFiles(files) {
+  let last = null;
+  for (const f of files) {
+    // history_<name>[__<room>]_(raw_YYYYMMDD_HHMMSS|all|merged|...).csv
+    const m = /^history_(.+?)_(raw_\d{8}_\d{6}|all|merged|daily_\d+|monthly_\d+|yearly_\d+)\.csv$/i.exec(f.name);
+    let dev = m ? m[1] : prompt(`Device name for ${f.name}?`, f.name.replace(/\.csv$/i, ""));
+    if (!dev) continue;
+    if (!dev.includes("__")) { const r = rooms[dev]; if (r) dev = `${dev}__${r}`; }
+    const rows = parseCsv(await f.text());
+    const total = await mergeInto(dev, rows);
+    log(`Imported ${rows.length} rows from ${f.name} into ${dev} (${total} total).`);
+    last = dev;
+  }
+  if (last) await refreshDeviceList(last);
+}
+
+// ===== Chart =====
+let histData = [];
+async function refreshDeviceList(select) {
+  const devs = (await listDevices()).sort();
+  const sel = $("histDev"), keep = select || sel.value || lsGet("histDev", "");
+  sel.innerHTML = "";
+  if (!devs.length) sel.add(new Option("(no data yet)", ""));
+  for (const d of devs) sel.add(new Option(d.replace("__", " · "), d));
+  if (devs.includes(keep)) sel.value = keep;
+  await loadChart();
+}
+async function loadChart() {
+  const dev = $("histDev").value; lsSet("histDev", dev);
+  histData = dev ? await loadHistory(dev) : [];
+  $("histCount").textContent = histData.length ? `${histData.length} samples · ${localStr(histData[0][0])} → ${localStr(histData[histData.length - 1][0])}` : "";
+  drawChart();
+}
+let plotted = null;
+function drawChart() {
+  const svg = $("chart"); const W = svg.clientWidth || 600, H = 260;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.innerHTML = "";
+  const css = getComputedStyle(document.documentElement);
+  const col = n => css.getPropertyValue(n).trim();
+  let data = histData;
+  if (prefs.range && data.length) { const from = data[data.length - 1][0] - prefs.range * 3600; data = data.filter(s => s[0] >= from); }
+  $("stats").innerHTML = ""; $("readout").textContent = "";
+  if (data.length < 2) {
+    svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" fill="${col("--muted")}" font-size="14">No data in this range</text>`;
+    plotted = null; return;
+  }
+  // Downsample to ~1 point per 2px (bucket averages)
+  const buckets = Math.max(50, Math.floor(W / 2));
+  const t0 = data[0][0], t1 = data[data.length - 1][0], span = Math.max(1, t1 - t0);
+  let pts = data;
+  if (data.length > buckets) {
+    const acc = new Map();
+    for (const s of data) { const k = Math.floor((s[0] - t0) / span * (buckets - 1));
+      const a = acc.get(k) || [0, 0, 0, 0]; a[0] += s[0]; a[1] += s[1]; a[2] += s[2]; a[3]++; acc.set(k, a); }
+    pts = [...acc.values()].map(a => [a[0] / a[3], a[1] / a[3], a[2] / a[3]]);
+  }
+  const L = 40, R = 40, T = 10, B = 26, pw = W - L - R, ph = H - T - B;
+  const ext = i => { let lo = Infinity, hi = -Infinity; for (const p of pts) { lo = Math.min(lo, p[i]); hi = Math.max(hi, p[i]); }
+    const pad = Math.max(0.5, (hi - lo) * 0.08); return [Math.floor(lo - pad), Math.ceil(hi + pad)]; };
+  const [tLo, tHi] = ext(1), [hLo, hHi] = ext(2);
+  const x = t => L + (t - t0) / span * pw, yT = v => T + (1 - (v - tLo) / (tHi - tLo)) * ph, yH = v => T + (1 - (v - hLo) / (hHi - hLo)) * ph;
+  const ns = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs, text) => { const e = document.createElementNS(ns, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; svg.appendChild(e); return e; };
+  // grid + axes
+  for (let i = 0; i <= 4; i++) {
+    const y = T + ph * i / 4;
+    el("line", { x1: L, x2: W - R, y1: y, y2: y, stroke: col("--line"), "stroke-width": 1 });
+    el("text", { x: L - 5, y: y + 4, "text-anchor": "end", "font-size": 11, fill: col("--temp") }, (tHi - (tHi - tLo) * i / 4).toFixed(1));
+    el("text", { x: W - R + 5, y: y + 4, "font-size": 11, fill: col("--hum") }, Math.round(hHi - (hHi - hLo) * i / 4));
+  }
+  const nT = Math.max(2, Math.floor(pw / 90));
+  for (let i = 0; i <= nT; i++) {
+    const t = t0 + span * i / nT, d = new Date(t * 1000), p = n => String(n).padStart(2, "0");
+    const lab = span > 3 * 86400 ? `${p(d.getMonth() + 1)}-${p(d.getDate())}` : `${p(d.getHours())}:${p(d.getMinutes())}`;
+    el("text", { x: x(t), y: H - 8, "text-anchor": i === 0 ? "start" : i === nT ? "end" : "middle", "font-size": 11, fill: col("--muted") }, lab);
+  }
+  // break lines on gaps > 6x median spacing
+  const gaps = []; for (let i = 1; i < pts.length; i++) gaps.push(pts[i][0] - pts[i - 1][0]);
+  const med = gaps.slice().sort((a, b) => a - b)[gaps.length >> 1] || 1;
+  const path = fy => pts.map((p, i) => `${i && p[0] - pts[i - 1][0] <= med * 6 ? "L" : "M"}${x(p[0]).toFixed(1)},${fy(p).toFixed(1)}`).join("");
+  el("path", { d: path(p => yH(p[2])), fill: "none", stroke: col("--hum"), "stroke-width": 1.6, "stroke-linejoin": "round" });
+  el("path", { d: path(p => yT(p[1])), fill: "none", stroke: col("--temp"), "stroke-width": 2, "stroke-linejoin": "round" });
+  const cursor = el("line", { x1: 0, x2: 0, y1: T, y2: T + ph, stroke: col("--muted"), "stroke-dasharray": "3 3", visibility: "hidden" });
+  plotted = { pts, x, cursor, L, pw };
+  // stats on raw data in range
+  let mn = data[0], mx = data[0], sum = 0, hs = 0;
+  for (const s of data) { if (s[1] < mn[1]) mn = s; if (s[1] > mx[1]) mx = s; sum += s[1]; hs += s[2]; }
+  const last = data[data.length - 1];
+  $("stats").innerHTML = [
+    ["Latest", `${last[1].toFixed(2)}° · ${last[2].toFixed(1)}%`],
+    ["Min temp", `${mn[1].toFixed(2)}° <span class=muted>${localStr(mn[0])}</span>`],
+    ["Max temp", `${mx[1].toFixed(2)}° <span class=muted>${localStr(mx[0])}</span>`],
+    ["Average", `${(sum / data.length).toFixed(2)}° · ${(hs / data.length).toFixed(1)}%`],
+    ["Battery", `${(last[3] / 1000).toFixed(2)} V`],
+  ].map(([k, v]) => `<div><div class="muted">${k}</div>${v}</div>`).join("");
+}
+function onChartPointer(ev) {
+  if (!plotted) return;
+  const svg = $("chart"), r = svg.getBoundingClientRect();
+  const px = (ev.clientX - r.left) * (svg.viewBox.baseVal.width / r.width);
+  const { pts, x, cursor } = plotted;
+  let best = pts[0]; for (const p of pts) if (Math.abs(x(p[0]) - px) < Math.abs(x(best[0]) - px)) best = p;
+  cursor.setAttribute("x1", x(best[0])); cursor.setAttribute("x2", x(best[0])); cursor.setAttribute("visibility", "visible");
+  $("readout").textContent = `${localStr(best[0])}  ·  ${best[1].toFixed(2)} °C  ·  ${best[2].toFixed(1)} %`;
+}
+
+// ===== Wire up =====
+(async function init() {
+  if (!navigator.bluetooth) { $("noBle").classList.remove("hidden"); $("btnConnect").disabled = true; }
+  $("timeMode").value = prefs.timeMode; $("csvLocale").value = prefs.csvLocale; $("idleTimeout").value = prefs.idleTimeout;
+  $("timeMode").onchange = e => { prefs.timeMode = e.target.value; savePrefs(); };
+  $("csvLocale").onchange = e => { prefs.csvLocale = e.target.value; savePrefs(); };
+  $("idleTimeout").onchange = e => { prefs.idleTimeout = Math.max(5, parseInt(e.target.value) || 30); savePrefs(); };
+  document.querySelectorAll("#rangeBtns .seg").forEach(b => {
+    b.classList.toggle("on", +b.dataset.h === prefs.range);
+    b.onclick = () => { prefs.range = +b.dataset.h; savePrefs(); document.querySelectorAll("#rangeBtns .seg").forEach(x => x.classList.toggle("on", x === b)); drawChart(); };
+  });
+  $("btnConnect").onclick = () => withBusy(connect);
+  $("btnDisconnect").onclick = disconnect;
+  $("btnDump").onclick = () => withBusy(dump);
+  $("btnTime").onclick = () => withBusy(setTime);
+  $("btnDeleteLog").onclick = () => withBusy(deleteLog);
+  $("btnGetCfg").onclick = () => withBusy(getCfg);
+  $("btnSetCfg").onclick = () => withBusy(setCfg);
+  $("btnCfgExport").onclick = () => {
+    const name = `config_${devKey().replace("__", "_").replace(/[^A-Za-z0-9._-]+/g, "_")}.json`;
+    const blob = new Blob([JSON.stringify(currentCfg, null, 2)], { type: "application/json" });
+    const file = new File([blob], name, { type: blob.type });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) navigator.share({ files: [file] }).catch(() => {});
+    else { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click(); }
+  };
+  $("btnCfgImport").onclick = () => $("fileCfg").click();
+  $("fileCfg").onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try { const c = JSON.parse(await f.text()); encodeCfg(c); currentCfg = c; renderCfg(); $("cfgDetails").open = true; log(`Loaded ${f.name}; review, then Write config.`); }
+    catch (err) { log("Invalid config JSON: " + err.message); }
+    e.target.value = "";
+  };
+  $("roomName").onchange = e => { if (!device) return; rooms[device.name] = e.target.value.trim(); lsSet("rooms", rooms); };
+  $("histDev").onchange = loadChart;
+  $("btnExportAll").onclick = exportAll;
+  $("btnExportRaw").onclick = exportRaw;
+  $("btnImport").onclick = () => $("fileImport").click();
+  $("fileImport").onchange = async e => { await importFiles([...e.target.files]); e.target.value = ""; };
+  $("btnForget").onclick = async () => {
+    const d = $("histDev").value; if (!d) return;
+    if (confirm(`Delete all stored history for ${d} from this phone? (The device itself is not affected.)`)) { await deleteHistory(d); await refreshDeviceList(); }
+  };
+  $("chart").addEventListener("pointermove", onChartPointer);
+  $("chart").addEventListener("pointerdown", onChartPointer);
+  window.addEventListener("resize", () => drawChart());
+  if (window.matchMedia) matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", drawChart);
+  idb = await openDB();
+  if (!idb) log("IndexedDB unavailable - history is kept only until the page is closed.");
+  await refreshDeviceList();
+  setButtons(false);
+})();
+</script>
+</body>
+</html>
