@@ -67,6 +67,7 @@ details summary { cursor: pointer; font-weight: 600; }
 #log { font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; max-height: 260px; overflow: auto;
   background: var(--input); border-radius: 8px; padding: 8px; margin-top: 8px; }
 .hidden { display: none !important; }
+h3.sub { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 6px; }
 .tabs { position: sticky; top: 0; z-index: 5; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
   background: var(--bg); padding: 6px 0 10px; }
 .tabs button { padding: 8px 4px; font-size: 14px; border-radius: 9px; }
@@ -145,30 +146,49 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
     <div id="knownList" style="margin-top:10px"></div>
     <p class="muted">“Picker ID” is the code Bluefy shows in its device list for sensors whose name it doesn't know. It's learned here when you scan or connect.</p>
 
-    <div class="only-single row"><button class="seg" onclick="showTab('all')">Batch jobs for all sensors →</button></div>
+    <div class="only-single row"><button class="seg" onclick="showTab('all')">Batch operations for all sensors →</button></div>
     <div class="only-all">
-    <h2 style="margin-top:14px">All sensors at once</h2>
-    <p class="muted">Ticked sensors are handled one after another: connect, do the job, disconnect, next. A sensor must be <b>available</b>: sensors used here before become available by themselves when they're in range; a new one has to be chosen once with “Add sensors…”.</p>
-    <div class="row">
-      <button id="btnAddSensors">Add sensors…</button>
-      <button id="btnSelAll" class="seg">Tick all</button>
-      <button id="btnSelNone" class="seg">Untick all</button>
-      <span id="readyMsg" class="muted"></span>
+      <p class="muted">A sensor must be <b>available</b> to be used: sensors used here before become available by themselves when they're in range; a new one has to be chosen once with “Add sensors…”.</p>
+      <div class="row">
+        <button id="btnAddSensors">Add sensors…</button>
+        <button id="btnSelAll" class="seg">Tick all</button>
+        <button id="btnSelNone" class="seg">Untick all</button>
+        <span id="readyMsg" class="muted"></span>
+      </div>
     </div>
+  </section>
+
+  <!-- Batch operations -->
+  <section class="card" data-tab="all">
+    <h2>Batch operations</h2>
+    <p class="muted">Ticked sensors are handled one after another: connect, do the job, disconnect, next.</p>
+    <h3 class="sub">History</h3>
     <div class="row">
       <button id="bDump" class="primary">Download all</button>
       <button id="bDumpSyncErase" class="danger">Download, set clock &amp; erase…</button>
+    </div>
+    <p class="muted">“Download all” uses the History download options below (samples, set clock, erase).</p>
+    <h3 class="sub">Clocks</h3>
+    <div class="row">
       <button id="bGetTime">Read clocks</button>
       <button id="bSetTime">Set clocks</button>
-      <button id="bGetCfg">Read configs</button>
-      <button id="bSetCfg">Write config…</button>
-      <button id="bSendCfg">Send configs…</button>
-      <button id="bStop" class="danger hidden">Stop</button>
     </div>
-    <p class="muted">“Download all” uses the options in the History download section (samples, sync clock, delete). “Write config” copies the settings in the Device configuration editor to every ticked sensor, keeping each sensor's own hardware‑specific bits and calibration offsets.</p>
+    <h3 class="sub">Configuration</h3>
+    <div class="row">
+      <button id="bGetCfg">Read configs</button>
+      <button id="bSendCfg">Send configs…</button>
+    </div>
+    <div class="row">
+      <button id="bLoadCfg">Load config JSON…</button>
+      <button id="bClearCfg" class="seg hidden">Forget loaded</button>
+      <button id="bSetCfg">Write config…</button>
+      <input type="file" id="fileBatchCfg" accept=".json,application/json" multiple class="hidden">
+    </div>
+    <p class="muted" id="batchCfgSrc"></p>
+    <p class="muted">“Write config” keeps each sensor's own hardware‑specific bits and calibration offsets. Files named like <code>config_ATC_xxxxxx_….json</code> (as your Windows scripts write them) go to that sensor only; any other file is used for all ticked sensors without their own file.</p>
+    <div class="row"><button id="bStop" class="danger hidden">Stop</button></div>
     <div class="progress" id="batchProg"><div></div></div>
     <div id="batchOut" style="margin-top:8px"></div>
-    </div>
   </section>
 
   <!-- Actions -->
@@ -269,6 +289,19 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
     </details>
   </section>
 
+  <!-- Sensor list storage -->
+  <section class="card" data-tab="settings">
+    <h2>Sensor list</h2>
+    <p class="muted">Your sensors and room names are saved only in this browser on this phone - not in the web page. Load them from the <code>devices.json</code> your Windows scripts use (name, description = room, address), or let them be added as you connect.</p>
+    <div class="row">
+      <button id="btnSensorsImport" class="primary">Load sensors from JSON…</button>
+      <button id="btnSensorsExport">Save sensors as JSON…</button>
+      <button id="btnSensorsClear" class="danger">Clear list…</button>
+      <input type="file" id="fileSensors" accept=".json,application/json" class="hidden">
+    </div>
+    <div class="row"><span id="sensorsMsg" class="muted"></span></div>
+  </section>
+
   <!-- Settings -->
   <section class="card" data-tab="settings">
     <details open>
@@ -312,7 +345,6 @@ const SVC = uuid16(0x1f10), CHR = uuid16(0x1f1f);
 const ES_SVC = uuid16(0x181a), BATT_SVC = uuid16(0x180f);
 const NAME_PREFIXES = ["ATC_", "LYWSD", "MHO", "CGG", "MJWSD"];
 const CFG_NEW_LAYOUT_VER = 0x47;
-const DEFAULT_ROOMS = { ATC_E3734E: "Office", ATC_7F605A: "Kitchen", ATC_14B6C2: "Bedroom", ATC_B3FB5E: "Hallway", ATC_A7FC74: "Cellar" };
 
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -321,7 +353,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 function lsGet(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } }
 function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 
-let rooms = Object.assign({}, DEFAULT_ROOMS, lsGet("rooms", {}));
+// Sensors and their room names live only in this browser's storage (import a devices.json in Settings).
+let rooms = lsGet("rooms", {});
 const prefs = Object.assign({ timeMode: "utc", csvLocale: "en", idleTimeout: 30, range: 168 }, lsGet("prefs", {}));
 // v10: UTC became the default (matching the Windows scripts' --time-mode utc). Older versions saved
 // "local" as the default whenever any setting was stored, so switch once; later choices are kept.
@@ -375,7 +408,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 23;
+const APP_VERSION = 25;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -544,7 +577,7 @@ const macStr = bytes => [...bytes].map(x => x.toString(16).padStart(2, "0").toUp
 function knownNames() {
   // Sorted by what's shown: room name first (sensors without a room after them, by their ATC_ name).
   const label = n => rooms[n] ? `0${rooms[n]}` : `1${n}`;
-  return [...new Set([...Object.keys(DEFAULT_ROOMS), ...Object.keys(rooms), ...Object.keys(known)])].filter(n => /^ATC_/i.test(n))
+  return [...new Set([...Object.keys(rooms), ...Object.keys(known)])].filter(n => /^ATC_/i.test(n))
     .sort((a, b) => label(a).localeCompare(label(b), undefined, { sensitivity: "base" }));
 }
 function rememberSensor(name, data) {
@@ -585,10 +618,52 @@ async function wakeRemembered(name, d, timeoutMs) {
   return ok;
 }
 
-const batchSel = new Set(lsGet("batchSel", null) || Object.keys(DEFAULT_ROOMS));
+const batchSel = new Set(lsGet("batchSel", null) || knownNames());
 const saveSel = () => lsSet("batchSel", [...batchSel]);
+// ===== Sensor list import / export (devices.json format of the Windows scripts) =====
+function sensorsMsg(t) { $("sensorsMsg").textContent = t; }
+function sensorsCountText() { const n = knownNames().length; return `${n} sensor${n === 1 ? "" : "s"} saved in this browser.`; }
+async function importSensors(file) {
+  let data;
+  try { data = JSON.parse(await file.text()); } catch (e) { sensorsMsg(`${file.name} isn't valid JSON: ${describeErr(e)}`); return; }
+  const list = Array.isArray(data) ? data : data && Array.isArray(data.devices) ? data.devices : null;
+  if (!list) { sensorsMsg(`${file.name}: expected a list of {"name", "description", "address"} entries.`); return; }
+  let added = 0, updated = 0, skipped = 0;
+  for (const d of list) {
+    const mac = typeof d.address === "string" && /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test(d.address) ? d.address.toUpperCase() : null;
+    let name = typeof d.name === "string" ? d.name.trim() : "";
+    if (!/^ATC_[0-9A-F]{6}$/i.test(name)) name = mac ? nameFromMac(mac) : "";   // custom names: identify by address
+    if (!name) { skipped++; continue; }
+    name = "ATC_" + name.slice(4).toUpperCase();
+    const isNew = !knownNames().includes(name);
+    known[name] = Object.assign(known[name] || {}, mac ? { mac } : {});
+    if (typeof d.description === "string" && d.description.trim()) rooms[name] = d.description.trim();
+    batchSel.add(name);
+    isNew ? added++ : updated++;
+  }
+  saveKnown(); lsSet("rooms", rooms); saveSel();
+  log(`Imported sensors from ${file.name}: ${added} added, ${updated} updated, ${skipped} skipped`);
+  sensorsMsg(`${file.name}: ${added} added, ${updated} updated${skipped ? `, ${skipped} skipped (no ATC_ name or address)` : ""}. ${sensorsCountText()}`);
+  renderKnown(); refreshDeviceList();
+}
+function exportSensors() {
+  const list = knownNames().map(n => ({ name: n, description: rooms[n] || "", address: (known[n] && known[n].mac) || macFromName(n) || "" }));
+  if (!list.length) { sensorsMsg("No sensors to save yet."); return; }
+  shareFiles([{ name: "devices.json", rows: list.length, text: JSON.stringify(list, null, 2) + "\n", type: "application/json" }], `Thermometer sensor list (${list.length})`);
+}
+function clearSensors() {
+  if (!confirm("Remove all sensors and room names from this browser? Downloaded history stays. You can load them again from a devices.json.")) return;
+  rooms = {}; known = {}; batchSel.clear();
+  lsSet("rooms", rooms); saveKnown(); saveSel();
+  log("Sensor list cleared");
+  sensorsMsg("Sensor list cleared."); renderKnown();
+}
+
 function renderKnown() {
   const box = $("knownList"); box.innerHTML = "";
+  if (!knownNames().length) {
+    box.innerHTML = `<p class="muted">No sensors yet. Connect to one with “Connect…”, or load your <code>devices.json</code> in the Settings tab.</p>`;
+  }
   let ready = 0, ticked = 0;
   for (const name of knownNames()) {
     const k = known[name] || {}, room = rooms[name] || "";
@@ -1003,6 +1078,39 @@ async function resetBtName() {
   await setBtName(null);
 }
 
+// ===== Batch config files ("Load config JSON…") =====
+// Kept in memory for this visit. batchCfgPer: sensor name -> {cfg, file}; batchCfgShared: {cfg, file}.
+let batchCfgShared = null; const batchCfgPer = {};
+// Bring any accepted config JSON (with or without the "bits" breakdown) into the full decoded shape.
+function normalizeCfg(c) {
+  const ver = (c.device_info && c.device_info.protocol_version_raw) || 0x58;
+  const out = decodeCfg(new Uint8Array([0x55, ver, ...encodeCfg(c)]));
+  return out;
+}
+async function loadBatchCfgFiles(files) {
+  const msgs = [];
+  for (const f of files) {
+    try {
+      const cfg = normalizeCfg(JSON.parse(await f.text()));
+      const m = /config_(ATC_[0-9A-F]{6})/i.exec(f.name);
+      const sensor = m ? "ATC_" + m[1].slice(4).toUpperCase() : null;
+      if (sensor) { batchCfgPer[sensor] = { cfg, file: f.name }; msgs.push(`${f.name} → ${sensorLabel(sensor)}`); }
+      else { batchCfgShared = { cfg, file: f.name }; msgs.push(`${f.name} → all others`); }
+      log(`Loaded batch config ${f.name}${sensor ? " for " + sensor : " (shared)"}: ${cfgSummary(cfg)}`);
+    } catch (e) { msgs.push(`${f.name}: not a valid config (${describeErr(e)})`); log(`Batch config ${f.name} rejected: ${errDetail(e)}`, "warn"); }
+  }
+  renderBatchCfgSrc(msgs.join(" · "));
+}
+function renderBatchCfgSrc(extra) {
+  const per = Object.keys(batchCfgPer);
+  const parts = [];
+  if (per.length) parts.push(`Own files for: ${per.map(sensorLabel).join(", ")}`);
+  if (batchCfgShared) parts.push(`Shared: ${batchCfgShared.file} (${cfgSummary(batchCfgShared.cfg)})`);
+  if (!parts.length) parts.push(currentCfg ? "No files loaded - “Write config” will use the Sensor tab's config editor." : "No config loaded yet.");
+  $("batchCfgSrc").textContent = (extra ? extra + ". " : "") + parts.join(" · ");
+  $("bClearCfg").classList.toggle("hidden", !per.length && !batchCfgShared);
+}
+
 // ===== Batch ("All sensors") =====
 // Handles ticked sensors one at a time: connect → job → disconnect → next. Web Bluetooth can only
 // reach sensors the user picked or scanned since the page loaded ("ready" = in `reachable`).
@@ -1134,11 +1242,21 @@ const BATCH = {
     $("bSendCfg").disabled = !Object.values(known).some(k => k.cfg);
   },
   async setCfg() {
-    if (!currentCfg) { alert("First load a config into the editor: connect to a sensor in the Sensor tab (or use Load JSON there), adjust it, then come back."); return; }
-    const tpl = JSON.parse(JSON.stringify(currentCfg));
-    if (!confirm(`Write these settings to ${batchTargets().length} sensor(s)?\n\n${cfgSummary(tpl)}\n\nEach sensor keeps its own hardware-specific bits and calibration offsets.`)) return;
-    log(`Batch config template: ${JSON.stringify(tpl)}`);
+    // Which config each ticked sensor gets: its own loaded file, else the shared loaded file, else the editor.
+    const editorTpl = currentCfg ? JSON.parse(JSON.stringify(currentCfg)) : null;
+    const plan = batchTargets().map(n => {
+      const src = batchCfgPer[n] ? ["own file", batchCfgPer[n]] : batchCfgShared ? ["shared file", batchCfgShared] : editorTpl ? ["editor", { cfg: editorTpl, file: "Sensor tab editor" }] : null;
+      return { n, src };
+    });
+    const missing = plan.filter(p => !p.src).map(p => sensorLabel(p.n));
+    if (missing.length === plan.length) { alert("No config to write. Tap “Load config JSON…” and choose a file, or prepare one in the Sensor tab's config editor."); return; }
+    const lines = plan.map(p => `• ${sensorLabel(p.n)}: ${p.src ? `${p.src[1].file} - ${cfgSummary(p.src[1].cfg)}` : "nothing to write - skipped"}`);
+    if (!confirm(`Write config to ${plan.length - missing.length} sensor(s)?\n\n${lines.join("\n")}\n\nEach sensor keeps its own hardware-specific bits and calibration offsets.`)) return;
+    for (const p of plan) if (p.src) log(`Batch config for ${p.n} from ${p.src[1].file}: ${JSON.stringify(p.src[1].cfg)}`);
+    const tplFor = Object.fromEntries(plan.map(p => [p.n, p.src && p.src[1].cfg]));
     await runBatch("Write config", async name => {
+      const tpl = tplFor[name];
+      if (!tpl) return { ok: false, text: "no config for this sensor - skipped" };
       const own = await readCfgNow();
       if (!own) return { ok: false, text: "couldn't read its current config" };
       const merged = mergeCfg(tpl, own), payload = encodeCfg(merged), before = encodeCfg(own);
@@ -1715,6 +1833,15 @@ function updateStatusBar() {
   $("bGetCfg").onclick = () => withBusy(BATCH.getCfg);
   $("bSetCfg").onclick = () => withBusy(BATCH.setCfg);
   $("bSendCfg").onclick = BATCH.sendCfg;
+  $("btnSensorsImport").onclick = () => $("fileSensors").click();
+  $("fileSensors").onchange = async e => { const f = e.target.files[0]; if (f) await importSensors(f); e.target.value = ""; };
+  $("btnSensorsExport").onclick = exportSensors;
+  $("btnSensorsClear").onclick = clearSensors;
+  sensorsMsg(sensorsCountText());
+  $("bLoadCfg").onclick = () => $("fileBatchCfg").click();
+  $("fileBatchCfg").onchange = async e => { await loadBatchCfgFiles([...e.target.files]); e.target.value = ""; };
+  $("bClearCfg").onclick = () => { batchCfgShared = null; for (const k in batchCfgPer) delete batchCfgPer[k]; renderBatchCfgSrc(); };
+  renderBatchCfgSrc();
   $("bSendCfg").disabled = !Object.values(known).some(k => k.cfg);
   $("bStop").onclick = () => { batchAbort = true; $("bStop").textContent = "Stopping after this sensor…"; setTimeout(() => $("bStop").textContent = "Stop", 4000); };
   if (navigator.bluetooth && navigator.bluetooth.addEventListener) navigator.bluetooth.addEventListener("advertisementreceived", onAdvertisement);
