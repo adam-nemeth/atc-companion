@@ -372,7 +372,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 17;
+const APP_VERSION = 18;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -594,7 +594,11 @@ function renderKnown() {
     left.innerHTML = `<label class="nm"><input type="checkbox"> <span></span></label><div class="vals"></div>`;
     const cb = left.querySelector("input"); cb.checked = batchSel.has(name);
     cb.onchange = () => { cb.checked ? batchSel.add(name) : batchSel.delete(name); saveSel(); renderKnown(); };
-    left.querySelector(".nm span").textContent = room ? `${room} · ${name}` : name;
+    const nameEl = left.querySelector(".nm span");
+    nameEl.textContent = room ? `${room} · ${name}` : name;
+    // Green = available, bold = the connected one.
+    nameEl.style.color = dev ? "var(--ok)" : "";
+    nameEl.style.fontWeight = isCur ? "700" : "400";
     left.querySelector(".vals").textContent = k.t != null
       ? `${k.t.toFixed(2)} °C · ${k.h.toFixed(1)} %${k.b != null ? ` · 🔋${k.b}%` : ""}${k.seen ? ` · ${ago(k.seen)}` : ""}` : "no live data yet";
     const btn = document.createElement("button");
