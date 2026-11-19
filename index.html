@@ -408,7 +408,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 27;
+const APP_VERSION = 28;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -575,10 +575,15 @@ function sensorFromBtName(btName) {
 }
 const macStr = bytes => [...bytes].map(x => x.toString(16).padStart(2, "0").toUpperCase()).join(":");
 function knownNames() {
-  // Sorted by what's shown: room name first (sensors without a room after them, by their ATC_ name).
-  const label = n => rooms[n] ? `0${rooms[n]}` : `1${n}`;
+  // Sorted by exactly the text shown in the list ("Room · Bluetooth name").
   return [...new Set([...Object.keys(rooms), ...Object.keys(known)])].filter(n => /^ATC_/i.test(n))
-    .sort((a, b) => label(a).localeCompare(label(b), undefined, { sensitivity: "base" }));
+    .sort((a, b) => byText(shownName(a), shownName(b)));
+}
+const byText = (a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+// What the lists show for a sensor: its room (if any) and its Bluetooth name.
+function shownName(n) {
+  const bt = (known[n] && known[n].btName) || n;
+  return rooms[n] ? `${rooms[n]} · ${bt}` : bt;
 }
 function rememberSensor(name, data) {
   known[name] = Object.assign(known[name] || {}, data); saveKnown(); scheduleKnownRender();
@@ -678,7 +683,7 @@ function renderKnown() {
     const nameEl = left.querySelector(".nm span");
     // Main line shows the Bluetooth name (what the picker shows); the fixed ATC_xxxxxx ID moves to the details.
     const btName = k.btName || name;
-    nameEl.textContent = room ? `${room} · ${btName}` : btName;
+    nameEl.textContent = shownName(name);
     // Green = available, bold = the connected one.
     nameEl.style.color = dev ? "var(--ok)" : "";
     nameEl.style.fontWeight = isCur ? "700" : "400";
@@ -1118,7 +1123,7 @@ function renderBatchCfgSrc(extra) {
 // reach sensors the user picked or scanned since the page loaded ("ready" = in `reachable`).
 let batchAbort = false;
 const batchTargets = () => knownNames().filter(n => batchSel.has(n));
-function sensorLabel(n) { return rooms[n] ? `${rooms[n]} · ${n}` : n; }
+function sensorLabel(n) { return shownName(n); }
 async function runBatch(label, fn) {
   const targets = batchTargets();
   if (!targets.length) return;
@@ -1551,7 +1556,9 @@ async function refreshDeviceList(select) {
   const sel = $("histDev"), keep = select || sel.value || lsGet("histDev", "");
   sel.innerHTML = "";
   if (!devs.length) sel.add(new Option("(no data yet)", ""));
-  for (const d of devs) sel.add(new Option(d.replace("__", " · "), d));
+  // Stored keys are "ATC_xxxxxx__Room"; show and sort them the same way as the sensor list.
+  const histLabel = d => { const id = d.split("__")[0]; return knownNames().includes(id) ? shownName(id) : d.replace("__", " · "); };
+  for (const d of devs.slice().sort((a, b) => byText(histLabel(a), histLabel(b)))) sel.add(new Option(histLabel(d), d));
   if (devs.includes(keep)) sel.value = keep;
   await loadChart();
 }
