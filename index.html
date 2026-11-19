@@ -75,6 +75,8 @@ body[data-tab] section[data-tab] { display: none; }
 body[data-tab="single"] section[data-tab~="single"], body[data-tab="all"] section[data-tab~="all"],
 body[data-tab="history"] section[data-tab~="history"], body[data-tab="settings"] section[data-tab~="settings"] { display: block; }
 body[data-tab="all"] .only-single { display: none !important; }
+body:not([data-tab="all"]) #knownList input[type=checkbox] { display: none; }
+body:not([data-tab="all"]) .only-single.row { display: flex; }
 body:not([data-tab="all"]) .only-all { display: none !important; }
 .ks { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); }
 .ks:first-child { border-top: 0; }
@@ -134,7 +136,7 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
   </section>
 
   <!-- Known sensors -->
-  <section class="card" data-tab="all">
+  <section class="card" data-tab="single all">
     <h2>Known sensors</h2>
     <div class="row">
       <button id="btnScan">Scan nearby (live values)</button>
@@ -143,6 +145,8 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
     <div id="knownList" style="margin-top:10px"></div>
     <p class="muted">“Picker ID” is the code Bluefy shows in its device list for sensors whose name it doesn't know. It's learned here when you scan or connect.</p>
 
+    <div class="only-single row"><button class="seg" onclick="showTab('all')">Batch jobs for all sensors →</button></div>
+    <div class="only-all">
     <h2 style="margin-top:14px">All sensors at once</h2>
     <p class="muted">Ticked sensors are handled one after another: connect, do the job, disconnect, next. A sensor must be <b>ready</b> first - the iPhone only lets this page reach sensors you've picked or scanned since the page was opened.</p>
     <div class="row">
@@ -163,6 +167,7 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
     <p class="muted">“Download all” uses the options in the History download section (samples, sync clock, delete). “Write config” copies the settings in the Device configuration editor to every ticked sensor, keeping each sensor's own hardware‑specific bits and calibration offsets.</p>
     <div class="progress" id="batchProg"><div></div></div>
     <div id="batchOut" style="margin-top:8px"></div>
+    </div>
   </section>
 
   <!-- Actions -->
@@ -367,7 +372,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 12;
+const APP_VERSION = 13;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -563,7 +568,7 @@ function renderKnown() {
     const btn = document.createElement("button");
     btn.textContent = isCur ? "Connected" : chr ? "Switch" : "Connect";
     btn.disabled = !dev || isCur || busy;
-    btn.onclick = () => withBusy(async () => { if (await connectDevice(dev, name)) showTab("single"); });
+    btn.onclick = () => withBusy(async () => { if (await connectDevice(dev, name)) { showTab("single"); window.scrollTo({ top: 0, behavior: "smooth" }); } });
     const meta = document.createElement("div"); meta.className = "meta";
     meta.textContent = (dev ? "✓ ready" : "not ready - use Add sensors… or Scan") +
       ` · MAC ${k.mac || macFromName(name) || "?"}` + (k.btName && k.btName !== name ? ` · Bluetooth name ${k.btName}` : "") + (k.id ? ` · Picker ID ${k.id.slice(0, 8)}…` : "");
