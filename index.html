@@ -84,9 +84,11 @@ details summary { cursor: pointer; font-weight: 600; }
     <h2>Device</h2>
     <div class="row">
       <button id="btnConnect" class="primary">Connect…</button>
+      <button id="btnConnectAll">Connect (all devices)…</button>
       <button id="btnDisconnect" disabled>Disconnect</button>
       <span id="connStatus" class="status">Not connected</span>
     </div>
+    <div class="row"><span id="connMsg" class="muted"></span></div>
     <div class="row">
       <label>Room <input id="roomName" placeholder="e.g. Kitchen" size="14" disabled></label>
       <span class="muted" id="devName"></span>
@@ -146,8 +148,12 @@ details summary { cursor: pointer; font-weight: 600; }
     <div id="readout" class="muted"></div>
     <div class="stats" id="stats"></div>
     <div class="row" style="margin-top:10px">
-      <button id="btnExportAll">Export CSV (all, UTC)</button>
-      <button id="btnExportRaw" disabled>Export last download (raw)</button>
+      <button id="btnShareSel" class="primary">Send / share this device…</button>
+      <button id="btnShareAll">Send all devices…</button>
+      <button id="btnExportRaw" disabled>Send last download (raw)…</button>
+    </div>
+    <div class="row"><span id="shareMsg" class="muted">Opens the iPhone share sheet: Mail, Messages, AirDrop, Save to Files… CSV times are UTC.</span></div>
+    <div class="row">
       <button id="btnImport">Import CSV…</button>
       <input type="file" id="fileImport" accept=".csv,text/csv" multiple class="hidden">
     </div>
@@ -205,12 +211,16 @@ details summary { cursor: pointer; font-weight: 600; }
       <div id="log"></div>
     </details>
   </section>
+  <p class="muted" style="text-align:center">App version 4</p>
 </main>
 
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
-const SVC = 0x1f10, CHR = 0x1f1f;
+// Full 128-bit UUID strings: some iOS Web Bluetooth browsers don't accept 16-bit numeric aliases.
+const uuid16 = n => `0000${n.toString(16).padStart(4, "0")}-0000-1000-8000-00805f9b34fb`;
+const SVC = uuid16(0x1f10), CHR = uuid16(0x1f1f);
+const ES_SVC = uuid16(0x181a), BATT_SVC = uuid16(0x180f);
 const NAME_PREFIXES = ["ATC_", "LYWSD", "MHO", "CGG", "MJWSD"];
 const CFG_NEW_LAYOUT_VER = 0x47;
 const DEFAULT_ROOMS = { ATC_E3734E: "Office", ATC_7F605A: "Kitchen", ATC_14B6C2: "Bedroom", ATC_B3FB5E: "Hallway", ATC_A7FC74: "Cellar" };
@@ -278,6 +288,23 @@ function log(msg) {
   console.log(line);
 }
 function setStatus(text, cls) { const s = $("connStatus"); s.textContent = text; s.className = "status " + (cls || ""); }
+function describeErr(e) {
+  if (e == null) return String(e);
+  if (typeof e !== "object") return `${typeof e} "${e}"`;
+  const parts = [];
+  if (e.name) parts.push(e.name);
+  if (e.message) parts.push(e.message);
+  if (e.code != null) parts.push("code " + e.code);
+  if (!parts.length) { try { parts.push(JSON.stringify(e)); } catch { parts.push(String(e)); } }
+  return parts.join(" - ");
+}
+function showError(where, e) {
+  const msg = `${where}: ${describeErr(e)}`;
+  log(msg); $("connMsg").textContent = msg; $("connMsg").className = "status err";
+}
+function showInfo(msg) { $("connMsg").textContent = msg; $("connMsg").className = "muted"; }
+window.addEventListener("error", e => showError("Script error", e.error || e.message));
+window.addEventListener("unhandledrejection", e => showError("Unhandled error", e.reason));
 
 // ===== Time conventions =====
 const localOffsetSec = () => -new Date().getTimezoneOffset() * 60;
@@ -345,13 +372,18 @@ async function request(bytes, pred) {
 
 const cfgListener = b => { if (b[0] === 0x55 && b.length - 1 >= 9) { try { currentCfg = decodeCfg(b); renderCfg(); } catch (e) { log("Config decode failed: " + e.message); } } };
 
-async function connect() {
+async function connect(showAll) {
+  showInfo("Opening Bluetooth device picker…");
+  const optionalServices = [SVC, ES_SVC, BATT_SVC];
+  const opts = showAll ? { acceptAllDevices: true, optionalServices }
+    : { filters: NAME_PREFIXES.map(p => ({ namePrefix: p })), optionalServices };
+  log(`requestDevice(${showAll ? "all devices" : "name filters"})`);
   try {
-    device = await navigator.bluetooth.requestDevice({
-      filters: NAME_PREFIXES.map(p => ({ namePrefix: p })),
-      optionalServices: [SVC, 0x181a, 0x180f]
-    });
-  } catch (e) { if (e.name !== "NotFoundError") log("Picker: " + e.message); return; }
+    // Must be called straight from the tap (no awaits before it) or the browser blocks the picker.
+    device = await navigator.bluetooth.requestDevice(opts);
+  } catch (e) { pickerFailed(e); return; }
+  if (!device) { showError("Device picker", "returned no device"); return; }
+  showInfo("");
   device.addEventListener("gattserverdisconnected", onDisconnected);
   setStatus("Connecting…", "warn"); log(`Connecting to ${device.name}…`);
   try {
@@ -369,9 +401,14 @@ async function connect() {
     setButtons(true);
     readLive(server);
   } catch (e) {
-    log("Connect failed: " + e.message); setStatus("Connect failed", "err");
+    showError("Connect failed", e); setStatus("Connect failed", "err");
     try { device.gatt.disconnect(); } catch {}
   }
+}
+function pickerFailed(e) {
+  if (e && e.name === "NotFoundError" && /cancel/i.test(e.message || "")) { showInfo("Picker cancelled."); return; }
+  showError("Device picker", e);
+  $("connMsg").textContent += " - try “Connect (all devices)”, and check that Bluetooth is on and Bluefy is allowed to use it (iPhone Settings → Privacy & Security → Bluetooth).";
 }
 function onDisconnected() {
   chr = null; listeners.clear(); setStatus("Disconnected", "warn"); log("Disconnected."); setButtons(false);
@@ -380,7 +417,7 @@ function disconnect() { if (device && device.gatt.connected) device.gatt.disconn
 function setButtons(on) {
   for (const id of ["btnDisconnect", "btnDump", "btnTime", "btnDeleteLog", "btnGetCfg"]) $(id).disabled = !on || busy;
   $("btnSetCfg").disabled = !on || busy || !currentCfg;
-  $("btnConnect").disabled = on || busy || !navigator.bluetooth;
+  $("btnConnect").disabled = $("btnConnectAll").disabled = on || busy || !navigator.bluetooth;
 }
 async function withBusy(fn) {
   if (busy) return; busy = true; setButtons(!!chr);
@@ -391,14 +428,14 @@ async function withBusy(fn) {
 async function readLive(server) {
   const out = {};
   try {
-    const es = await server.getPrimaryService(0x181a);
-    try { const v = await (await es.getCharacteristic(0x2a6e)).readValue(); out.t = v.getInt16(0, true) / 100; } catch {}
-    if (out.t == null) { try { const v = await (await es.getCharacteristic(0x2a1f)).readValue(); out.t = v.getInt16(0, true) / 10; } catch {} }
-    try { const v = await (await es.getCharacteristic(0x2a6f)).readValue(); out.h = v.getUint16(0, true) / 100; } catch {}
+    const es = await server.getPrimaryService(ES_SVC);
+    try { const v = await (await es.getCharacteristic(uuid16(0x2a6e))).readValue(); out.t = v.getInt16(0, true) / 100; } catch {}
+    if (out.t == null) { try { const v = await (await es.getCharacteristic(uuid16(0x2a1f))).readValue(); out.t = v.getInt16(0, true) / 10; } catch {} }
+    try { const v = await (await es.getCharacteristic(uuid16(0x2a6f))).readValue(); out.h = v.getUint16(0, true) / 100; } catch {}
   } catch {}
   try {
-    const bs = await server.getPrimaryService(0x180f);
-    const v = await (await bs.getCharacteristic(0x2a19)).readValue(); out.b = v.getUint8(0);
+    const bs = await server.getPrimaryService(BATT_SVC);
+    const v = await (await bs.getCharacteristic(uuid16(0x2a19))).readValue(); out.b = v.getUint8(0);
   } catch {}
   if (out.t != null) $("liveT").textContent = out.t.toFixed(2) + "°";
   if (out.h != null) $("liveH").textContent = out.h.toFixed(1) + "%";
@@ -594,25 +631,59 @@ function toCsv(rows, loc) { // rows: [tsStr, offStr, t, h, v]
     rows.map(r => [r[0], r[1], fmtNum(r[2], loc), fmtNum(r[3], loc), r[4]].join(d)).join("\r\n") + "\r\n";
 }
 const safe = s => s.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "device";
-async function saveFile(name, text) {
-  const blob = new Blob([text], { type: "text/csv" });
-  try {
-    const file = new File([blob], name, { type: blob.type });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); return; }
-  } catch (e) { if (e.name === "AbortError") return; }
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
-  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 15000);
+function shareMsg(text, cls) { const m = $("shareMsg"); m.textContent = text; m.className = cls || "muted"; }
+// Opens the iOS share sheet (Mail, Messages, AirDrop, Save to Files…) with the CSV file(s) attached.
+// iOS only allows the share sheet straight from a tap, so everything is prepared synchronously
+// from in-memory data - no awaits before navigator.share().
+function shareFiles(items, subject) {
+  if (!items.length) { shareMsg("Nothing to send yet.", "status warn"); return; }
+  const files = items.map(it => new File([it.text], it.name, { type: "text/csv" }));
+  const rows = items.reduce((n, it) => n + it.rows, 0);
+  const body = `${subject}\n${items.map(it => `${it.name} (${it.rows} rows)`).join("\n")}`;
+  const done = () => shareMsg(`Shared ${files.length} file(s), ${rows} rows.`, "status ok");
+  const failed = e => {
+    if (e && e.name === "AbortError") { shareMsg("Sharing cancelled."); return; }
+    shareMsg("Share sheet failed: " + describeErr(e) + " - downloading instead.", "status err");
+    downloadFiles(items);
+  };
+  let canFiles = false;
+  try { canFiles = !!(navigator.canShare && navigator.canShare({ files })); } catch {}
+  if (canFiles) {
+    navigator.share({ files, title: subject, text: body }).then(done, failed);
+  } else if (navigator.share && items.length === 1) {
+    // Browser can't attach files: share the CSV as text instead (still works for Mail/Notes).
+    navigator.share({ title: items[0].name, text: items[0].text }).then(done, failed);
+  } else {
+    shareMsg("This browser has no share sheet - downloading the file(s) instead.", "status warn");
+    downloadFiles(items);
+  }
 }
-async function exportAll() {
-  const dev = $("histDev").value; if (!dev) return;
-  const s = await loadHistory(dev);
-  await saveFile(`history_${dev.replace(/[^A-Za-z0-9._-]+/g, "_")}_all.csv`,
-    toCsv(s.map(([t, tm, hm, v]) => [faceValue(t), "+00:00", tm, hm, v]), prefs.csvLocale));
+function downloadFiles(items) {
+  for (const it of items) {
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([it.text], { type: "text/csv" }));
+    a.download = it.name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 15000);
+  }
 }
-async function exportRaw() {
+const fileSafe = s => s.replace(/[^A-Za-z0-9._-]+/g, "_");
+function csvAllFor(dev) {
+  const s = histCache.get(dev) || [];
+  return { name: `history_${fileSafe(dev)}_all.csv`, rows: s.length,
+    text: toCsv(s.map(([t, tm, hm, v]) => [faceValue(t), "+00:00", tm, hm, v]), prefs.csvLocale) };
+}
+function shareSelected() {
+  const dev = $("histDev").value; if (!dev) { shareMsg("No stored data yet.", "status warn"); return; }
+  shareFiles([csvAllFor(dev)], `Thermometer history: ${dev.replace("__", " · ")}`);
+}
+function shareAllDevices() {
+  const items = [...histCache.keys()].sort().map(csvAllFor).filter(it => it.rows);
+  shareFiles(items, `Thermometer history: ${items.length} device(s)`);
+}
+function shareRaw() {
   if (!lastRaw) return;
-  await saveFile(`history_${lastRaw.dev.replace(/[^A-Za-z0-9._-]+/g, "_")}_raw_${stamp()}.csv`,
-    toCsv(lastRaw.rows.map(([e, t, h, v]) => [faceValue(e), lastRaw.offset, t, h, v]), prefs.csvLocale));
+  shareFiles([{ name: `history_${fileSafe(lastRaw.dev)}_raw_${stamp()}.csv`, rows: lastRaw.rows.length,
+    text: toCsv(lastRaw.rows.map(([e, t, h, v]) => [faceValue(e), lastRaw.offset, t, h, v]), prefs.csvLocale) }],
+    `Thermometer download: ${lastRaw.dev.replace("__", " · ")}`);
 }
 function parseCsv(text) {
   const lines = text.split(/\r?\n/).filter(Boolean); if (!lines.length) return [];
@@ -650,8 +721,11 @@ async function importFiles(files) {
 
 // ===== Chart =====
 let histData = [];
+const histCache = new Map(); // dev -> samples, kept in memory so sharing needs no awaits
 async function refreshDeviceList(select) {
   const devs = (await listDevices()).sort();
+  histCache.clear();
+  for (const d of devs) histCache.set(d, await loadHistory(d));
   const sel = $("histDev"), keep = select || sel.value || lsGet("histDev", "");
   sel.innerHTML = "";
   if (!devs.length) sel.add(new Option("(no data yet)", ""));
@@ -661,7 +735,7 @@ async function refreshDeviceList(select) {
 }
 async function loadChart() {
   const dev = $("histDev").value; lsSet("histDev", dev);
-  histData = dev ? await loadHistory(dev) : [];
+  histData = dev ? (histCache.get(dev) || await loadHistory(dev)) : [];
   $("histCount").textContent = histData.length ? `${histData.length} samples · ${localStr(histData[0][0])} → ${localStr(histData[histData.length - 1][0])}` : "";
   drawChart();
 }
@@ -740,7 +814,7 @@ function onChartPointer(ev) {
 
 // ===== Wire up =====
 (async function init() {
-  if (!navigator.bluetooth) { $("noBle").classList.remove("hidden"); $("btnConnect").disabled = true; }
+  if (!navigator.bluetooth) { $("noBle").classList.remove("hidden"); $("btnConnect").disabled = $("btnConnectAll").disabled = true; }
   $("timeMode").value = prefs.timeMode; $("csvLocale").value = prefs.csvLocale; $("idleTimeout").value = prefs.idleTimeout;
   $("timeMode").onchange = e => { prefs.timeMode = e.target.value; savePrefs(); };
   $("csvLocale").onchange = e => { prefs.csvLocale = e.target.value; savePrefs(); };
@@ -749,7 +823,8 @@ function onChartPointer(ev) {
     b.classList.toggle("on", +b.dataset.h === prefs.range);
     b.onclick = () => { prefs.range = +b.dataset.h; savePrefs(); document.querySelectorAll("#rangeBtns .seg").forEach(x => x.classList.toggle("on", x === b)); drawChart(); };
   });
-  $("btnConnect").onclick = () => withBusy(connect);
+  $("btnConnect").onclick = () => withBusy(() => connect(false));
+  $("btnConnectAll").onclick = () => withBusy(() => connect(true));
   $("btnDisconnect").onclick = disconnect;
   $("btnDump").onclick = () => withBusy(dump);
   $("btnTime").onclick = () => withBusy(setTime);
@@ -772,8 +847,9 @@ function onChartPointer(ev) {
   };
   $("roomName").onchange = e => { if (!device) return; rooms[device.name] = e.target.value.trim(); lsSet("rooms", rooms); };
   $("histDev").onchange = loadChart;
-  $("btnExportAll").onclick = exportAll;
-  $("btnExportRaw").onclick = exportRaw;
+  $("btnShareSel").onclick = shareSelected;
+  $("btnShareAll").onclick = shareAllDevices;
+  $("btnExportRaw").onclick = shareRaw;
   $("btnImport").onclick = () => $("fileImport").click();
   $("fileImport").onchange = async e => { await importFiles([...e.target.files]); e.target.value = ""; };
   $("btnForget").onclick = async () => {
