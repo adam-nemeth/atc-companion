@@ -116,11 +116,9 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
       <span id="scanMsg" class="muted"></span>
     </div>
     <div id="knownList" style="margin-top:10px"></div>
-    <p class="muted">“Picker ID” is the code Bluefy shows in its device list for sensors whose name it doesn't know. It's learned here when you connect.</p>
 
     <div class="only-single row"><button class="seg" onclick="showTab('all')">Batch operations for all sensors →</button></div>
     <div class="only-all">
-      <p class="muted">A sensor must be <b>available</b> to be used: sensors used here before become available by themselves when they're in range; a new one has to be chosen once with “Add sensors…”.</p>
       <div class="row">
         <button id="btnAddSensors">Add sensors…</button>
         <button id="btnSelAll" class="seg">Tick all</button>
@@ -411,7 +409,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 36;
+const APP_VERSION = 37;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
