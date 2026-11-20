@@ -91,6 +91,8 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
 .ks:first-child { border-top: 0; }
 .ks .nm { font-weight: 600; }
 #knownList .nm { font-size: 17px; }
+/* All sensors tab: no per-sensor Connect buttons (batch operations connect by themselves) */
+body[data-tab="all"] #knownList .ks > button { display: none; }
 #knownList .nm input[type=checkbox] { width: 20px; height: 20px; }
 .ks .vals { font-variant-numeric: tabular-nums; }
 .ks .meta { grid-column: 1 / -1; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; word-break: break-all; }
@@ -415,7 +417,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 41;
+const APP_VERSION = 42;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
