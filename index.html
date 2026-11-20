@@ -94,7 +94,8 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
 #knownList .nm input[type=checkbox] { width: 20px; height: 20px; }
 .ks .vals { font-variant-numeric: tabular-nums; }
 .ks .meta { grid-column: 1 / -1; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; word-break: break-all; }
-.ks.current .nm::after { content: "  ● connected"; color: var(--ok); font-weight: 500; font-size: 12px; }
+/* The connected sensor's button reads "Connected" in green (full strength, although it's disabled) */
+.ks.current button.is-current { color: var(--ok); border-color: var(--ok); opacity: 1; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -414,7 +415,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 40;
+const APP_VERSION = 41;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -702,6 +703,7 @@ function renderKnown() {
       ? `${k.t.toFixed(2)} °C · ${k.h.toFixed(1)} %${k.b != null ? ` · 🔋${k.b}%` : ""}${k.seen ? ` · ${ago(k.seen)}` : ""}` : "";
     const btn = document.createElement("button");
     btn.textContent = isCur ? "Connected" : chr ? "Switch" : "Connect";
+    if (isCur) btn.classList.add("is-current");
     btn.disabled = !dev || isCur || busy;
     btn.onclick = () => {
       // Show the Device card (where connection progress and errors appear) straight away.
@@ -721,7 +723,7 @@ function renderKnown() {
     avail.style.fontWeight = dev ? "600" : "";
     meta.append(avail);
     meta.append(
-      (btName !== name ? ` · ID ${name}` : "") + ` · MAC ${k.mac || macFromName(name) || "?"}` + (k.id ? ` · Picker ID ${k.id.slice(0, 8)}…` : ""));
+      (btName !== name ? ` · ID ${name}` : "") + ` · MAC ${k.mac || macFromName(name) || "?"}`);
     row.append(left, btn, meta); box.appendChild(row);
   }
   const rm = $("readyMsg"); if (rm) rm.textContent = `${ready} available · ${ticked} ticked`;
