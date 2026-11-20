@@ -139,6 +139,11 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
   <!-- Known sensors -->
   <section class="card" data-tab="single all">
     <h2>Known sensors</h2>
+    <!-- Only shown in browsers that support advertisement scanning (e.g. Chrome with the experimental flag) -->
+    <div class="row hidden" id="scanRow">
+      <button id="btnScan">Scan nearby (live values)</button>
+      <span id="scanMsg" class="muted"></span>
+    </div>
     <div id="knownList" style="margin-top:10px"></div>
     <p class="muted">“Picker ID” is the code Bluefy shows in its device list for sensors whose name it doesn't know. It's learned here when you connect.</p>
 
@@ -404,7 +409,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 30;
+const APP_VERSION = 31;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -740,8 +745,38 @@ function onAdvertisement(ev) {
   }
   if (!name) return;
   if (ev.device) reachable.set(name, ev.device);
-  rememberSensor(name, Object.assign({ seen: Date.now() }, ev.device && ev.device.id ? { id: ev.device.id } : {}, p || {}));
+  rememberSensor(name, Object.assign({ seen: Date.now() }, ev.device && ev.device.id ? { id: ev.device.id } : {},
+    /^ATC_/i.test(advName) ? { btName: advName } : {}, p || {}));
 }
+// ===== Scan nearby (only where the browser supports requestLEScan) =====
+// Listens to all sensors' broadcasts: live readings, and each heard sensor becomes available.
+let leScan = null, scanTimer = null;
+const SCAN_SECONDS = 120;
+async function toggleScan() {
+  if (leScan) { stopScan(); return; }
+  dbg("requestLEScan({acceptAllAdvertisements, keepRepeatedDevices})");
+  try {
+    // Must be called straight from the tap, like the picker.
+    leScan = await navigator.bluetooth.requestLEScan({ acceptAllAdvertisements: true, keepRepeatedDevices: true });
+    dbg(`Scan started: ${JSON.stringify({ active: leScan && leScan.active })}`);
+  } catch (e) {
+    leScan = null; log("Scan failed: " + errDetail(e), "err");
+    $("scanMsg").textContent = "Scan failed: " + describeErr(e); return;
+  }
+  advTotal = 0;
+  $("btnScan").textContent = "Stop scan";
+  const until = Date.now() + SCAN_SECONDS * 1000;
+  const tick = () => { if (!leScan) return; $("scanMsg").textContent = `Scanning… ${Math.ceil((until - Date.now()) / 1000)} s left`; };
+  tick(); scanTimer = setInterval(() => { if (Date.now() >= until) stopScan(); else tick(); }, 1000);
+}
+function stopScan() {
+  try { leScan && leScan.stop(); } catch {}
+  leScan = null; clearInterval(scanTimer);
+  dbg(`Scan stopped; ${advTotal} advertisements received`);
+  $("btnScan").textContent = "Scan nearby (live values)";
+  $("scanMsg").textContent = "Scan stopped."; renderKnown();
+}
+
 // Work out which sensor we're connected to: from the name (ATC_xxxxxx) or, if iOS shows another
 // name (e.g. LYWSD03MMC), by asking the pvvx firmware for its MAC (command 0x10, read-only).
 async function identifySensor() {
@@ -1809,6 +1844,10 @@ function updateStatusBar() {
     if ($("btNameNew").dataset.auto) $("btNameNew").value = suggestBtName();
   };
   $("btnAddSensors").onclick = () => withBusy(addSensor);
+  if (navigator.bluetooth && typeof navigator.bluetooth.requestLEScan === "function") {
+    $("scanRow").classList.remove("hidden");
+    $("btnScan").onclick = toggleScan;
+  }
   $("btnSelAll").onclick = () => { knownNames().forEach(n => batchSel.add(n)); saveSel(); renderKnown(); };
   $("btnSelNone").onclick = () => { batchSel.clear(); saveSel(); renderKnown(); };
   $("bDump").onclick = () => withBusy(BATCH.dump);
