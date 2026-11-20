@@ -93,6 +93,7 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
 #knownList .nm { font-size: 17px; }
 /* All sensors tab: no per-sensor Connect buttons (batch operations connect by themselves) */
 body[data-tab="all"] #knownList .ks > button { display: none; }
+#batchStatus { scroll-margin-top: 70px; } /* stay clear of the sticky tab bar when scrolled to */
 #knownList .nm input[type=checkbox] { width: 20px; height: 20px; }
 .ks .vals { font-variant-numeric: tabular-nums; }
 .ks .meta { grid-column: 1 / -1; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; word-break: break-all; }
@@ -186,7 +187,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
     </div>
     <p class="muted" id="batchCfgSrc"></p>
     <p class="muted">“Write config” keeps each sensor's own hardware‑specific bits and calibration offsets. Files named like <code>config_ATC_xxxxxx_….json</code> (as your Windows scripts write them) go to that sensor only; any other file is used for all ticked sensors without their own file.</p>
-    <div class="row"><button id="bStop" class="danger hidden">Stop</button></div>
+    <div class="row" id="batchStatus"><button id="bStop" class="danger hidden">Stop</button></div>
     <div class="progress" id="batchProg"><div></div></div>
     <div id="batchOut" style="margin-top:8px"></div>
   </section>
@@ -417,7 +418,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 42;
+const APP_VERSION = 43;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1179,6 +1180,8 @@ async function runBatch(label, fn) {
   const setRow = (n, text, cls) => { rowEls[n].textContent = text; rowEls[n].className = cls ? "status " + cls : "muted"; };
   const prog = $("batchProg"), bar = prog.firstElementChild; prog.style.display = "block"; bar.style.width = "0";
   $("bStop").classList.remove("hidden");
+  // Bring the progress (Stop button, bar and per-sensor rows) into view.
+  $("batchStatus").scrollIntoView({ behavior: "smooth", block: "start" });
   log(`==== Batch "${label}" on ${targets.length} sensor(s): ${targets.join(", ")} ====`);
   let okCount = 0;
   try {
