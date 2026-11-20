@@ -408,7 +408,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 33;
+const APP_VERSION = 34;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -766,8 +766,15 @@ async function toggleScan() {
     leScan = await navigator.bluetooth.requestLEScan({ acceptAllAdvertisements: true, keepRepeatedDevices: true });
     dbg(`Scan started after ${since(s)}: ${JSON.stringify({ active: leScan && leScan.active, acceptAll: leScan && leScan.acceptAllAdvertisements })}`);
   } catch (e) {
+    const ms = performance.now() - s;
     leScan = null; log(`Scan failed after ${since(s)}: ${errDetail(e)}`, "err");
-    $("scanMsg").textContent = "Scan failed: " + describeErr(e); return;
+    // Refused before any prompt could be shown (Chrome on Windows does this): the browser offers
+    // scanning but can't do it, so hide the button for this visit instead of showing "User canceled".
+    if (ms < 300) {
+      $("btnScan").classList.add("hidden");
+      $("scanMsg").textContent = "Scanning isn't supported in this browser - use “Connect…” or “Add sensors…” to reach your sensors.";
+    } else $("scanMsg").textContent = "Scan failed: " + describeErr(e);
+    return;
   } finally { scanPending = false; $("btnScan").disabled = false; }
   advTotal = 0;
   $("btnScan").textContent = "Stop scan";
