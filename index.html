@@ -118,16 +118,6 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
       <label>Room <input id="roomName" placeholder="e.g. Kitchen" size="14" disabled></label>
       <span class="muted" id="devName"></span>
     </div>
-    <details id="renameBox" style="margin-top:8px">
-      <summary>Bluetooth name (shown in the device picker)</summary>
-      <p class="muted" id="btNameCur">Connect to a sensor to see its Bluetooth name.</p>
-      <div class="row">
-        <input id="btNameNew" maxlength="20" size="18" placeholder="ATC_Kitchen" autocapitalize="off" autocorrect="off" spellcheck="false" disabled>
-        <button id="btnRename" disabled>Rename</button>
-        <button id="btnRenameReset" disabled>Reset to default</button>
-      </div>
-      <p class="muted">Must start with ATC_ (so the Connect picker still lists it), up to 20 letters, digits, _ or -. The sensor applies the new name after you disconnect; the iPhone may keep showing the old name until Bluetooth is turned off and on. Your Windows scripts are unaffected (they use the address).</p>
-    </details>
     <div class="live" id="liveTiles">
       <div class="tile"><div class="k">Temperature</div><div class="v" id="liveT">–</div></div>
       <div class="tile"><div class="k">Humidity</div><div class="v" id="liveH">–</div></div>
@@ -287,6 +277,15 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
         <input type="file" id="fileCfg" accept=".json,application/json" class="hidden">
       </div>
       <div id="cfgForm" class="cfg-grid" style="margin-top:12px"></div>
+
+      <h3 class="sub" id="renameBox">Bluetooth name (shown in the device picker)</h3>
+      <p class="muted" id="btNameCur">Connect to a sensor to see its Bluetooth name.</p>
+      <div class="row">
+        <input id="btNameNew" maxlength="20" size="18" placeholder="ATC_Kitchen" autocapitalize="off" autocorrect="off" spellcheck="false" disabled>
+        <button id="btnRename" disabled>Rename</button>
+        <button id="btnRenameReset" disabled>Reset to default</button>
+      </div>
+      <p class="muted">Must start with ATC_ (so the Connect picker still lists it), up to 20 letters, digits, _ or -. The sensor applies the new name after you disconnect; the iPhone may keep showing the old name until Bluetooth is turned off and on. Your Windows scripts are unaffected (they use the address).</p>
     </details>
   </section>
 
@@ -409,7 +408,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 32;
+const APP_VERSION = 33;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
