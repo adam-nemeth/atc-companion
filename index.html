@@ -68,7 +68,7 @@ details summary { cursor: pointer; font-weight: 600; }
   background: var(--input); border-radius: 8px; padding: 8px; margin-top: 8px; }
 .hidden { display: none !important; }
 /* Big line at the top of the Device section: which sensor, and whether it's connecting/connected */
-.devstate { font-size: 19px; font-weight: 700; margin: -2px 0 10px; padding: 8px 10px; border-radius: 9px;
+.devstate { font-size: 16px; font-weight: 700; margin: -2px 0 10px; padding: 6px 10px; border-radius: 9px;
   background: var(--input); border: 1px solid var(--line); overflow-wrap: anywhere; }
 .devstate:not(.ok):not(.warn):not(.err) { color: var(--muted); font-weight: 600; }
 /* Title line: app name on the left, connection status on the right (one line, never changes height) */
@@ -90,6 +90,8 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
 .ks { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); }
 .ks:first-child { border-top: 0; }
 .ks .nm { font-weight: 600; }
+#knownList .nm { font-size: 17px; }
+#knownList .nm input[type=checkbox] { width: 20px; height: 20px; }
 .ks .vals { font-variant-numeric: tabular-nums; }
 .ks .meta { grid-column: 1 / -1; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; word-break: break-all; }
 .ks.current .nm::after { content: "  ● connected"; color: var(--ok); font-weight: 500; font-size: 12px; }
@@ -412,7 +414,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 38;
+const APP_VERSION = 39;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
