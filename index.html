@@ -145,7 +145,7 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
     </div>
     <div class="row"><span id="connMsg" class="muted"></span></div>
     <div class="row">
-      <label>Room <input id="roomName" placeholder="e.g. Kitchen" size="14" disabled></label>
+      <label>Description <input id="roomName" placeholder="e.g. Kitchen" size="14" disabled></label>
     </div>
     <div class="live" id="liveTiles">
       <div class="tile"><div class="k">Temperature</div><div class="v" id="liveT">–</div></div>
@@ -298,7 +298,7 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
   <!-- Sensor list storage -->
   <section class="card" data-tab="settings">
     <h2>Sensor list</h2>
-    <p class="muted">Your sensors and room names are saved only in this browser on this phone - not in the web page. Load them from the <code>devices.json</code> your Windows scripts use (name, description = room, address), or let them be added as you connect.</p>
+    <p class="muted">Your sensors and their descriptions are saved only in this browser on this phone - not in the web page. Load them from the <code>devices.json</code> your Windows scripts use (name, description, address), or let them be added as you connect.</p>
     <div class="row">
       <button id="btnSensorsImport" class="primary">Import sensors from JSON…</button>
       <button id="btnSensorsExport">Export sensors to JSON…</button>
@@ -414,7 +414,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 39;
+const APP_VERSION = 40;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -668,7 +668,7 @@ function exportSensors() {
   shareFiles([{ name: "devices.json", rows: list.length, text: JSON.stringify(list, null, 2) + "\n", type: "application/json" }], `Thermometer sensor list (${list.length})`);
 }
 function clearSensors() {
-  if (!confirm("Remove all sensors and room names from this browser? Downloaded history stays. You can load them again from a devices.json.")) return;
+  if (!confirm("Remove all sensors and their descriptions from this browser? Downloaded history stays. You can load them again from a devices.json.")) return;
   rooms = {}; known = {}; batchSel.clear();
   lsSet("rooms", rooms); saveKnown(); saveSel();
   log("Sensor list cleared");
