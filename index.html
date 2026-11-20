@@ -67,6 +67,10 @@ details summary { cursor: pointer; font-weight: 600; }
 #log { font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; max-height: 260px; overflow: auto;
   background: var(--input); border-radius: 8px; padding: 8px; margin-top: 8px; }
 .hidden { display: none !important; }
+/* Title line: app name on the left, connection status on the right (one line, never changes height) */
+h1.titlebar { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+h1.titlebar > span:first-child { white-space: nowrap; }
+#statusBar { font-size: 13px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 h3.sub { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 6px; }
 .tabs { position: sticky; top: 0; z-index: 5; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
   background: var(--bg); padding: 6px 0 10px; }
@@ -89,14 +93,16 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
 </head>
 <body>
 <main>
-  <h1>ATC Thermometers <span class="muted" id="appVersionTop" style="font-weight:500;font-size:14px"></span></h1>
+  <h1 class="titlebar">
+    <span>ATC Thermometers <span class="muted" id="appVersionTop" style="font-weight:500;font-size:14px"></span></span>
+    <span id="statusBar" class="muted">Not connected</span>
+  </h1>
   <nav class="tabs" id="tabs">
     <button data-go="single">Sensor</button>
     <button data-go="all">All sensors</button>
     <button data-go="history">History</button>
     <button data-go="settings">Settings</button>
   </nav>
-  <div id="statusBar" class="muted" style="margin:-4px 0 10px"></div>
 
   <div id="noBle" class="banner hidden">
     <b>Web Bluetooth isn't available in this browser.</b><br>
@@ -408,7 +414,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 34;
+const APP_VERSION = 35;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1802,8 +1808,9 @@ function showTab(t) {
 // One-line connection status shown under the tabs on every tab.
 function updateStatusBar() {
   const s = $("statusBar"); if (!s) return;
-  s.textContent = chr && sensorName ? `● Connected: ${sensorLabel(sensorName)}` : busy ? "Working…" : "Not connected";
+  s.textContent = chr && sensorName ? `● ${sensorLabel(sensorName)}` : busy ? "Working…" : "Not connected";
   s.className = chr ? "status ok" : "muted";
+  s.title = s.textContent;
 }
 
 (async function init() {
