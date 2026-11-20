@@ -93,10 +93,7 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
 </head>
 <body>
 <main>
-  <h1 class="titlebar">
-    <span>ATC Thermometers <span class="muted" id="appVersionTop" style="font-weight:500;font-size:14px"></span></span>
-    <span id="statusBar" class="muted">Not connected</span>
-  </h1>
+  <h1>ATC Thermometers <span class="muted" id="appVersionTop" style="font-weight:500;font-size:14px"></span></h1>
   <nav class="tabs" id="tabs">
     <button data-go="single">Sensor</button>
     <button data-go="all">All sensors</button>
@@ -109,28 +106,6 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
     On iPhone, open this page in the <b>Bluefy</b> browser (free on the App Store). Safari doesn't support Bluetooth.
     You can still view stored history and import CSV files here.
   </div>
-
-  <!-- Connection -->
-  <section class="card" data-tab="single" id="deviceCard" style="scroll-margin-top:70px">
-    <h2>Device</h2>
-    <div class="row">
-      <button id="btnConnect" class="primary">Connect…</button>
-      <button id="btnConnectAll">Connect (all devices)…</button>
-      <button id="btnDisconnect" disabled>Disconnect</button>
-      <span id="connStatus" class="status">Not connected</span>
-    </div>
-    <div class="row"><span id="connMsg" class="muted"></span></div>
-    <div class="row">
-      <label>Room <input id="roomName" placeholder="e.g. Kitchen" size="14" disabled></label>
-      <span class="muted" id="devName"></span>
-    </div>
-    <div class="live" id="liveTiles">
-      <div class="tile"><div class="k">Temperature</div><div class="v" id="liveT">–</div></div>
-      <div class="tile"><div class="k">Humidity</div><div class="v" id="liveH">–</div></div>
-      <div class="tile"><div class="k">Battery</div><div class="v" id="liveB">–</div></div>
-    </div>
-    <div class="row"><span class="muted" id="liveNote"></span></div>
-  </section>
 
   <!-- Known sensors -->
   <section class="card" data-tab="single all">
@@ -153,6 +128,28 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
         <span id="readyMsg" class="muted"></span>
       </div>
     </div>
+  </section>
+
+  <!-- Connection -->
+  <section class="card" data-tab="single" id="deviceCard" style="scroll-margin-top:70px">
+    <h2>Device</h2>
+    <div class="row">
+      <button id="btnConnect" class="primary">Connect…</button>
+      <button id="btnConnectAll">Connect (all devices)…</button>
+      <button id="btnDisconnect" disabled>Disconnect</button>
+      <span id="connStatus" class="status">Not connected</span>
+    </div>
+    <div class="row"><span id="connMsg" class="muted"></span></div>
+    <div class="row">
+      <label>Room <input id="roomName" placeholder="e.g. Kitchen" size="14" disabled></label>
+      <span class="muted" id="devName"></span>
+    </div>
+    <div class="live" id="liveTiles">
+      <div class="tile"><div class="k">Temperature</div><div class="v" id="liveT">–</div></div>
+      <div class="tile"><div class="k">Humidity</div><div class="v" id="liveH">–</div></div>
+      <div class="tile"><div class="k">Battery</div><div class="v" id="liveB">–</div></div>
+    </div>
+    <div class="row"><span class="muted" id="liveNote"></span></div>
   </section>
 
   <!-- Batch operations -->
@@ -414,7 +411,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 35;
+const APP_VERSION = 36;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
