@@ -409,7 +409,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 31;
+const APP_VERSION = 32;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -752,17 +752,24 @@ function onAdvertisement(ev) {
 // Listens to all sensors' broadcasts: live readings, and each heard sensor becomes available.
 let leScan = null, scanTimer = null;
 const SCAN_SECONDS = 120;
+let scanPending = false;
 async function toggleScan() {
   if (leScan) { stopScan(); return; }
+  // A second request while Chrome's permission prompt is open cancels the first one
+  // ("User canceled the permission prompt"), so ignore taps until the prompt is answered.
+  if (scanPending) { dbg("Scan request ignored - permission prompt still open"); return; }
+  scanPending = true; $("btnScan").disabled = true;
+  $("scanMsg").textContent = "Waiting for permission - click Allow in Chrome's prompt…";
   dbg("requestLEScan({acceptAllAdvertisements, keepRepeatedDevices})");
+  const s = t0();
   try {
     // Must be called straight from the tap, like the picker.
     leScan = await navigator.bluetooth.requestLEScan({ acceptAllAdvertisements: true, keepRepeatedDevices: true });
-    dbg(`Scan started: ${JSON.stringify({ active: leScan && leScan.active })}`);
+    dbg(`Scan started after ${since(s)}: ${JSON.stringify({ active: leScan && leScan.active, acceptAll: leScan && leScan.acceptAllAdvertisements })}`);
   } catch (e) {
-    leScan = null; log("Scan failed: " + errDetail(e), "err");
+    leScan = null; log(`Scan failed after ${since(s)}: ${errDetail(e)}`, "err");
     $("scanMsg").textContent = "Scan failed: " + describeErr(e); return;
-  }
+  } finally { scanPending = false; $("btnScan").disabled = false; }
   advTotal = 0;
   $("btnScan").textContent = "Stop scan";
   const until = Date.now() + SCAN_SECONDS * 1000;
