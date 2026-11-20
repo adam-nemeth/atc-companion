@@ -67,6 +67,10 @@ details summary { cursor: pointer; font-weight: 600; }
 #log { font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; max-height: 260px; overflow: auto;
   background: var(--input); border-radius: 8px; padding: 8px; margin-top: 8px; }
 .hidden { display: none !important; }
+/* Big line at the top of the Device section: which sensor, and whether it's connecting/connected */
+.devstate { font-size: 19px; font-weight: 700; margin: -2px 0 10px; padding: 8px 10px; border-radius: 9px;
+  background: var(--input); border: 1px solid var(--line); overflow-wrap: anywhere; }
+.devstate:not(.ok):not(.warn):not(.err) { color: var(--muted); font-weight: 600; }
 /* Title line: app name on the left, connection status on the right (one line, never changes height) */
 h1.titlebar { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 h1.titlebar > span:first-child { white-space: nowrap; }
@@ -131,16 +135,15 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
   <!-- Connection -->
   <section class="card" data-tab="single" id="deviceCard" style="scroll-margin-top:70px">
     <h2>Device</h2>
+    <div id="connStatus" class="status devstate">Not connected</div>
     <div class="row">
       <button id="btnConnect" class="primary">Connect…</button>
       <button id="btnConnectAll">Connect (all devices)…</button>
       <button id="btnDisconnect" disabled>Disconnect</button>
-      <span id="connStatus" class="status">Not connected</span>
     </div>
     <div class="row"><span id="connMsg" class="muted"></span></div>
     <div class="row">
       <label>Room <input id="roomName" placeholder="e.g. Kitchen" size="14" disabled></label>
-      <span class="muted" id="devName"></span>
     </div>
     <div class="live" id="liveTiles">
       <div class="tile"><div class="k">Temperature</div><div class="v" id="liveT">–</div></div>
@@ -409,7 +412,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 37;
+const APP_VERSION = 38;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -445,7 +448,12 @@ function logEnvironment() {
 }
 document.addEventListener("visibilitychange", () => dbg(`Page ${document.hidden ? "hidden (backgrounded)" : "visible"}${chr ? " - BLE connected" : ""}`));
 window.addEventListener("pagehide", () => { dbg("pagehide"); flushLog(); });
-function setStatus(text, cls) { const s = $("connStatus"); s.textContent = text; s.className = "status " + (cls || ""); }
+function setStatus(text, cls) { const s = $("connStatus"); s.textContent = text; s.className = "status devstate " + (cls || ""); }
+// Best guess of which sensor a device handle is, before it's been identified over the connection.
+function guessLabel(dev, expectedName) {
+  const n = expectedName || sensorFromBtName(dev && dev.name) || Object.keys(known).find(k => dev && known[k].id === dev.id);
+  return n ? shownName(n) : (dev && dev.name) || "sensor";
+}
 function describeErr(e) {
   if (e == null) return String(e);
   if (typeof e !== "object") return `${typeof e} "${e}"`;
@@ -846,7 +854,8 @@ async function connectDevice(dev, expectedName, opts = {}) {
     log(`Remembered sensor ${expectedName || dev.name}: ${heard ? "advertisement heard, connecting" : "not heard - trying to connect anyway"}`);
   }
   if (!device._atcListener) { device.addEventListener("gattserverdisconnected", onDisconnected); device._atcListener = true; }
-  setStatus("Connecting…", "warn"); log(`Connecting to ${expectedName || device.name || device.id} (id ${device.id})…`);
+  const connectingTo = guessLabel(device, expectedName);
+  setStatus(`Connecting to ${connectingTo}…`, "warn"); log(`Connecting to ${expectedName || device.name || device.id} (id ${device.id})…`);
   let step = "connecting";
   const sAll = t0();
   try {
@@ -911,18 +920,16 @@ async function connectDevice(dev, expectedName, opts = {}) {
     if (!opts.batch) await readBtName();
     reachable.set(sensorName, device);
     const room = rooms[sensorName];
+    // Details under the big status line: the fixed ID (if the shown name differs) and the MAC.
     const shown = shownName(sensorName);
-    showInfo(`Connected to ${shown}` + (shown.endsWith(sensorName) ? "" : ` (ID ${sensorName})`) +
-      (macFromName(sensorName) ? ` · MAC ${macFromName(sensorName)}` : "") +
-      (device.name && device.name !== sensorName && device.name !== (known[sensorName] || {}).btName ? ` - iPhone lists it as “${device.name}”` : ""));
-    setStatus("Connected", "ok"); log(`Connected to ${sensorName} (total ${since(sAll)}).`);
-    $("devName").textContent = (known[sensorName] && known[sensorName].btName) || sensorName;
+    showInfo([shown.endsWith(sensorName) ? "" : `ID ${sensorName}`, macFromName(sensorName) ? `MAC ${macFromName(sensorName)}` : ""].filter(Boolean).join(" · "));
+    setStatus(`● Connected to ${shownName(sensorName)}`, "ok"); log(`Connected to ${sensorName} (total ${since(sAll)}).`);
     $("roomName").value = room || ""; $("roomName").disabled = false;
     setButtons(true); renderKnown();
     if (!opts.batch) readLive(server);
     return true;
   } catch (e) {
-    showError(`Connect failed while ${step}`, e); setStatus("Connect failed", "err");
+    showError(`Connect failed while ${step}`, e); setStatus(`Couldn't connect to ${connectingTo}`, "err");
     chr = null;
     try { device.gatt.disconnect(); } catch {}
     return false;
@@ -949,7 +956,8 @@ function onDisconnected(ev) {
   // Events from a sensor we already switched away from must not tear down the current connection.
   if (ev && ev.target && ev.target !== device) { dbg(`Disconnect event from previous sensor ${ev.target.name || ev.target.id} (ignored)`); return; }
   log(`Disconnected (gattserverdisconnected); busy=${busy}, ${rxCount} notifications this session, last BLE traffic ${Math.round((Date.now() - lastActivity) / 1000)} s ago, page ${document.hidden ? "hidden" : "visible"}`, "warn");
-  chr = null; listeners.clear(); setStatus("Disconnected", "warn"); setButtons(false); renderKnown();
+  const was = sensorName ? shownName(sensorName) : guessLabel(device);
+  chr = null; listeners.clear(); setStatus(`Disconnected from ${was}`); setButtons(false); renderKnown();
 }
 function disconnect() { dbg("Disconnect requested by user"); if (device && device.gatt.connected) device.gatt.disconnect(); }
 function setButtons(on) {
