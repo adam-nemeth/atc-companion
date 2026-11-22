@@ -283,6 +283,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
       </span>
     </div>
     <div id="readout" class="muted"></div>
+    <div id="avgNote" class="muted hidden" style="font-size:12px;margin-top:2px"></div>
     <div class="stats" id="stats"></div>
     <div class="row" style="margin-top:10px">
       <button id="btnShareSel" class="primary">Share this sensor…</button>
@@ -466,7 +467,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 54;
+const APP_VERSION = 55;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1832,22 +1833,38 @@ function drawChart() {
     svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" fill="${col("--muted")}" font-size="14">No data in this range</text>`;
     plotted = null; return;
   }
-  // Downsample to ~1 point per 2px (bucket averages)
+  // Downsample to ~1 point per 2px. Each point: [time, temp avg, hum avg, n readings, temp min, temp max,
+  // hum min, hum max, first time, last time] - the min/max feed the shaded band and the readout.
   const buckets = Math.max(50, Math.floor(W / 2));
   const t0 = dom.a, t1 = dom.b, span = Math.max(1, t1 - t0);
-  let pts = lineData;
+  let pts = lineData.map(s => [s[0], s[1], s[2], 1, s[1], s[1], s[2], s[2], s[0], s[0]]);
+  let averaged = false;
   if (lineData.length > buckets) {
     const acc = new Map();
-    for (const s of lineData) { const k = Math.floor((s[0] - t0) / span * (buckets - 1));
-      const a = acc.get(k) || [0, 0, 0, 0]; a[0] += s[0]; a[1] += s[1]; a[2] += s[2]; a[3]++; acc.set(k, a); }
-    pts = [...acc.entries()].sort((p, q) => p[0] - q[0]).map(([, a]) => [a[0] / a[3], a[1] / a[3], a[2] / a[3]]);
+    for (const s of lineData) {
+      const k = Math.floor((s[0] - t0) / span * (buckets - 1));
+      let a = acc.get(k);
+      if (!a) acc.set(k, a = [0, 0, 0, 0, Infinity, -Infinity, Infinity, -Infinity, s[0], s[0]]);
+      a[0] += s[0]; a[1] += s[1]; a[2] += s[2]; a[3]++;
+      a[4] = Math.min(a[4], s[1]); a[5] = Math.max(a[5], s[1]); a[6] = Math.min(a[6], s[2]); a[7] = Math.max(a[7], s[2]);
+      a[8] = Math.min(a[8], s[0]); a[9] = Math.max(a[9], s[0]);
+    }
+    pts = [...acc.entries()].sort((p, q) => p[0] - q[0])
+      .map(([, a]) => [a[0] / a[3], a[1] / a[3], a[2] / a[3], a[3], a[4], a[5], a[6], a[7], a[8], a[9]]);
+    averaged = pts.some(p => p[3] > 1);
   }
   const showT = prefs.showT !== false, showH = prefs.showH !== false;
   // Left axis = temperature (humidity when temperature is hidden); right axis only when both are shown.
   const L = 40, R = showT && showH ? 40 : 14, T = 22, B = 40, pw = W - L - R, ph = H - T - B;
   const inWin = pts.filter(p => p[0] >= t0 && p[0] <= t1);
   const extPts = inWin.length ? inWin : pts;
-  const range = i => { let lo = Infinity, hi = -Infinity; for (const p of extPts) { lo = Math.min(lo, p[i]); hi = Math.max(hi, p[i]); } return [lo, hi]; };
+  // Axis range covers the min–max band too (indexes 4/5 = temp min/max, 6/7 = humidity min/max).
+  const range = i => {
+    const [mi, ma] = i === 1 ? [4, 5] : [6, 7];
+    let lo = Infinity, hi = -Infinity;
+    for (const p of extPts) { lo = Math.min(lo, p[mi]); hi = Math.max(hi, p[ma]); }
+    return [lo, hi];
+  };
   // "Nice" axes: a round step (1, 2, 2.5 or 5 × 10ⁿ) and a range snapped to whole steps, so labels read
   // 19 / 20 / 21 or 45 / 50 / 55. Both axes get the same number of steps so they share the gridlines.
   const nTarget = Math.max(3, Math.min(8, Math.floor(ph / 42)));
@@ -1967,10 +1984,34 @@ function drawChart() {
   const gaps = []; for (let i = 1; i < pts.length; i++) gaps.push(pts[i][0] - pts[i - 1][0]);
   const med = gaps.slice().sort((a, b) => a - b)[gaps.length >> 1] || 1;
   const path = fy => pts.map((p, i) => `${i && p[0] - pts[i - 1][0] <= Math.max(med * 6, gapMin) ? "L" : "M"}${x(p[0]).toFixed(1)},${fy(p).toFixed(1)}`).join("");
+  // Min–max bands when points are averages: a shaded area from each slice's lowest to highest reading,
+  // split at the same gaps as the lines.
+  if (averaged) {
+    const segments = []; let seg = [];
+    pts.forEach((p, i) => { if (i && p[0] - pts[i - 1][0] > Math.max(med * 6, gapMin)) { segments.push(seg); seg = []; } seg.push(p); });
+    segments.push(seg);
+    const band = (lo, hi, fy, color) => {
+      const d = segments.filter(s => s.length).map(s =>
+        "M" + s.map(p => `${x(p[0]).toFixed(1)},${fy(p[hi]).toFixed(1)}`).join("L") +
+        "L" + s.slice().reverse().map(p => `${x(p[0]).toFixed(1)},${fy(p[lo]).toFixed(1)}`).join("L") + "Z").join("");
+      el("path", { d, fill: color, "fill-opacity": 0.16, stroke: "none", "clip-path": "url(#plotClip)" });
+    };
+    if (showH) band(6, 7, yH, col("--hum"));
+    if (showT) band(4, 5, yT, col("--temp"));
+  }
   if (showH) el("path", { d: path(p => yH(p[2])), fill: "none", stroke: col("--hum"), "stroke-width": 1.6, "stroke-linejoin": "round", "clip-path": "url(#plotClip)" });
   if (showT) el("path", { d: path(p => yT(p[1])), fill: "none", stroke: col("--temp"), "stroke-width": 2, "stroke-linejoin": "round", "clip-path": "url(#plotClip)" });
   const cursor = el("line", { x1: 0, x2: 0, y1: T, y2: T + ph, stroke: col("--muted"), "stroke-dasharray": "3 3", visibility: "hidden" });
   plotted = { pts: inWin.length ? inWin : pts, x, cursor, L, pw };
+  // Note under the chart while points are averages.
+  const note = $("avgNote");
+  if (note) {
+    if (averaged) {
+      const ns = pts.map(p => p[3]).sort((a, b) => a - b), nMed = ns[ns.length >> 1];
+      note.textContent = `Each point is an average of ~${fmtDuration(span / buckets)} (~${nMed} readings); the shaded band shows the lowest–highest reading. Zoom in for single readings.`;
+      note.classList.remove("hidden");
+    } else note.classList.add("hidden");
+  }
   if (!data.length) return;
   // stats on raw data in range
   let mn = data[0], mx = data[0], sum = 0, hs = 0;
@@ -1992,7 +2033,16 @@ function showReadoutAt(clientX) {
   const { pts, x, cursor } = plotted;
   let best = pts[0]; for (const p of pts) if (Math.abs(x(p[0]) - px) < Math.abs(x(best[0]) - px)) best = p;
   cursor.setAttribute("x1", x(best[0])); cursor.setAttribute("x2", x(best[0])); cursor.setAttribute("visibility", "visible");
-  $("readout").textContent = `${localStr(best[0])}  ·  ${best[1].toFixed(2)} °C  ·  ${best[2].toFixed(1)} %`;
+  const [t, tm, hm, n, tLo, tHi, hLo, hHi, tA, tB] = best;
+  $("readout").textContent = n > 1
+    // Averaged point: say so, with its time span, the range of readings behind it, and how many.
+    ? `${localStr(tA)} – ${localStr(tB)}  ·  avg ${tm.toFixed(1)} °C (${tLo.toFixed(1)}–${tHi.toFixed(1)})  ·  avg ${hm.toFixed(0)} % (${hLo.toFixed(0)}–${hHi.toFixed(0)})  ·  ${n} readings`
+    : `${localStr(t)}  ·  ${tm.toFixed(2)} °C  ·  ${hm.toFixed(1)} %`;
+}
+function fmtDuration(sec) {
+  if (sec < 90 * 60) return `${Math.max(1, Math.round(sec / 60))} min`;
+  if (sec < 36 * 3600) { const h = sec / 3600; return `${h < 10 ? h.toFixed(1) : Math.round(h)} h`; }
+  const d = sec / 86400; return `${d < 10 ? d.toFixed(1) : Math.round(d)} days`;
 }
 function hideReadout() {
   if (plotted) plotted.cursor.setAttribute("visibility", "hidden");
