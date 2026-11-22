@@ -200,6 +200,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
     <div class="row">
       <button id="bDump" class="primary">Download all</button>
       <button id="bDumpSyncErase" class="danger">Download, set clock &amp; erase…</button>
+      <button id="bShareAll">Share all sensors…</button>
     </div>
     <p class="muted">“Download all” uses the History download options below (samples, set clock, erase).</p>
     <h3 class="sub">Clocks</h3>
@@ -501,7 +502,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 68;
+const APP_VERSION = 69;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -514,10 +515,16 @@ function log(msg, level) {
   if (!logDirty) { logDirty = true; setTimeout(flushLog, 400); }
 }
 const dbg = msg => log(msg, "dbg");
-function flushLog() {
+// Writing the whole log (up to ~1 MB) is slow on a phone, so: the on-screen copy is only updated while
+// the Settings tab is open, and storage at most every 5 s (and when the page is hidden).
+let logSavedAt = 0, logSaveTimer = null;
+function flushLog(force) {
   logDirty = false;
-  const el = $("log"); if (el) { const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 20; el.textContent = logLines.join("\n"); if (atEnd) el.scrollTop = el.scrollHeight; }
-  lsSet("debugLog", logLines);
+  const el = $("log");
+  if (el && (document.body.dataset.tab === "settings" || force)) { const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 20; el.textContent = logLines.join("\n"); if (atEnd) el.scrollTop = el.scrollHeight; }
+  const save = () => { logSaveTimer = null; logSavedAt = Date.now(); lsSet("debugLog", logLines); };
+  if (force || Date.now() - logSavedAt > 5000) save();
+  else if (!logSaveTimer) logSaveTimer = setTimeout(save, 5000 - (Date.now() - logSavedAt));
 }
 const hex = u8 => [...u8].map(x => x.toString(16).padStart(2, "0")).join(" ");
 const t0 = () => performance.now();
@@ -539,7 +546,8 @@ function logEnvironment() {
   if (bt && bt.getAvailability) bt.getAvailability().then(a => dbg(`Bluetooth availability: ${a}`), e => dbg(`getAvailability error: ${describeErr(e)}`));
 }
 document.addEventListener("visibilitychange", () => dbg(`Page ${document.hidden ? "hidden (backgrounded)" : "visible"}${chr ? " - BLE connected" : ""}`));
-window.addEventListener("pagehide", () => { dbg("pagehide"); flushLog(); });
+window.addEventListener("pagehide", () => { dbg("pagehide"); flushLog(true); });
+document.addEventListener("visibilitychange", () => { if (document.hidden) flushLog(true); });
 function setStatus(text, cls) { const s = $("connStatus"); s.textContent = text; s.className = "status devstate " + (cls || ""); }
 // Best guess of which sensor a device handle is, before it's been identified over the connection.
 function guessLabel(dev, expectedName) {
@@ -770,7 +778,7 @@ async function wakeRemembered(name, d, timeoutMs) {
 // Only while the page is visible (listening costs phone battery).
 const liveWatch = new Map(); // name -> { d, ctrl, onAdv }
 async function watchLive(name, d) {
-  if (liveWatch.has(name) || typeof d.watchAdvertisements !== "function" || removedSensors.has(name)) return;
+  if (liveNoData || liveWatch.has(name) || typeof d.watchAdvertisements !== "function" || removedSensors.has(name)) return;
   let ctrl = null; try { ctrl = new AbortController(); } catch {}
   const onAdv = ev => {
     d._advSeen = Date.now(); d._advCount = (d._advCount || 0) + 1;
@@ -790,7 +798,12 @@ async function watchLive(name, d) {
       if (!p && d._advCount <= 2) dbg(`${name} broadcast contents: ${describeAdvEvent(ev)}`);
     }
     if (p) liveUpdate(name, Object.assign({ seen: Date.now() }, p));
-    else scheduleKnownRender(4000);
+    else if (d._advCount >= 3 && !d._advParsed) {
+      // This browser delivers the broadcasts without their data (Bluefy, v67/v68 logs): listening only
+      // costs work on every broadcast (it made chart dragging stutter), so stop for this visit.
+      dbg(`${name}: broadcasts carry no readings in this browser - live listening stopped`);
+      liveNoData = true; stopLive();  // the browser treats all sensors the same
+    }
   };
   d.addEventListener("advertisementreceived", onAdv);
   liveWatch.set(name, { d, ctrl, onAdv });
@@ -798,14 +811,18 @@ async function watchLive(name, d) {
   catch (e) { dbg(`${name}: live watching failed: ${errDetail(e)}`); d.removeEventListener("advertisementreceived", onAdv); liveWatch.delete(name); d._liveFailed = describeErr(e); }
   scheduleKnownRender();
 }
-function startLive() { if (!document.hidden) for (const [n, d] of remembered) watchLive(n, d); }
+let liveNoData = false;  // set once broadcasts turn out to arrive without readings
+function startLive() { if (!document.hidden && !liveNoData) for (const [n, d] of remembered) watchLive(n, d); }
+function unwatchLive(n) {
+  const w = liveWatch.get(n); if (!w) return;
+  try { if (w.ctrl) w.ctrl.abort(); else if (w.d.unwatchAdvertisements) w.d.unwatchAdvertisements(); } catch {}
+  w.d.removeEventListener("advertisementreceived", w.onAdv); w.d._liveWatching = false;
+  liveWatch.delete(n); scheduleKnownRender();
+}
 function stopLive() {
-  for (const [n, w] of liveWatch) {
-    try { if (w.ctrl) w.ctrl.abort(); else if (w.d.unwatchAdvertisements) w.d.unwatchAdvertisements(); } catch {}
-    w.d.removeEventListener("advertisementreceived", w.onAdv); w.d._liveWatching = false;
-  }
-  if (liveWatch.size) dbg(`Live watching stopped (${liveWatch.size} sensors)`);
-  liveWatch.clear();
+  const n = liveWatch.size;
+  for (const name of [...liveWatch.keys()]) unwatchLive(name);
+  if (n) dbg(`Live watching stopped (${n} sensors)`);
 }
 // Tiles: one per sensor with readings, newest values from broadcasts (or the last connection).
 function renderRooms() {
@@ -846,6 +863,7 @@ function renderRooms() {
     !ble.getDevices ? "This browser can't list sensors from earlier visits, so it can't listen live - values are from connections." :
     noWatch ? "This browser can't listen to broadcasts (no watchAdvertisements) - values are from connections." :
     !remembered.size ? "No sensors remembered from earlier visits yet - connect to each once, then they update live here." :
+    liveNoData ? "This browser passes the sensors' broadcasts on without their readings, so live values aren't possible here. Tiles show the latest downloaded values." :
     liveWatch.size ? (heard >= 3 && !parsed
       ? `Listening to ${liveWatch.size} sensor(s): ${heard} broadcasts heard, but this browser passes them on without their readings, so tiles show the latest downloaded values.`
       : `Live: listening to ${liveWatch.size} of ${remembered.size} remembered sensor(s) · ${heard} broadcasts heard.`) :
@@ -2743,7 +2761,7 @@ function showTab(t) {
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.go === t));
   lsSet("tab", t);
   if (t === "history" || t === "single") drawChart();
-  if (t === "settings") { const el = $("log"); el.scrollTop = el.scrollHeight; }
+  if (t === "settings") { flushLog(true); const el = $("log"); el.scrollTop = el.scrollHeight; }
 }
 // One-line connection status shown under the tabs on every tab.
 function updateStatusBar() {
@@ -2820,6 +2838,8 @@ function updateStatusBar() {
   $("btnSelNone").onclick = () => { batchSel.clear(); saveSel(); renderKnown(); };
   $("bDump").onclick = () => withBusy(BATCH.dump);
   $("bDumpSyncErase").onclick = () => withBusy(BATCH.dumpSyncErase);
+  // Straight from the tap (iOS only opens the share sheet then); same files as History → Share all sensors.
+  $("bShareAll").onclick = () => { shareAllDevices(); $("batchOut").textContent = $("shareMsg").textContent; };
   $("bGetTime").onclick = () => withBusy(BATCH.getTime);
   $("bSetTime").onclick = () => withBusy(BATCH.setTime);
   $("bGetCfg").onclick = () => withBusy(BATCH.getCfg);
