@@ -67,6 +67,7 @@ details summary { cursor: pointer; font-weight: 600; }
 #log { font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; max-height: 260px; overflow: auto;
   background: var(--input); border-radius: 8px; padding: 8px; margin-top: 8px; }
 .hidden { display: none !important; }
+button.linkbtn { border: 0; background: none; padding: 0; color: var(--err); font-size: 12px; text-decoration: underline; cursor: pointer; }
 /* Big line at the top of the Sensor section: which sensor, and whether it's connecting/connected */
 .devstate { font-size: 16px; font-weight: 700; margin: -2px 0 10px; padding: 6px 10px; border-radius: 9px;
   background: var(--input); border: 1px solid var(--line); overflow-wrap: anywhere; }
@@ -91,7 +92,7 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
 .ks:first-child { border-top: 0; }
 .ks .nm { font-weight: 600; }
 #knownList .nm { font-size: 17px; }
-/* All sensors tab: no per-sensor Connect buttons (batch operations connect by themselves) */
+/* Batch tab: no per-sensor Connect buttons (batch operations connect by themselves) */
 body[data-tab="all"] #knownList .ks > button { display: none; }
 #batchStatus { scroll-margin-top: 70px; } /* stay clear of the sticky tab bar when scrolled to */
 #knownList .nm input[type=checkbox] { width: 20px; height: 20px; }
@@ -106,7 +107,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
   <h1>ATC Thermometers <span class="muted" id="appVersionTop" style="font-weight:500;font-size:14px"></span></h1>
   <nav class="tabs" id="tabs">
     <button data-go="single">Sensor</button>
-    <button data-go="all">All sensors</button>
+    <button data-go="all">Batch</button>
     <button data-go="history">History</button>
     <button data-go="settings">Settings</button>
   </nav>
@@ -186,7 +187,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
       <input type="file" id="fileBatchCfg" accept=".json,application/json" multiple class="hidden">
     </div>
     <p class="muted" id="batchCfgSrc"></p>
-    <p class="muted">“Write config” keeps each sensor's own hardware‑specific bits and calibration offsets. Files named like <code>config_ATC_xxxxxx_….json</code> (as your Windows scripts write them) go to that sensor only; any other file is used for all ticked sensors without their own file.</p>
+    <p class="muted">“Write config” keeps each sensor's own hardware‑specific bits and calibration offsets. Files named like <code>config_ATC_xxxxxx_….json</code> go to that sensor only; any other file is used for all ticked sensors without their own file.</p>
     <div class="row" id="batchStatus"><button id="bStop" class="danger hidden">Stop</button></div>
     <div class="progress" id="batchProg"><div></div></div>
     <div id="batchOut" style="margin-top:8px"></div>
@@ -276,6 +277,16 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
   <section class="card" data-tab="single">
     <details id="cfgDetails">
       <summary>Sensor configuration</summary>
+      <h3 class="sub" id="renameBox">Bluetooth name (shown in the Bluetooth picker)</h3>
+      <p class="muted" id="btNameCur">Connect to a sensor to see its Bluetooth name.</p>
+      <div class="row">
+        <input id="btNameNew" maxlength="20" size="18" placeholder="ATC_Kitchen" autocapitalize="off" autocorrect="off" spellcheck="false" disabled>
+        <button id="btnRename" disabled>Rename</button>
+        <button id="btnRenameReset" disabled>Reset to default</button>
+      </div>
+      <p class="muted">Must start with ATC_ (so the Connect picker still lists it), up to 20 letters, digits, _ or -. The sensor applies the new name after you disconnect; the iPhone may keep showing the old name until Bluetooth is turned off and on.</p>
+
+      <h3 class="sub">Settings</h3>
       <p class="muted">Read on connect. Change values, then “Write config”. Fields marked hardware‑specific mean different things per model; leave them unless you know.</p>
       <div class="row">
         <button id="btnGetCfg" disabled>Re-read config</button>
@@ -287,22 +298,13 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
         <input type="file" id="fileCfg" accept=".json,application/json" class="hidden">
       </div>
       <div id="cfgForm" class="cfg-grid" style="margin-top:12px"></div>
-
-      <h3 class="sub" id="renameBox">Bluetooth name (shown in the Bluetooth picker)</h3>
-      <p class="muted" id="btNameCur">Connect to a sensor to see its Bluetooth name.</p>
-      <div class="row">
-        <input id="btNameNew" maxlength="20" size="18" placeholder="ATC_Kitchen" autocapitalize="off" autocorrect="off" spellcheck="false" disabled>
-        <button id="btnRename" disabled>Rename</button>
-        <button id="btnRenameReset" disabled>Reset to default</button>
-      </div>
-      <p class="muted">Must start with ATC_ (so the Connect picker still lists it), up to 20 letters, digits, _ or -. The sensor applies the new name after you disconnect; the iPhone may keep showing the old name until Bluetooth is turned off and on. Your Windows scripts are unaffected (they use the address).</p>
     </details>
   </section>
 
   <!-- Sensor list storage -->
   <section class="card" data-tab="settings">
     <h2>Sensor list</h2>
-    <p class="muted">Your sensors and their descriptions are saved only in this browser on this phone - not in the web page. Load them from the <code>devices.json</code> your Windows scripts use (name, description, address), or let them be added as you connect.</p>
+    <p class="muted">Your sensors and their descriptions are saved only in this browser on this phone - not in the web page. Load them from a <code>devices.json</code> (name, description, address), or let them be added as you connect.</p>
     <div class="row">
       <button id="btnSensorsImport" class="primary">Import sensors from JSON…</button>
       <button id="btnSensorsExport">Export sensors to JSON…</button>
@@ -418,7 +420,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 44;
+const APP_VERSION = 45;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -600,8 +602,24 @@ function shownName(n) {
   const bt = (known[n] && known[n].btName) || n;
   return rooms[n] ? `${rooms[n]} · ${bt}` : bt;
 }
+// Sensors removed from the list stay out of it until the user connects to, adds or imports them again
+// (otherwise remembered-sensor wake-ups and scans would quietly add them back).
+const removedSensors = new Set(lsGet("removedSensors", []));
+const saveRemoved = () => lsSet("removedSensors", [...removedSensors]);
+function unremoveSensor(name) { if (removedSensors.delete(name)) saveRemoved(); }
 function rememberSensor(name, data) {
+  if (removedSensors.has(name)) return;
   known[name] = Object.assign(known[name] || {}, data); saveKnown(); scheduleKnownRender();
+}
+function removeSensor(name) {
+  if (chr && sensorName === name) { alert("Disconnect from this sensor before removing it."); return; }
+  if (!confirm(`Remove ${shownName(name)} from the sensor list?\n\nIts downloaded history stays on this phone. It comes back if you connect to it, add it with “Add sensors…”, or import it again.`)) return;
+  delete known[name]; delete rooms[name];
+  reachable.delete(name); remembered.delete(name); batchSel.delete(name);
+  removedSensors.add(name);
+  saveKnown(); lsSet("rooms", rooms); saveSel(); saveRemoved();
+  log(`Sensor ${name} removed from the list`);
+  renderKnown(); refreshDeviceList();
 }
 let renderPending = false;
 function scheduleKnownRender() { if (renderPending) return; renderPending = true; setTimeout(() => { renderPending = false; renderKnown(); }, 300); }
@@ -655,6 +673,7 @@ async function importSensors(file) {
     if (!/^ATC_[0-9A-F]{6}$/i.test(name)) name = mac ? nameFromMac(mac) : "";   // custom names: identify by address
     if (!name) { skipped++; continue; }
     name = "ATC_" + name.slice(4).toUpperCase();
+    unremoveSensor(name);  // importing on purpose brings a removed sensor back
     const isNew = !knownNames().includes(name);
     known[name] = Object.assign(known[name] || {}, mac ? { mac } : {});
     if (typeof d.description === "string" && d.description.trim()) rooms[name] = d.description.trim();
@@ -727,6 +746,10 @@ function renderKnown() {
     meta.append(avail);
     meta.append(
       (btName !== name ? ` · ID ${name}` : "") + ` · MAC ${k.mac || macFromName(name) || "?"}`);
+    const rm = document.createElement("button");
+    rm.className = "linkbtn"; rm.textContent = "Remove"; rm.title = "Remove from the list";
+    rm.onclick = () => removeSensor(name);
+    meta.append(" · ", rm);
     row.append(left, btn, meta); box.appendChild(row);
   }
   const rm = $("readyMsg"); if (rm) rm.textContent = `${ready} available · ${ticked} ticked`;
@@ -758,7 +781,7 @@ function onAdvertisement(ev) {
     let uu = ""; try { uu = (ev.uuids || []).join(","); } catch {}
     dbg(`ADV "${advName}" id=${id} rssi=${ev.rssi} tx=${ev.txPower}${uu ? " uuids=" + uu : ""}${sdTxt} → ${name ? name + (p ? ` ${JSON.stringify(p)}` : "") : "not a known sensor"}`);
   }
-  if (!name) return;
+  if (!name || removedSensors.has(name)) return;
   if (ev.device) reachable.set(name, ev.device);
   rememberSensor(name, Object.assign({ seen: Date.now() }, ev.device && ev.device.id ? { id: ev.device.id } : {},
     /^ATC_/i.test(advName) ? { btName: advName } : {}, p || {}));
@@ -923,6 +946,7 @@ async function connectDevice(dev, expectedName, opts = {}) {
     if (!currentCfg) { step = "reading config"; await request([0x55], b => b[0] === 0x55 && b.length - 1 >= 9, 4000); dbg(`Config ${currentCfg ? "received on second request" : "still not received"}`); }
     step = "identifying the sensor";
     sensorName = (await identifySensor()) || expectedName || device.name || "unknown";
+    unremoveSensor(sensorName);  // connecting on purpose brings a removed sensor back
     rememberSensor(sensorName, { id: device.id, mac: macFromName(sensorName) || undefined });
     if (!opts.batch) await readBtName();
     reachable.set(sensorName, device);
@@ -1236,6 +1260,7 @@ async function addSensor() {
     if (await connectDevice(dev, null, { batch: true })) { name = sensorName; await disconnectAndWait(); }
   }
   if (!name) { $("readyMsg").textContent = "Couldn't identify that sensor."; return; }
+  unremoveSensor(name);
   reachable.set(name, dev); rememberSensor(name, { id: dev.id });
   renderKnown();
   $("readyMsg").textContent = `${sensorLabel(name)} is available. ` + $("readyMsg").textContent;
@@ -1335,8 +1360,8 @@ function updateTzLabels() {
   $("timeMode").options[1].textContent = `Local - ${modeLabel("local")}`;
   $("optSyncLabel").textContent = `Set clock afterwards (${prefs.timeMode === "utc" ? "UTC" : modeLabel("local")})`;
   $("tzHelp").textContent = prefs.timeMode === "utc"
-    ? "Read clock, Set clock and “Set clock afterwards” all use UTC - the same as your Windows scripts (--time-mode utc). Charts still show your local time."
-    : `Read clock, Set clock and “Set clock afterwards” use the phone's local time, ${modeLabel("local")}. Your Windows scripts use UTC, so a sensor set here will be an hour off for them; it also shifts at daylight-saving changes.`;
+    ? "Read clock, Set clock and “Set clock afterwards” all use UTC. Charts still show your local time."
+    : `Read clock, Set clock and “Set clock afterwards” use the phone's local time, ${modeLabel("local")}. It shifts at daylight-saving changes, so set the clocks again then.`;
 }
 async function setTime() {
   const t = deviceEpochNow(prefs.timeMode);
@@ -1940,7 +1965,7 @@ function updateStatusBar() {
       dbg(`getDevices(): ${devs.map(d => `${d.name}/${String(d.id).slice(0, 8)}`).join(", ") || "none"}; watchAdvertisements ${devs[0] ? typeof devs[0].watchAdvertisements : "n/a"}`);
       for (const d of devs) {
         const n = sensorFromBtName(d.name) || Object.keys(known).find(k => known[k].id === d.id);
-        if (!n) continue;
+        if (!n || removedSensors.has(n)) continue;
         d._remembered = true;
         remembered.set(n, d);
         wakeRemembered(n, d, 20000).then(ok => { if (ok && !reachable.has(n)) { reachable.set(n, d); renderKnown(); } });
