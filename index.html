@@ -501,7 +501,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 67;
+const APP_VERSION = 68;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -532,7 +532,10 @@ function logEnvironment() {
   dbg(`Web Bluetooth: ${!!bt}; requestDevice ${!!(bt && bt.requestDevice)}, getAvailability ${!!(bt && bt.getAvailability)}, getDevices ${!!(bt && bt.getDevices)}, requestLEScan ${!!(bt && bt.requestLEScan)}, events ${!!(bt && bt.addEventListener)}`);
   if (ch) dbg(`Characteristic API: writeValue ${!!ch.writeValue}, writeValueWithResponse ${!!ch.writeValueWithResponse}, writeValueWithoutResponse ${!!ch.writeValueWithoutResponse}`);
   dbg(`Share: share ${!!navigator.share}, canShare ${!!navigator.canShare}, clipboard ${!!(navigator.clipboard && navigator.clipboard.writeText)}; IndexedDB ${typeof indexedDB !== "undefined"}; secure context ${window.isSecureContext}`);
-  dbg(`Prefs ${JSON.stringify(prefs)}; known sensors ${JSON.stringify(lsGet("known", {}))}`);
+  // Sensors without their stored configs (those made each page load's log entry several KB long).
+  const ks = lsGet("known", {}), brief = {};
+  for (const [n, k] of Object.entries(ks)) { const { cfg, ...rest } = k; brief[n] = Object.assign(rest, cfg ? { cfgLogEvery: logIntervalFromCfg(cfg) } : {}); }
+  dbg(`Prefs ${JSON.stringify(prefs)}; known sensors ${JSON.stringify(brief)}`);
   if (bt && bt.getAvailability) bt.getAvailability().then(a => dbg(`Bluetooth availability: ${a}`), e => dbg(`getAvailability error: ${describeErr(e)}`));
 }
 document.addEventListener("visibilitychange", () => dbg(`Page ${document.hidden ? "hidden (backgrounded)" : "visible"}${chr ? " - BLE connected" : ""}`));
@@ -744,7 +747,7 @@ async function wakeRemembered(name, d, timeoutMs) {
     const onAdv = ev => {
       d._advSeen = Date.now();
       let p = null;
-      try { if (ev.serviceData) for (const [k, v] of ev.serviceData) if (String(k).toLowerCase().startsWith("0000181a")) p = parseAdv(v); } catch {}
+      try { for (const [k, dv] of advEntries(ev.serviceData)) if (dv && (k.startsWith("0000181a") || k === "181a")) p = parseAdv(dv); } catch {}
       dbg(`${name}: advertisement heard after ${since(s)} (rssi ${ev.rssi})${p ? " " + JSON.stringify(p) : ""}`);
       if (p) rememberSensor(name, Object.assign({ seen: Date.now() }, p));
       d.removeEventListener("advertisementreceived", onAdv);
@@ -773,12 +776,18 @@ async function watchLive(name, d) {
     d._advSeen = Date.now(); d._advCount = (d._advCount || 0) + 1;
     if (!reachable.has(name)) reachable.set(name, d);
     let p = null, keys = [];
-    try { if (ev.serviceData) for (const [k, v] of ev.serviceData) { keys.push(`${String(k).slice(4, 8)}:${v.byteLength}B`); if (String(k).toLowerCase().startsWith("0000181a")) p = parseAdv(v); } } catch (e) { keys.push("error " + describeErr(e)); }
+    try {
+      for (const [k, dv] of advEntries(ev.serviceData)) {
+        keys.push(`${k.length > 8 ? k.slice(4, 8) : k}:${dv ? dv.byteLength + "B" : "?"}`);
+        if (dv && (k.startsWith("0000181a") || k === "181a")) p = parseAdv(dv);
+      }
+    } catch (e) { keys.push("error " + describeErr(e)); }
     if (p) d._advParsed = (d._advParsed || 0) + 1;
     // Log the first few broadcasts per sensor in full, then one per minute, to see what arrives.
     if (d._advCount <= 3 || Date.now() - (d._advLogged || 0) > 60000) {
       d._advLogged = Date.now();
       dbg(`${name} live #${d._advCount}: rssi ${ev.rssi}, service data [${keys.join(", ") || "none"}]${p ? " " + JSON.stringify(p) : " - no readings in it"}`);
+      if (!p && d._advCount <= 2) dbg(`${name} broadcast contents: ${describeAdvEvent(ev)}`);
     }
     if (p) liveUpdate(name, Object.assign({ seen: Date.now() }, p));
     else scheduleKnownRender(4000);
@@ -806,7 +815,12 @@ function renderRooms() {
   $("roomsCard").classList.toggle("hidden", !names.length);
   box.innerHTML = "";
   for (const n of names) {
-    const k = known[n] || {}, age = k.seen ? Date.now() - k.seen : Infinity;
+    let k = known[n] || {};
+    // Use the newest of: the last broadcast heard, or the latest downloaded reading on this phone.
+    const hist = histCache.get(histId(n)), last = hist && hist.length ? hist[hist.length - 1] : null;
+    if (last && (k.t == null || !k.seen || last[0] * 1000 > k.seen))
+      k = Object.assign({}, k, { t: last[1], h: last[2], b: null, seen: last[0] * 1000, fromLog: true });
+    const age = k.seen ? Date.now() - k.seen : Infinity;
     if (k.t == null) {
       const tile = document.createElement("div"); tile.className = "room stale";
       tile.innerHTML = `<div class="rn"></div><div class="rt">–</div><div class="rh">&nbsp;</div><div class="rm">no reading yet</div>`;
@@ -820,7 +834,7 @@ function renderRooms() {
     tile.querySelector(".rt").textContent = `${k.t.toFixed(1)}°`;
     tile.querySelector(".rh").textContent = `${k.h.toFixed(0)} %`;
     const logW = logWarning(n);
-    tile.querySelector(".rm").textContent = [k.b != null ? `🔋${k.b}%` : "", k.seen ? ago(k.seen) : "", logW && (logW.level === "soon" || logW.level === "full") ? "⚠ log" : ""].filter(Boolean).join(" · ");
+    tile.querySelector(".rm").textContent = [k.b != null ? `🔋${k.b}%` : "", k.seen ? (k.fromLog ? "downloaded, " : "") + ago(k.seen) : "", logW && (logW.level === "soon" || logW.level === "full") ? "⚠ log" : ""].filter(Boolean).join(" · ");
     tile.title = `${shownName(n)}${k.seen ? " - heard " + ago(k.seen) : ""}`;
     box.appendChild(tile);
   }
@@ -832,7 +846,9 @@ function renderRooms() {
     !ble.getDevices ? "This browser can't list sensors from earlier visits, so it can't listen live - values are from connections." :
     noWatch ? "This browser can't listen to broadcasts (no watchAdvertisements) - values are from connections." :
     !remembered.size ? "No sensors remembered from earlier visits yet - connect to each once, then they update live here." :
-    liveWatch.size ? `Live: listening to ${liveWatch.size} of ${remembered.size} remembered sensor(s) · ${heard} broadcasts heard${heard && !parsed ? " but none contained readings (check the broadcast format in the sensor configuration)" : ""}.` :
+    liveWatch.size ? (heard >= 3 && !parsed
+      ? `Listening to ${liveWatch.size} sensor(s): ${heard} broadcasts heard, but this browser passes them on without their readings, so tiles show the latest downloaded values.`
+      : `Live: listening to ${liveWatch.size} of ${remembered.size} remembered sensor(s) · ${heard} broadcasts heard.`) :
     document.hidden ? "Paused while the page is in the background." : "Starting to listen…";
 }
 
@@ -941,6 +957,39 @@ function renderKnown() {
   const rm = $("readyMsg"); if (rm) rm.textContent = `${ready} available · ${ticked} ticked`;
   for (const id of ["bDump", "bDumpSyncErase", "bGetTime", "bSetTime", "bGetCfg", "bSetCfg", "btnAddSensors"]) { const b = $(id); if (b) b.disabled = busy || (id !== "btnAddSensors" && !ticked); }
 }
+// Service data of an advertisement event as [uuid, DataView] pairs. The standard is a Map of
+// DataViews; Bluefy hands over a plain object (v67 log: "{} is not iterable"), possibly with
+// ArrayBuffers, byte arrays or strings as values - accept all of those.
+function toDataView(v) {
+  if (v == null) return null;
+  if (v instanceof DataView) return v;
+  if (v instanceof ArrayBuffer) return new DataView(v);
+  if (ArrayBuffer.isView(v)) return new DataView(v.buffer, v.byteOffset, v.byteLength);
+  if (Array.isArray(v)) return new DataView(Uint8Array.from(v).buffer);
+  if (typeof v === "string") {
+    const s = v.replace(/[\s:<>-]/g, "");
+    if (/^([0-9a-f]{2})+$/i.test(s)) return new DataView(Uint8Array.from(s.match(/../g).map(x => parseInt(x, 16))).buffer);
+    try { const b = atob(v); return new DataView(Uint8Array.from(b, c => c.charCodeAt(0)).buffer); } catch {}
+  }
+  if (typeof v === "object" && v.buffer instanceof ArrayBuffer) return new DataView(v.buffer);
+  return null;
+}
+function advEntries(sd) {
+  if (!sd) return [];
+  let pairs = [];
+  if (typeof sd.forEach === "function" && typeof sd.get === "function") sd.forEach((v, k) => pairs.push([k, v]));
+  else if (typeof sd === "object") pairs = Object.entries(sd);
+  return pairs.map(([k, v]) => [String(k).toLowerCase(), toDataView(v), v]);
+}
+// One-line description of what a browser put into an advertisement event (for the debug log).
+function describeAdvEvent(ev) {
+  const d = x => { if (x == null) return String(x); const c = x.constructor ? x.constructor.name : typeof x;
+    let keys = []; try { keys = typeof x.keys === "function" && typeof x.get === "function" ? [...x.keys()] : Object.keys(x); } catch {}
+    let json = ""; try { json = JSON.stringify(x).slice(0, 120); } catch {}
+    return `${c}(${keys.length} keys${keys.length ? ": " + keys.slice(0, 4).join(",") : ""})${json && json !== "{}" ? " " + json : ""}`; };
+  let own = []; try { for (const k in ev) if (!/^(type|target|currentTarget|srcElement|timeStamp|isTrusted|bubbles|cancelable|composed|defaultPrevented|eventPhase|returnValue|cancelBubble|NONE|CAPTURING_PHASE|AT_TARGET|BUBBLING_PHASE)$/.test(k) && typeof ev[k] !== "function") own.push(k); } catch {}
+  return `fields [${own.join(",")}] serviceData ${d(ev.serviceData)} manufacturerData ${d(ev.manufacturerData)} uuids ${d(ev.uuids)}`;
+}
 // Parse sensor advertisements. pvvx "custom" format (service data 0x181A, 15+ bytes):
 // MAC[6] reversed, temp int16 x0.01, hum uint16 x0.01, batt mV uint16, batt %, counter, flags (all little-endian).
 // ATC1441 format (13 bytes): MAC[6] in order, temp int16 BE x0.1, hum %, batt %, batt mV uint16 BE, counter.
@@ -954,7 +1003,7 @@ const advLogged = new Map(); let advTotal = 0;
 function onAdvertisement(ev) {
   advTotal++;
   let sd = null;
-  if (ev.serviceData) for (const [k, v] of ev.serviceData) if (String(k).toLowerCase().startsWith("0000181a")) sd = v;
+  try { for (const [k, dv] of advEntries(ev.serviceData)) if (dv && (k.startsWith("0000181a") || k === "181a")) sd = dv; } catch {}
   const advName = ev.name || (ev.device && ev.device.name) || "";
   const p = sd ? parseAdv(sd) : null;
   let name = p && p.mac.startsWith(OUI) ? nameFromMac(p.mac) : sensorFromBtName(advName);
@@ -963,7 +1012,7 @@ function onAdvertisement(ev) {
   if (Date.now() - (advLogged.get(id) || 0) > 15000) {
     advLogged.set(id, Date.now());
     let sdTxt = "";
-    try { if (ev.serviceData) for (const [k, v] of ev.serviceData) sdTxt += ` sd[${String(k).slice(4, 8)}]=${hex(new Uint8Array(v.buffer, v.byteOffset, v.byteLength))}`; } catch {}
+    try { for (const [k, dv] of advEntries(ev.serviceData)) sdTxt += ` sd[${k.length > 8 ? k.slice(4, 8) : k}]=${dv ? hex(new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength)) : "?"}`; } catch {}
     let uu = ""; try { uu = (ev.uuids || []).join(","); } catch {}
     dbg(`ADV "${advName}" id=${id} rssi=${ev.rssi} tx=${ev.txPower}${uu ? " uuids=" + uu : ""}${sdTxt} → ${name ? name + (p ? ` ${JSON.stringify(p)}` : "") : "not a known sensor"}`);
   }
