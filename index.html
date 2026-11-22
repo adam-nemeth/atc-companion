@@ -472,7 +472,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 56;
+const APP_VERSION = 57;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -2027,10 +2027,15 @@ function drawChart() {
     pts.forEach((p, i) => { if (i && p[0] - pts[i - 1][0] > Math.max(med * 6, gapMin)) { segments.push(seg); seg = []; } seg.push(p); });
     segments.push(seg);
     const band = (lo, hi, fy, color) => {
-      const d = segments.filter(s => s.length).map(s =>
+      const segs = segments.filter(s => s.length);
+      const edge = idx => segs.map(s => "M" + s.map(p => `${x(p[0]).toFixed(1)},${fy(p[idx]).toFixed(1)}`).join("L")).join("");
+      const d = segs.map(s =>
         "M" + s.map(p => `${x(p[0]).toFixed(1)},${fy(p[hi]).toFixed(1)}`).join("L") +
         "L" + s.slice().reverse().map(p => `${x(p[0]).toFixed(1)},${fy(p[lo]).toFixed(1)}`).join("L") + "Z").join("");
-      el("path", { d, fill: color, "fill-opacity": 0.16, stroke: "none", "clip-path": "url(#plotClip)" });
+      el("path", { d, fill: color, "fill-opacity": 0.26, stroke: "none", "clip-path": "url(#plotClip)" });
+      // Thin lines along the highest and the lowest readings, so the extremes read clearly.
+      for (const idx of [hi, lo])
+        el("path", { d: edge(idx), fill: "none", stroke: color, "stroke-width": 1, "stroke-opacity": 0.75, "stroke-linejoin": "round", "clip-path": "url(#plotClip)" });
     };
     if (showH) band(6, 7, yH, col("--hum"));
     if (showT) band(4, 5, yT, col("--temp"));
@@ -2049,7 +2054,7 @@ function drawChart() {
       note.classList.remove("hidden");
     } else if (averaged) {
       const ns = pts.map(p => p[3]).sort((a, b) => a - b), nMed = ns[ns.length >> 1];
-      note.textContent = `Each point is an average of ~${fmtDuration(span / buckets)} (~${nMed} readings); the shaded band shows the lowest–highest reading. Zoom in for single readings.`;
+      note.textContent = `Each point is an average of ~${fmtDuration(span / buckets)} (~${nMed} readings); the thin lines and shading around it show the highest and lowest reading. Zoom in for single readings.`;
       note.classList.remove("hidden");
     } else note.classList.add("hidden");
   }
