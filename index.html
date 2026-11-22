@@ -475,7 +475,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 58;
+const APP_VERSION = 59;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1980,7 +1980,7 @@ function drawChart() {
   // the phone's own date format, on two lines: time/day on top, date/month/year below where it changes.
   const tk = timeTicks(t0, t1, Math.max(3, Math.floor(pw / 56)), Math.max(3, Math.floor(pw / 42)));
   const fmt = o => new Intl.DateTimeFormat(undefined, o);
-  const f1 = tk.unit === "subday" ? fmt({ hour: "2-digit", minute: "2-digit" })
+  const f1 = tk.unit === "subday" ? fmt({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
     : tk.unit === "day" ? fmt({ weekday: "short", day: "numeric" })
     : tk.unit === "week" ? fmt({ day: "numeric", month: "short" }) : fmt({ month: "short" });
   const f2 = tk.unit === "subday" ? fmt({ weekday: "short", day: "numeric", month: "short" })
