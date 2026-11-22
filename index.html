@@ -475,7 +475,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 59;
+const APP_VERSION = 60;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1759,6 +1759,18 @@ function timeTicks(a, b, maxTicks, maxDateTicks = maxTicks) {
   }
   return { ticks, unit };
 }
+// Width in px of an 11 px chart label (canvas measurement; works even while the chart is hidden).
+let measureCtx = null;
+function measureText11() {
+  let family = "sans-serif";
+  try { family = getComputedStyle($("chart")).fontFamily || family; } catch {}
+  try { measureCtx = measureCtx || document.createElement("canvas").getContext("2d"); } catch {}
+  return (s, bold) => {
+    if (!measureCtx) return s.length * (bold ? 7 : 6.5);
+    measureCtx.font = `${bold ? "600 " : ""}11px ${family}`;
+    return measureCtx.measureText(s).width;
+  };
+}
 // Night hours for the chart shading (Settings), as [hours, minutes]; default 23:00 → 07:00.
 function nightHours() {
   const parse = (s, d) => { const m = /^(\d{1,2}):(\d{2})$/.exec(s || ""); return m ? [Math.min(23, +m[1]), Math.min(59, +m[2])] : d; };
@@ -1978,26 +1990,41 @@ function drawChart() {
 
   // Time axis: ticks at round local times (15 min … 12 h, midnights, Mondays, 1st of month), labels in
   // the phone's own date format, on two lines: time/day on top, date/month/year below where it changes.
-  const tk = timeTicks(t0, t1, Math.max(3, Math.floor(pw / 56)), Math.max(3, Math.floor(pw / 42)));
   const fmt = o => new Intl.DateTimeFormat(undefined, o);
-  const f1 = tk.unit === "subday" ? fmt({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
-    : tk.unit === "day" ? fmt({ weekday: "short", day: "numeric" })
-    : tk.unit === "week" ? fmt({ day: "numeric", month: "short" }) : fmt({ month: "short" });
-  const f2 = tk.unit === "subday" ? fmt({ weekday: "short", day: "numeric", month: "short" })
-    : tk.unit === "day" ? fmt({ month: "short" }) : fmt({ year: "numeric" });
+  const formatsFor = unit => [
+    unit === "subday" ? fmt({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+      : unit === "day" ? fmt({ weekday: "short", day: "numeric" })
+      : unit === "week" ? fmt({ day: "numeric", month: "short" }) : fmt({ month: "short" }),
+    unit === "subday" ? fmt({ weekday: "short", day: "numeric", month: "short" })
+      : unit === "day" ? fmt({ month: "short" }) : fmt({ year: "numeric" })];
+  // Labels are measured (not guessed), so long names like "Wed 17" or "17 Nov" never overlap on a small
+  // phone: start from the width-based tick count and use fewer ticks until every top-line label fits.
+  const textW = measureText11();
+  const anchorOf = xx => xx - L < 18 ? "start" : L + pw - xx < 18 ? "end" : "middle";
+  const extent = (xx, w) => { const a = anchorOf(xx); return a === "start" ? [xx, xx + w] : a === "end" ? [xx - w, xx] : [xx - w / 2, xx + w / 2]; };
+  const fits = (ticks, f, bold) => { let right = -Infinity;
+    for (const t of ticks) { const [l, r] = extent(x(t), textW(f.format(new Date(t * 1000)), bold)); if (l < right + 6) return false; right = r; }
+    return true; };
+  let tk, f1, f2;
+  for (let n = Math.max(3, Math.floor(pw / 56)), m = Math.max(3, Math.floor(pw / 42)); ; n--, m--) {
+    tk = timeTicks(t0, t1, Math.max(1, n), Math.max(1, m)); [f1, f2] = formatsFor(tk.unit);
+    if (fits(tk.ticks, f1, false) || (n <= 1 && m <= 1)) break;
+  }
   const key2 = d => tk.unit === "subday" ? d.toDateString() : tk.unit === "day" ? `${d.getFullYear()}-${d.getMonth()}` : String(d.getFullYear());
-  let prevKey = null;
+  let prevKey = null, right2 = -Infinity;
   for (const t of tk.ticks) {
     const xx = x(t), d = new Date(t * 1000);
     const isMidnight = d.getHours() === 0 && d.getMinutes() === 0;
     // Vertical gridline: stronger at day starts (or month starts for long ranges).
     el("line", { x1: xx, x2: xx, y1: T, y2: T + ph, stroke: col(isMidnight && tk.unit === "subday" ? "--muted" : "--line"),
       "stroke-width": 1, "stroke-opacity": isMidnight && tk.unit === "subday" ? 0.45 : 1 });
-    const anchor = xx - L < 18 ? "start" : L + pw - xx < 18 ? "end" : "middle";
+    const anchor = anchorOf(xx);
     el("text", { x: xx, y: T + ph + 14, "text-anchor": anchor, "font-size": 11, fill: col("--muted") }, f1.format(d));
     const k2 = key2(d);
     if (k2 !== prevKey) {
-      el("text", { x: xx, y: T + ph + 28, "text-anchor": anchor, "font-size": 11, "font-weight": 600, fill: col("--text") }, f2.format(d));
+      // Second line (date / month / year where it changes): skipped if it would run into the previous one.
+      const s2 = f2.format(d), [l2, r2] = extent(xx, textW(s2, true));
+      if (l2 >= right2 + 6) { el("text", { x: xx, y: T + ph + 28, "text-anchor": anchor, "font-size": 11, "font-weight": 600, fill: col("--text") }, s2); right2 = r2; }
       prevKey = k2;
     }
   }
