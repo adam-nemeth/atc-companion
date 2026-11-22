@@ -245,7 +245,9 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
       </label>
       <label><input type="checkbox" id="optSync" checked> <span id="optSyncLabel">Set clock afterwards (UTC)</span></label>
       <label><input type="checkbox" id="optDelete" checked> Erase on sensor afterwards</label>
+      <label><input type="checkbox" id="driftCorr"> Correct clock drift</label>
     </div>
+    <p class="muted" style="font-size:12px;margin:2px 0 0">Clock drift: the sensors' clocks gain about 40 s a day. The clock is read before downloading and the readings are shifted to the right time; the sensor's own times stay in the sensor_timestamp column.</p>
     <div class="row only-single">
       <button id="btnDump" class="primary" disabled>Download history</button>
       <button id="btnDeleteLog" class="danger" disabled>Erase history on sensor…</button>
@@ -389,10 +391,6 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
         <label><input type="checkbox" id="showNow"> Show “Sensors now” on the Sensor tab</label>
       </div>
       <p class="muted">Tiles with each sensor's latest values. Live values need a browser that passes on the sensors' broadcasts; Bluefy doesn't, so there they show the latest downloaded readings.</p>
-      <div class="row">
-        <label><input type="checkbox" id="driftCorr"> Correct clock drift when downloading</label>
-      </div>
-      <p class="muted">The sensors' clocks run a little fast or slow (about 40 s/day). Before each download the clock is read, and the readings since the last clock set are shifted to the right time. The sensor's own times are kept in the “sensor_timestamp” column.</p>
       <h3 class="sub">Chart</h3>
       <div class="row">
         <label><input type="checkbox" id="cfOn"> Comfort bands</label>
@@ -510,7 +508,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 73;
+const APP_VERSION = 74;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
