@@ -63,11 +63,13 @@ label { display: inline-flex; gap: 6px; align-items: center; }
 .legend button.lg::before { content: ""; display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; background: currentColor; }
 .legend .t { color: var(--temp); border-color: var(--temp); } .legend .h { color: var(--hum); border-color: var(--hum); }
 .legend button.lg[aria-pressed="false"] { color: var(--muted); border-color: var(--line); text-decoration: line-through; }
-/* "Fixed scale" is an on/off switch, not a series: no line marker, no strike-through when off */
-.legend button.lg.sc { margin-left: auto; color: var(--muted); border-color: var(--line); }
-.legend button.lg.sc::before { display: none; }
-.legend button.lg.sc[aria-pressed="false"] { text-decoration: none; }
-.legend button.lg.sc[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); font-weight: 600; }
+/* Scale switch: "Scale  [Auto|Fixed]" with the active option filled in */
+.legend .scalesw { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.legend .scalesw .seg { padding: 4px 10px; font-size: 13px; }
+.legend .scalesw .seg:first-of-type { border-radius: 9px 0 0 9px; }
+.legend .scalesw .seg:last-of-type { border-radius: 0 9px 9px 0; margin-left: -1px; }
+.legend .scalesw .seg[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+.legend { flex-wrap: wrap; align-items: center; row-gap: 6px; }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; margin-top: 8px; font-size: 13px; }
 .cfg-grid { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center; }
 .cfg-grid .info { grid-column: 1 / -1; margin-top: -6px; }
@@ -268,7 +270,10 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
     <div class="legend">
       <button class="lg t" id="lgTemp" aria-pressed="true" title="Show or hide temperature">Temperature °C</button>
       <button class="lg h" id="lgHum" aria-pressed="true" title="Show or hide humidity">Humidity %</button>
-      <button class="lg sc" id="lgScale" aria-pressed="false" title="Same axes for every sensor and zoom (limits in Settings)">Fixed scale</button>
+      <span class="scalesw" role="group" aria-label="Chart scale" title="Fixed: same axes for every sensor and zoom (limits in Settings)">
+        <span class="muted">Scale</span>
+        <button class="seg" id="scAuto" aria-pressed="true">Auto</button><button class="seg" id="scFixed" aria-pressed="false">Fixed</button>
+      </span>
     </div>
     <div id="readout" class="muted"></div>
     <div class="stats" id="stats"></div>
@@ -447,7 +452,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 48;
+const APP_VERSION = 49;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1731,10 +1736,16 @@ function setupChartSettings() {
   };
   bind("comfort", comfortPrefs, [["cfOn", "on"], ["cfTLo", "tLo"], ["cfTHi", "tHi"], ["cfHLo", "hLo"], ["cfHHi", "hHi"]]);
   bind("scale", scalePrefs, [["fsOn", "on"], ["fsTLo", "tLo"], ["fsTHi", "tHi"], ["fsHLo", "hLo"], ["fsHHi", "hHi"]]);
-  $("lgScale").onclick = () => { const s = scalePrefs(); s.on = !s.on; prefs.scale = s; savePrefs(); $("fsOn").checked = s.on; syncScaleToggle(); drawChart(); };
+  const setScale = on => { const s = scalePrefs(); s.on = on; prefs.scale = s; savePrefs(); $("fsOn").checked = on; syncScaleToggle(); drawChart(); };
+  $("scAuto").onclick = () => setScale(false);
+  $("scFixed").onclick = () => setScale(true);
   syncScaleToggle();
 }
-function syncScaleToggle() { $("lgScale").setAttribute("aria-pressed", String(scalePrefs().on)); }
+function syncScaleToggle() {
+  const on = scalePrefs().on;
+  $("scAuto").setAttribute("aria-pressed", String(!on));
+  $("scFixed").setAttribute("aria-pressed", String(on));
+}
 // Visible time window {a, b} (UTC seconds) while zoomed/panned; null = follow the range buttons.
 let view = null;
 function rangeDomain() {
