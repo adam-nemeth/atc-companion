@@ -190,7 +190,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
       <input type="file" id="fileBatchCfg" accept=".json,application/json" multiple class="hidden">
     </div>
     <p class="muted" id="batchCfgSrc"></p>
-    <p class="muted">“Write config” keeps each sensor's own hardware‑specific bits and calibration offsets. Files named like <code>config_ATC_xxxxxx_….json</code> go to that sensor only; any other file is used for all ticked sensors without their own file.</p>
+    <p class="muted">“Write config” keeps each sensor's own hardware‑specific bits and calibration offsets. Files whose name contains a sensor's ID (like <code>Kitchen-ATC_xxxxxx-config.json</code>) go to that sensor only; any other file is used for all ticked sensors without their own file.</p>
     <div class="row" id="batchStatus"><button id="bStop" class="danger hidden">Stop</button></div>
     <div class="progress" id="batchProg"><div></div></div>
     <div id="batchOut" style="margin-top:8px"></div>
@@ -426,7 +426,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 46;
+const APP_VERSION = 47;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1097,7 +1097,7 @@ async function dump(opts = {}) {
     const offStr = prefs.timeMode === "utc" ? "+00:00" : fmtOffset(localOffsetSec());
     const offSec = parseOffset(offStr);
     const key = histId(sensorName || "sensor");  // stored per sensor ID; the description is only for file names
-    lastRaw = { dev: devKey(), rows: raw, offset: offStr };
+    lastRaw = { dev: key, rows: raw, offset: offStr };
     $("btnExportRaw").disabled = !raw.length;
     const total = await mergeInto(key, raw.map(([e, t, h, v]) => [e - offSec, t, h, v]));
     log(`Stored ${raw.length} new samples for ${key} (${total} total).`);
@@ -1170,7 +1170,9 @@ async function loadBatchCfgFiles(files) {
   for (const f of files) {
     try {
       const cfg = normalizeCfg(JSON.parse(await f.text()));
-      const m = /config_(ATC_[0-9A-F]{6})/i.exec(f.name);
+      // Any file whose name contains a sensor ID (Kitchen-ATC_7F605A-config.json, or the older
+      // config_ATC_7F605A_Kitchen.json) is for that sensor only.
+      const m = /(ATC_[0-9A-F]{6})(?![0-9A-Za-z])/i.exec(f.name);
       const sensor = m ? "ATC_" + m[1].slice(4).toUpperCase() : null;
       if (sensor) { batchCfgPer[sensor] = { cfg, file: f.name }; msgs.push(`${f.name} → ${sensorLabel(sensor)}`); }
       else { batchCfgShared = { cfg, file: f.name }; msgs.push(`${f.name} → all others`); }
@@ -1354,7 +1356,7 @@ const BATCH = {
   sendCfg() {
     const items = knownNames().filter(n => known[n] && known[n].cfg).map(n => {
       const text = JSON.stringify(known[n].cfg, null, 2);
-      return { name: `config_${n}${rooms[n] ? "_" + fileSafe(rooms[n]) : ""}.json`, rows: 1, text, type: "application/json" };
+      return { name: `${fileLabel(n)}-config.json`, rows: 1, text, type: "application/json" };
     });
     shareFiles(items, `Thermometer configs: ${items.length} sensor(s)`);
   },
@@ -1568,10 +1570,15 @@ function downloadFiles(items) {
 }
 const fileSafe = s => s.replace(/[^A-Za-z0-9._-]+/g, "_");
 // File name label like the Windows scripts': "ATC_xxxxxx__Description" (description only if set).
-function fileLabel(id) { return rooms[id] ? `${id}__${rooms[id]}` : id; }
+// File names: "<Description>-<ATC_ID>-<kind>", description first so files sort by room (same as the
+// Python tools). Spaces/hyphens in the description become "_", so "-" only separates the parts.
+function fileLabel(id) {
+  const desc = (rooms[id] || "").trim().replace(/[\s-]+/g, "_").replace(/[^A-Za-z0-9._]+/g, "_").replace(/^_+|_+$/g, "");
+  return desc ? `${desc}-${id}` : id;
+}
 function csvAllFor(dev) {
   const s = histCache.get(dev) || [];
-  return { name: `history_${fileSafe(fileLabel(dev))}_all.csv`, rows: s.length,
+  return { name: `${fileLabel(dev)}-all.csv`, rows: s.length,
     text: toCsv(s.map(([t, tm, hm, v]) => [faceValue(t), "+00:00", tm, hm, v]), prefs.csvLocale) };
 }
 function shareSelected() {
@@ -1584,9 +1591,9 @@ function shareAllDevices() {
 }
 function shareRaw() {
   if (!lastRaw) return;
-  shareFiles([{ name: `history_${fileSafe(lastRaw.dev)}_raw_${stamp()}.csv`, rows: lastRaw.rows.length,
+  shareFiles([{ name: `${fileLabel(lastRaw.dev)}-raw-${stamp()}.csv`, rows: lastRaw.rows.length,
     text: toCsv(lastRaw.rows.map(([e, t, h, v]) => [faceValue(e), lastRaw.offset, t, h, v]), prefs.csvLocale) }],
-    `Thermometer download: ${lastRaw.dev.replace("__", " · ")}`);
+    `Thermometer download: ${histLabel(lastRaw.dev)}`);
 }
 function parseCsv(text) {
   const lines = text.split(/\r?\n/).filter(Boolean); if (!lines.length) return [];
@@ -1609,9 +1616,11 @@ function parseCsv(text) {
 async function importFiles(files) {
   let last = null;
   for (const f of files) {
-    // history_<name>[__<room>]_(raw_YYYYMMDD_HHMMSS|all|merged|...).csv
+    // The sensor is the ATC_xxxxxx in the name: "<Description>-ATC_xxxxxx-<kind>.csv" (current),
+    // or the older "history_ATC_xxxxxx[__<Description>]_<kind>.csv".
+    const id = /(ATC_[0-9A-F]{6})(?![0-9A-Za-z])/i.exec(f.name);
     const m = /^history_(.+?)_(raw_\d{8}_\d{6}|all|merged|daily_\d+|monthly_\d+|yearly_\d+)\.csv$/i.exec(f.name);
-    let dev = m ? m[1] : prompt(`Sensor name for ${f.name}?`, f.name.replace(/\.csv$/i, ""));
+    let dev = id ? id[1] : m ? m[1] : prompt(`Sensor name for ${f.name}?`, f.name.replace(/\.csv$/i, ""));
     if (!dev) continue;
     dev = histId(dev);
     const rows = parseCsv(await f.text());
@@ -1920,7 +1929,7 @@ function updateStatusBar() {
   $("btnGetCfg").onclick = () => withBusy(getCfg);
   $("btnSetCfg").onclick = () => withBusy(setCfg);
   $("btnCfgExport").onclick = () => {
-    const name = `config_${devKey().replace("__", "_").replace(/[^A-Za-z0-9._-]+/g, "_")}.json`;
+    const name = sensorName ? `${fileLabel(sensorName)}-config.json` : "config.json";
     const blob = new Blob([JSON.stringify(currentCfg, null, 2)], { type: "application/json" });
     const file = new File([blob], name, { type: blob.type });
     if (navigator.canShare && navigator.canShare({ files: [file] })) navigator.share({ files: [file] }).catch(() => {});
