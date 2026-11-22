@@ -58,8 +58,11 @@ label { display: inline-flex; gap: 6px; align-items: center; }
 #chart { width: 100%; height: 260px; display: block; }
 #readout { font-size: 13px; min-height: 20px; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .legend { display: flex; gap: 14px; font-size: 13px; color: var(--muted); }
-.legend span::before { content: ""; display: inline-block; width: 10px; height: 3px; margin-right: 5px; vertical-align: middle; background: currentColor; }
-.legend .t { color: var(--temp); } .legend .h { color: var(--hum); }
+/* Legend entries are toggle buttons: tap to hide/show that line */
+.legend button.lg { font-size: 13px; padding: 5px 10px; border-radius: 999px; background: transparent; }
+.legend button.lg::before { content: ""; display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; background: currentColor; }
+.legend .t { color: var(--temp); border-color: var(--temp); } .legend .h { color: var(--hum); border-color: var(--hum); }
+.legend button.lg[aria-pressed="false"] { color: var(--muted); border-color: var(--line); text-decoration: line-through; }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; margin-top: 8px; font-size: 13px; }
 .cfg-grid { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center; }
 .cfg-grid .info { grid-column: 1 / -1; margin-top: -6px; }
@@ -178,7 +181,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
     <h3 class="sub">Configuration</h3>
     <div class="row">
       <button id="bGetCfg">Read configs</button>
-      <button id="bSendCfg">Send configs…</button>
+      <button id="bSendCfg">Share configs…</button>
     </div>
     <div class="row">
       <button id="bLoadCfg">Load config JSON…</button>
@@ -257,13 +260,16 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
       <span id="zoomInfo" class="muted">Pinch to zoom · drag sideways to move · double-tap to reset</span>
       <button id="btnZoomReset" class="seg hidden">Reset zoom</button>
     </div>
-    <div class="legend"><span class="t">Temperature °C</span><span class="h">Humidity %</span></div>
+    <div class="legend">
+      <button class="lg t" id="lgTemp" aria-pressed="true" title="Show or hide temperature">Temperature °C</button>
+      <button class="lg h" id="lgHum" aria-pressed="true" title="Show or hide humidity">Humidity %</button>
+    </div>
     <div id="readout" class="muted"></div>
     <div class="stats" id="stats"></div>
     <div class="row" style="margin-top:10px">
-      <button id="btnShareSel" class="primary">Send / share this sensor…</button>
-      <button id="btnShareAll">Send all sensors…</button>
-      <button id="btnExportRaw" disabled>Send last download (raw)…</button>
+      <button id="btnShareSel" class="primary">Share this sensor…</button>
+      <button id="btnShareAll">Share all sensors…</button>
+      <button id="btnExportRaw" disabled>Share last download (raw)…</button>
     </div>
     <div class="row"><span id="shareMsg" class="muted">Opens the iPhone share sheet: Mail, Messages, AirDrop, Save to Files… CSV times are UTC.</span></div>
     <div class="row">
@@ -335,9 +341,9 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
   <section class="card" data-tab="settings">
     <details open>
       <summary>Debug log</summary>
-      <p class="muted">Records every Bluetooth packet and step. Kept across reloads. If something goes wrong, tap “Send log” and email it.</p>
+      <p class="muted">Records every Bluetooth packet and step. Kept across reloads. If something goes wrong, tap “Share log” and email it.</p>
       <div class="row">
-        <button id="btnLogSend" class="primary">Send log…</button>
+        <button id="btnLogSend" class="primary">Share log…</button>
         <button id="btnLogCopy">Copy log</button>
         <button id="btnLogClear" class="danger">Clear</button>
         <span id="logMsg" class="muted"></span>
@@ -420,7 +426,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 45;
+const APP_VERSION = 46;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1404,7 +1410,7 @@ async function updateStorageInfo() {
     }
     if (navigator.storage && navigator.storage.persisted) {
       const p = await navigator.storage.persisted();
-      txt += p ? " Marked persistent." : " Not marked persistent: clearing Bluefy's website data, deleting Bluefy, or iOS clean-up can erase it - use “Send all sensors” now and then as a backup.";
+      txt += p ? " Marked persistent." : " Not marked persistent: clearing Bluefy's website data, deleting Bluefy, or iOS clean-up can erase it - use “Share all sensors” now and then as a backup.";
     }
   } catch (e) { dbg(`storage info error: ${describeErr(e)}`); }
   $("storageInfo").textContent = txt;
@@ -1529,7 +1535,7 @@ function shareMsg(text, cls) { const m = $("shareMsg"); m.textContent = text; m.
 // iOS only allows the share sheet straight from a tap, so everything is prepared synchronously
 // from in-memory data - no awaits before navigator.share().
 function shareFiles(items, subject) {
-  if (!items.length) { shareMsg("Nothing to send yet.", "status warn"); return; }
+  if (!items.length) { shareMsg("Nothing to share yet.", "status warn"); return; }
   const files = items.map(it => new File([it.text], it.name, { type: it.type || "text/csv" }));
   const rows = items.reduce((n, it) => n + it.rows, 0);
   const body = `${subject}\n${items.map(it => `${it.name} (${it.rows} rows)`).join("\n")}`;
@@ -1711,11 +1717,12 @@ function drawChart() {
   const ns = "http://www.w3.org/2000/svg";
   const el = (tag, attrs, text) => { const e = document.createElementNS(ns, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; svg.appendChild(e); return e; };
   // grid + axes
+  const showT = prefs.showT !== false, showH = prefs.showH !== false;
   for (let i = 0; i <= 4; i++) {
     const y = T + ph * i / 4;
     el("line", { x1: L, x2: W - R, y1: y, y2: y, stroke: col("--line"), "stroke-width": 1 });
-    el("text", { x: L - 5, y: y + 4, "text-anchor": "end", "font-size": 11, fill: col("--temp") }, (tHi - (tHi - tLo) * i / 4).toFixed(1));
-    el("text", { x: W - R + 5, y: y + 4, "font-size": 11, fill: col("--hum") }, Math.round(hHi - (hHi - hLo) * i / 4));
+    if (showT) el("text", { x: L - 5, y: y + 4, "text-anchor": "end", "font-size": 11, fill: col("--temp") }, (tHi - (tHi - tLo) * i / 4).toFixed(1));
+    if (showH) el("text", { x: W - R + 5, y: y + 4, "font-size": 11, fill: col("--hum") }, Math.round(hHi - (hHi - hLo) * i / 4));
   }
   const nT = Math.max(2, Math.floor(pw / 90));
   for (let i = 0; i <= nT; i++) {
@@ -1732,8 +1739,8 @@ function drawChart() {
   const defs = el("defs", {}); const cp = document.createElementNS(ns, "clipPath"); cp.setAttribute("id", "plotClip");
   const cr = document.createElementNS(ns, "rect"); [["x", L], ["y", T - 2], ["width", pw], ["height", ph + 4]].forEach(([k, v]) => cr.setAttribute(k, v));
   cp.appendChild(cr); defs.appendChild(cp);
-  el("path", { d: path(p => yH(p[2])), fill: "none", stroke: col("--hum"), "stroke-width": 1.6, "stroke-linejoin": "round", "clip-path": "url(#plotClip)" });
-  el("path", { d: path(p => yT(p[1])), fill: "none", stroke: col("--temp"), "stroke-width": 2, "stroke-linejoin": "round", "clip-path": "url(#plotClip)" });
+  if (showH) el("path", { d: path(p => yH(p[2])), fill: "none", stroke: col("--hum"), "stroke-width": 1.6, "stroke-linejoin": "round", "clip-path": "url(#plotClip)" });
+  if (showT) el("path", { d: path(p => yT(p[1])), fill: "none", stroke: col("--temp"), "stroke-width": 2, "stroke-linejoin": "round", "clip-path": "url(#plotClip)" });
   const cursor = el("line", { x1: 0, x2: 0, y1: T, y2: T + ph, stroke: col("--muted"), "stroke-dasharray": "3 3", visibility: "hidden" });
   plotted = { pts: inWin.length ? inWin : pts, x, cursor, L, pw };
   if (!data.length) return;
@@ -1987,6 +1994,16 @@ function updateStatusBar() {
   };
   $("chart").addEventListener("pointermove", onChartPointer);
   setupChartGestures();
+  // Legend toggles: hide/show temperature or humidity (at least one stays visible).
+  const syncLegend = () => { $("lgTemp").setAttribute("aria-pressed", String(prefs.showT !== false)); $("lgHum").setAttribute("aria-pressed", String(prefs.showH !== false)); };
+  const toggleSeries = (key, other) => {
+    prefs[key] = prefs[key] === false;          // flip
+    if (prefs[key] === false && prefs[other] === false) prefs[other] = true;  // never hide both
+    savePrefs(); syncLegend(); drawChart();
+  };
+  $("lgTemp").onclick = () => toggleSeries("showT", "showH");
+  $("lgHum").onclick = () => toggleSeries("showH", "showT");
+  syncLegend();
   $("chart").addEventListener("pointerdown", onChartPointer);
   window.addEventListener("resize", () => drawChart());
   if (window.matchMedia) matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", drawChart);
