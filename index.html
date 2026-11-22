@@ -98,6 +98,7 @@ body[data-tab] section[data-tab] { display: none; }
 body[data-tab="single"] section[data-tab~="single"], body[data-tab="all"] section[data-tab~="all"],
 body[data-tab="history"] section[data-tab~="history"], body[data-tab="settings"] section[data-tab~="settings"] { display: block; }
 body[data-tab="all"] .only-single { display: none !important; }
+body[data-tab="single"] .hist-extra { display: none !important; }
 body:not([data-tab="all"]) #knownList input[type=checkbox] { display: none; }
 body:not([data-tab="all"]) .only-single.row { display: flex; }
 body:not([data-tab="all"]) .only-all { display: none !important; }
@@ -249,9 +250,9 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
   </section>
 
   <!-- History -->
-  <section class="card" data-tab="history">
+  <section class="card" data-tab="single history">
     <h2>Stored history</h2>
-    <p class="muted" id="storageInfo"></p>
+    <p class="muted hist-extra" id="storageInfo"></p>
     <div class="row">
       <select id="histDev"><option value="">(no data yet)</option></select>
       <span class="muted" id="histCount"></span>
@@ -290,6 +291,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
     <div id="readout" class="muted"></div>
     <div id="avgNote" class="muted hidden" style="font-size:12px;margin-top:2px"></div>
     <div class="stats" id="stats"></div>
+    <div class="hist-extra">
     <div class="row" style="margin-top:10px">
       <button id="btnShareSel" class="primary">Share this sensor…</button>
       <button id="btnShareAll">Share all sensors…</button>
@@ -301,6 +303,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
       <input type="file" id="fileImport" accept=".csv,text/csv" multiple class="hidden">
     </div>
     <div class="row"><button id="btnForget" class="danger">Forget this sensor's stored data…</button></div>
+    </div>
   </section>
 
   <!-- Config -->
@@ -472,7 +475,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 57;
+const APP_VERSION = 58;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1009,6 +1012,10 @@ async function connectDevice(dev, expectedName, opts = {}) {
     setStatus(`● Connected to ${shownName(sensorName)}`, "ok"); log(`Connected to ${sensorName} (total ${since(sAll)}).`);
     $("roomName").value = room || ""; $("roomName").disabled = false;
     setButtons(true); renderKnown();
+    // Show the connected sensor's stored history in the (shared) chart.
+    if (!opts.batch && histCache.has(histId(sensorName)) && $("histDev").value !== histId(sensorName)) {
+      $("histDev").value = histId(sensorName); loadChart();
+    }
     if (!opts.batch) readLive(server);
     return true;
   } catch (e) {
@@ -2303,7 +2310,7 @@ function showTab(t) {
   document.body.dataset.tab = t;
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.go === t));
   lsSet("tab", t);
-  if (t === "history") drawChart();
+  if (t === "history" || t === "single") drawChart();
   if (t === "settings") { const el = $("log"); el.scrollTop = el.scrollHeight; }
 }
 // One-line connection status shown under the tabs on every tab.
