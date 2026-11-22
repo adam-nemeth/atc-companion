@@ -502,7 +502,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 70;
+const APP_VERSION = 71;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -802,7 +802,7 @@ async function watchLive(name, d) {
       if (!p && d._advCount <= 2) dbg(`${name} broadcast contents: ${describeAdvEvent(ev)}`);
     }
     if (p) liveUpdate(name, Object.assign({ seen: Date.now() }, p));
-    else if (d._advCount >= 3 && !d._advParsed) {
+    else if ((d._advCount >= 3 || !keys.length) && !d._advParsed) {
       // This browser delivers the broadcasts without their data (Bluefy, v67/v68 logs): listening only
       // costs work on every broadcast (it made chart dragging stutter), so stop for this visit.
       dbg(`${name}: broadcasts carry no readings in this browser - live listening stopped`);
@@ -867,7 +867,7 @@ function renderRooms() {
     !ble.getDevices ? "This browser can't list sensors from earlier visits, so it can't listen live - values are from connections." :
     noWatch ? "This browser can't listen to broadcasts (no watchAdvertisements) - values are from connections." :
     !remembered.size ? "No sensors remembered from earlier visits yet - connect to each once, then they update live here." :
-    liveNoData ? "This browser passes the sensors' broadcasts on without their readings, so live values aren't possible here. Tiles show the latest downloaded values." :
+    liveNoData ? "Bluefy passes the sensors' broadcasts on without their contents, so live values aren't possible in it. Tiles show the latest downloaded readings." :
     liveWatch.size ? (heard >= 3 && !parsed
       ? `Listening to ${liveWatch.size} sensor(s): ${heard} broadcasts heard, but this browser passes them on without their readings, so tiles show the latest downloaded values.`
       : `Live: listening to ${liveWatch.size} of ${remembered.size} remembered sensor(s) · ${heard} broadcasts heard.`) :
@@ -1003,6 +1003,8 @@ function advEntries(sd) {
   // UUID in front, or just the 0x181A payload - try each; callers check the MAC inside before using it.
   if (sd instanceof DataView || sd instanceof ArrayBuffer || ArrayBuffer.isView(sd)) {
     const dv = toDataView(sd), u = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength), out = [];
+    // Bluefy 3.9 (v70 log): always the 3 bytes 9E E9 65 = base64-decoded "null", i.e. no data at all.
+    if (u.length === 3 && u[0] === 0x9e && u[1] === 0xe9 && u[2] === 0x65) return [];
     for (let i = 0; i + 1 < u.length;) {
       const len = u[i]; if (!len || i + 1 + len > u.length) break;
       if (u[i + 1] === 0x16 && len >= 3) out.push([`0000${u[i + 3].toString(16).padStart(2, "0")}${u[i + 2].toString(16).padStart(2, "0")}-0000-1000-8000-00805f9b34fb`, new DataView(u.buffer, u.byteOffset + i + 4, len - 3)]);
