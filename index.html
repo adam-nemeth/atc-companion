@@ -362,6 +362,10 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
       <div class="row">
         <label>Idle timeout (s) <input type="number" id="idleTimeout" min="5" max="300" value="30"></label>
       </div>
+      <div class="row">
+        <label><input type="checkbox" id="driftCorr"> Correct clock drift when downloading</label>
+      </div>
+      <p class="muted">The sensors' clocks run a little fast or slow (about 40 s/day). Before each download the clock is read, and the readings since the last clock set are shifted to the right time. The sensor's own times are kept in the “sensor_timestamp” column.</p>
       <h3 class="sub">Chart</h3>
       <div class="row">
         <label><input type="checkbox" id="cfOn"> Comfort bands</label>
@@ -465,8 +469,12 @@ async function listDevices() {
 }
 // samples: array of [trueUtcSec, tempC, humPct, batteryMv]; merged & de-duplicated by instant
 async function mergeInto(dev, newSamples) {
-  const m = new Map((await loadHistory(dev)).map(s => [s[0], s]));
-  for (const s of newSamples) m.set(s[0], s);
+  // A reading is identified by the sensor's own timestamp (element 4; older samples have none, and
+  // their time IS the sensor's) plus its values, so re-downloads with an updated clock correction
+  // replace the earlier copy, and two readings that got the same time after a clock set are both kept.
+  const keyOf = s => `${s[4] != null ? s[4] : s[0]}|${(+s[1]).toFixed(2)}|${(+s[2]).toFixed(2)}|${s[3]}`;
+  const m = new Map((await loadHistory(dev)).map(s => [keyOf(s), s]));
+  for (const s of newSamples) m.set(keyOf(s), s);
   const merged = [...m.values()].sort((a, b) => a[0] - b[0]);
   await saveHistory(dev, merged);
   return merged.length;
@@ -475,7 +483,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 60;
+const APP_VERSION = 61;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1112,7 +1120,7 @@ async function dump(opts = {}) {
     if (b[0] !== 0x35) return;
     if (b.length >= 13) {
       const dv = new DataView(b.buffer);
-      raw.push([dv.getUint32(3, true), dv.getInt16(7, true) / 100, dv.getUint16(9, true) / 100, dv.getUint16(11, true)]);
+      raw.push([dv.getUint32(3, true), dv.getInt16(7, true) / 100, dv.getUint16(9, true) / 100, dv.getUint16(11, true), dv.getUint16(1, true)]);
     } else done = true;
   };
   const ui = setInterval(() => {
@@ -1123,6 +1131,10 @@ async function dump(opts = {}) {
   listeners.add(l);
   const sDump = t0(); rx35 = 0;
   try {
+    // Read the clock first: its error now is the end point of the drift correction.
+    const clk = prefs.driftCorr !== false ? await readSensorClock() : null;
+    if (clk) dbg(`Clock before download: sensor ${faceValue(clk.sensor)}, phone ${faceValue(Math.round(clk.phone))} (${Math.round(clk.sensor - clk.phone)} s)`);
+    else if (prefs.driftCorr !== false) log("Couldn't read the clock - the newest samples won't be drift-corrected.", "warn");
     log(`Requesting ${cnt === 0xffff ? "all stored" : cnt} samples (sensor ${devKey()}, clock mode ${prefs.timeMode}, sync ${sync}, delete ${del})…`);
     await write([0x35, cnt & 0xff, cnt >> 8, 0, 0]);
     const finished = await waitIdle(() => done);
@@ -1135,7 +1147,10 @@ async function dump(opts = {}) {
       log(`Transfer complete: ${raw.length} samples.`);
       if (sync) {
         const t = deviceEpochNow(prefs.timeMode);
-        try { await write([0x23, ...le32(t)]); log(`Clock synced to ${faceValue(t)} [${prefs.timeMode}]`); result.synced = true; }
+        try {
+          await write([0x23, ...le32(t)]); log(`Clock synced to ${faceValue(t)} [${prefs.timeMode}]`); result.synced = true;
+          if (clk) saveClockLog(histId(sensorName || "sensor"), { set: { before: t + Math.round(clk.sensor - clk.phone), at: t } });
+        }
         catch (e) { log("(non-fatal) clock sync failed: " + e.message); }
       }
       if (del) {
@@ -1146,15 +1161,33 @@ async function dump(opts = {}) {
     }
     result.finished = finished;
     if (del && !finished) log("Download incomplete - skipped delete for safety.");
-    raw.sort((a, b) => a[0] - b[0]);
+    const key = histId(sensorName || "sensor");  // stored per sensor ID; the description is only for file names
+    // Log order (needed to see clock sets, since a clock set back makes times overlap): by record
+    // number, in whichever direction makes the times increase.
+    raw.sort((a, b) => a[4] - b[4]);
+    let up = 0; for (let i = 1; i < raw.length; i++) up += Math.sign(raw[i][0] - raw[i - 1][0]);
+    if (up < 0) raw.reverse();
+    let drift = null;
+    if (prefs.driftCorr !== false && raw.length) {
+      const cl = clockLog(key);
+      drift = driftCorrect(raw.map(r => r[0]), { nowSensor: clk ? clk.sensor : null, nowTrue: clk ? clk.phone : null, sets: cl.sets, rate: cl.rate });
+      raw.forEach((r, i) => r[5] = Math.round(drift.corr[i]));
+      const known = drift.stretches.filter(s => s.applied && s.to - s.from > 86400);
+      if (known.length) saveClockLog(key, { rate: known[known.length - 1].perDay / 86400 });
+      for (const s of drift.stretches) dbg(`Drift stretch ${faceValue(s.from)} … ${faceValue(s.to)} (${s.n}): ${s.E == null ? "-" : Math.round(s.E) + " s"}${s.perDay != null ? `, ${s.perDay.toFixed(1)} s/day` : ""}${s.applied ? ", corrected" : s.why ? ", " + s.why : ""}`);
+      log(`Clock drift: ${driftSummary(drift)}.`);
+    } else raw.forEach(r => r[5] = r[0]);
+    raw.sort((a, b) => a[5] - b[5]);
     const offStr = prefs.timeMode === "utc" ? "+00:00" : fmtOffset(localOffsetSec());
     const offSec = parseOffset(offStr);
-    const key = histId(sensorName || "sensor");  // stored per sensor ID; the description is only for file names
     lastRaw = { dev: key, rows: raw, offset: offStr };
     $("btnExportRaw").disabled = !raw.length;
-    const total = await mergeInto(key, raw.map(([e, t, h, v]) => [e - offSec, t, h, v]));
+    // Stored: [corrected time, t, h, mV, sensor's own time] - the sensor time identifies the reading,
+    // so a later download (with a slightly different correction) replaces it instead of duplicating it.
+    const total = await mergeInto(key, raw.map(([e, t, h, v, , c]) => [c - offSec, t, h, v, e - offSec]));
     log(`Stored ${raw.length} new samples for ${key} (${total} total).`);
-    $("dumpStatus").textContent = `${raw.length} samples downloaded · ${total} stored`;
+    $("dumpStatus").textContent = `${raw.length} samples downloaded · ${total} stored` + (drift && drift.stretches.some(s => s.applied) ? ` · ${driftSummary(drift)}` : "");
+    result.drift = drift ? driftSummary(drift) : "";
     showLatestSample(raw[raw.length - 1] && [0, ...raw[raw.length - 1].slice(1)]);
     bar.style.width = "100%";
     await refreshDeviceList(key);
@@ -1163,6 +1196,93 @@ async function dump(opts = {}) {
   } finally { clearInterval(ui); listeners.delete(l); setTimeout(() => prog.style.display = "none", 1500); }
 }
 const le32 = t => [t & 0xff, (t >>> 8) & 0xff, (t >>> 16) & 0xff, (t >>> 24) & 0xff];
+
+// ===== Clock drift correction =====
+// The sensors have no clock crystal, so their clocks gain or lose time steadily (≈40 s/day on these).
+// The sensor doesn't remember when its clock was set, but every clock set shows up in the log: the
+// sample after it jumps by (interval − error). Between two sets the error grows linearly from 0, so
+// each stretch between sets is corrected linearly. For the stretch still running, the error is
+// measured by reading the clock before the download. Same algorithm as drift_correct() in
+// ATC_MiThermometer_tools.py - keep the two in step.
+// ts: sensor times in LOG order (face values); opts: { nowSensor, nowTrue, sets: [{before, at}], rate }
+// Returns { corr: corrected face values (same order), stretches: [...], note }.
+const DRIFT_TOL = 20, DRIFT_MAX_PER_DAY = 150;
+function driftCorrect(ts, opts = {}) {
+  const n = ts.length, corr = ts.slice(), res = { corr, stretches: [], note: "" };
+  if (!n) return res;
+  if (Math.min(...ts) < 1577836800) { res.note = "sensor clock was reset (dates before 2020) - not corrected"; return res; }
+  const sets = opts.sets || [];
+  const diffs = []; for (let k = 1; k < n; k++) diffs.push(ts[k] - ts[k - 1]);
+  const good = diffs.filter(d => d >= 30 && d <= 7200).sort((a, b) => a - b);
+  const P = good.length ? good[good.length >> 1] : 600;
+  // Pass 1: steps that are not one interval. A recorded clock set gives the error exactly.
+  const ev = [];
+  for (let k = 1; k < n; k++) {
+    const d = ts[k] - ts[k - 1];
+    const rec = sets.find(r => r.before >= ts[k - 1] - 5 && r.before <= ts[k - 1] + 2 * P + 300 && r.at <= ts[k] + 5 && r.at >= ts[k] - 2 * P - 300);
+    if (rec) { ev.push({ k, d, E: rec.before - rec.at, known: true }); continue; }
+    if (Math.abs(d - P) <= DRIFT_TOL) continue;
+    // Several intervals with no clock change = samples missed while connected, not a set.
+    const m = Math.max(1, Math.round(d / P));
+    if (m > 1 && Math.abs(m * P - d) <= DRIFT_TOL) continue;
+    ev.push({ k, d, E: P - d, known: false });
+  }
+  const bounds = () => { const b = []; let a = 0; for (const e of ev) { b.push([a, e.k - 1, e]); a = e.k; } b.push([a, n - 1, null]); return b; };
+  // Pass 2: a step can also hide skipped samples (step back by E plus one missed interval). Use the
+  // typical drift rate (other stretches, or this sensor's last known rate) to pick the right count.
+  const rates = bounds().filter(([a, b, e]) => e && ts[b] - ts[a] > 86400).map(([a, b, e]) => e.E / (ts[b] - ts[a]));
+  if (opts.rate != null) rates.push(opts.rate);
+  const rate = rates.length ? rates.slice().sort((x, y) => x - y)[rates.length >> 1] : null;
+  if (rate != null) for (const [a, b, e] of bounds()) {
+    if (!e || e.known) continue;
+    const m = Math.max(1, Math.round((e.d + rate * (ts[b] - ts[a])) / P));
+    e.E = m * P - e.d;
+  }
+  // Apply: error 0 at the start of each stretch, E at its end.
+  for (const [a, b, e] of bounds()) {
+    let s0 = ts[a];
+    if (a === 0) { const r = sets.filter(r => r.at <= ts[0] + 5 && r.at >= ts[0] - 2 * P - 300).pop(); if (r) s0 = r.at; }
+    let te, E;
+    if (e) { te = ts[b]; E = e.E; }
+    else if (opts.nowSensor != null && opts.nowTrue != null) { te = opts.nowSensor; E = opts.nowSensor - opts.nowTrue; }
+    else { res.stretches.push({ from: ts[a], to: ts[b], n: b - a + 1, E: null, applied: false, why: "clock not read" }); continue; }
+    const span = te - s0, perDay = span > 0 ? E / span * 86400 : 0;
+    const st = { from: ts[a], to: ts[b], n: b - a + 1, E, perDay, applied: false, startKnown: a > 0 || s0 !== ts[a] };
+    if (span <= 0 || Math.abs(E) < 1) st.why = "no drift";
+    // More error than drift can build up in that time = the clock was set to another value (or samples
+    // were missed), not drift: leave those times alone.
+    else if (Math.abs(E) > DRIFT_TOL + DRIFT_MAX_PER_DAY * span / 86400) st.why = "jump, not drift - not corrected";
+    else { for (let i = a; i <= b; i++) corr[i] = ts[i] - E * Math.max(0, ts[i] - s0) / span; st.applied = true; }
+    res.stretches.push(st);
+  }
+  return res;
+}
+// Per-sensor record of clock sets this app made, and the last measured drift rate (s per s).
+function clockLog(id) { const all = lsGet("clockLog", {}); return all[id] || { sets: [], rate: null }; }
+function saveClockLog(id, upd) {
+  const all = lsGet("clockLog", {}), cur = all[id] || { sets: [], rate: null };
+  if (upd.set) cur.sets = [...cur.sets, upd.set].slice(-40);
+  if (upd.rate != null) cur.rate = upd.rate;
+  all[id] = cur; lsSet("clockLog", all);
+}
+const fmtDur = s => { const a = Math.abs(Math.round(s)); return a >= 3600 ? `${Math.floor(a / 3600)} h ${Math.round(a % 3600 / 60)} min` : a >= 60 ? `${Math.floor(a / 60)} min ${a % 60} s` : `${a} s`; };
+function driftSummary(r) {
+  if (r.note) return r.note;
+  const ap = r.stretches.filter(s => s.applied);
+  if (!ap.length) { const s = r.stretches[r.stretches.length - 1]; return s && s.why === "clock not read" ? "clock not read - times not corrected" : "no clock drift to correct"; }
+  const last = ap[ap.length - 1];
+  return `clock was ${fmtDur(last.E)} ${last.E > 0 ? "fast" : "slow"} (${Math.abs(last.perDay).toFixed(0)} s/day since ${localStr(last.from - (prefs.timeMode === "utc" ? 0 : localOffsetSec()))})` +
+    (ap.length > 1 ? `; ${ap.length} stretches between clock sets corrected` : "") + ` - ${ap.reduce((n, s) => n + s.n, 0)} samples corrected`;
+}
+// Read the sensor clock: { sensor, phone } as face values in the selected time zone (phone time is
+// taken half-way through the request, to cancel the Bluetooth delay), or null.
+async function readSensorClock() {
+  const s = t0();
+  const r = await request([0x23], b => b[0] === 0x23 && b.length >= 5, 8000);
+  if (!r) return null;
+  const rtt = performance.now() - s;
+  return { sensor: new DataView(r.buffer).getUint32(1, true), phone: deviceEpochNow(prefs.timeMode) - rtt / 2000, rtt };
+}
 
 // ===== Bluetooth name (pvvx CMD_ID_DNAME 0x01) =====
 // [0x01] → reply [0x01][name]; [0x01][name…] sets it (saved in the sensor, used after disconnect);
@@ -1355,7 +1475,7 @@ const BATCH = {
       const r = await dump({ skipConfirm: true, sync: true, del: true, all: true });
       if (!r) return null;
       const ok = r.finished && r.synced && r.deleted;
-      return { ok, text: `${r.n} samples downloaded · ${r.total} stored · ${r.synced ? "clock set" : "clock NOT set"} · ${r.deleted ? "erased on sensor" : "NOT erased"}${r.finished ? "" : " · INCOMPLETE download (idle timeout)"}` };
+      return { ok, text: `${r.n} samples downloaded · ${r.total} stored · ${r.synced ? "clock set" : "clock NOT set"} · ${r.deleted ? "erased on sensor" : "NOT erased"}${r.finished ? "" : " · INCOMPLETE download (idle timeout)"}${r.drift ? " · " + r.drift : ""}` };
     });
   },
   async dump() {
@@ -1363,7 +1483,7 @@ const BATCH = {
     await runBatch("Download all", async () => {
       const r = await dump({ skipConfirm: true });
       if (!r) return null;
-      return { ok: r.finished, text: `${r.n} samples downloaded · ${r.total} stored${r.synced ? " · clock set" : ""}${r.deleted ? " · erased on sensor" : ""}${r.finished ? "" : " · INCOMPLETE (idle timeout)"}` };
+      return { ok: r.finished, text: `${r.n} samples downloaded · ${r.total} stored${r.synced ? " · clock set" : ""}${r.deleted ? " · erased on sensor" : ""}${r.finished ? "" : " · INCOMPLETE (idle timeout)"}${r.drift ? " · " + r.drift : ""}` };
     });
   },
   async getTime() { await runBatch("Read clocks", () => getTime()); },
@@ -1425,7 +1545,14 @@ function updateTzLabels() {
     : `Read clock, Set clock and “Set clock afterwards” use the phone's local time, ${modeLabel("local")}. It shifts at daylight-saving changes, so set the clocks again then.`;
 }
 async function setTime() {
+  // Read the clock first, so this set is recorded with the error it corrected (used by drift correction).
+  const before = await readSensorClock();
   const t = deviceEpochNow(prefs.timeMode);
+  if (before && sensorName) {
+    const E = Math.round(before.sensor - before.phone);
+    saveClockLog(histId(sensorName), { set: { before: t + E, at: t } });
+    log(`Clock was ${fmtDur(E)} ${E >= 0 ? "fast" : "slow"} before setting.`);
+  }
   log(`Setting clock to ${faceValue(t)} [${modeLabel(prefs.timeMode)}]…`);
   const r = await request([0x23, ...le32(t)], b => b[0] === 0x23 && b.length >= 5);
   if (r) {
@@ -1439,12 +1566,9 @@ async function setTime() {
 }
 // Read the sensor clock (0x23 with no payload) and compare with the phone in the selected time zone.
 async function getTime() {
-  const s = t0();
-  const r = await request([0x23], b => b[0] === 0x23 && b.length >= 5, 8000);
-  if (!r) { $("clockMsg").textContent = "No reply from the sensor."; $("clockMsg").className = "status err"; return { ok: false, text: "no reply" }; }
-  const dev = new DataView(r.buffer).getUint32(1, true);
-  const rtt = performance.now() - s;
-  const ref = deviceEpochNow(prefs.timeMode) - rtt / 2000;
+  const c = await readSensorClock();
+  if (!c) { $("clockMsg").textContent = "No reply from the sensor."; $("clockMsg").className = "status err"; return { ok: false, text: "no reply" }; }
+  const dev = c.sensor, rtt = c.rtt, ref = c.phone;
   const diff = Math.round(dev - ref);
   const other = Math.round(dev - deviceEpochNow(prefs.timeMode === "utc" ? "local" : "utc"));
   log(`Sensor clock ${faceValue(dev)}; phone (${modeLabel(prefs.timeMode)}) ${faceValue(Math.round(ref))}; difference ${diff} s (vs ${prefs.timeMode === "utc" ? "local" : "UTC"}: ${other} s); reply ${Math.round(rtt)} ms`);
@@ -1579,10 +1703,12 @@ async function setCfg() {
 
 // ===== CSV export / import =====
 const fmtNum = (v, loc) => { const s = v.toFixed(2); return loc === "hu" ? s.replace(".", ",") : s; };
-function toCsv(rows, loc) { // rows: [tsStr, offStr, t, h, v]
+// rows: [tsStr, offStr, t, h, v, sensorTsStr]. "timestamp" is drift-corrected; "sensor_timestamp" is
+// the sensor's own (uncorrected) time, empty when unknown - same columns as the Python tool.
+function toCsv(rows, loc) {
   const d = loc === "hu" ? ";" : ",";
-  return ["timestamp", "utc_offset", "temperature_c", "humidity_pct", "battery_mv"].join(d) + "\r\n" +
-    rows.map(r => [r[0], r[1], fmtNum(r[2], loc), fmtNum(r[3], loc), r[4]].join(d)).join("\r\n") + "\r\n";
+  return ["timestamp", "utc_offset", "temperature_c", "humidity_pct", "battery_mv", "sensor_timestamp"].join(d) + "\r\n" +
+    rows.map(r => [r[0], r[1], fmtNum(r[2], loc), fmtNum(r[3], loc), r[4], r[5] || ""].join(d)).join("\r\n") + "\r\n";
 }
 const safe = s => s.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "sensor";
 function shareMsg(text, cls) { const m = $("shareMsg"); m.textContent = text; m.className = cls || "muted"; }
@@ -1632,7 +1758,7 @@ function fileLabel(id) {
 function csvAllFor(dev) {
   const s = histCache.get(dev) || [];
   return { name: `${fileLabel(dev)}-all.csv`, rows: s.length,
-    text: toCsv(s.map(([t, tm, hm, v]) => [faceValue(t), "+00:00", tm, hm, v]), prefs.csvLocale) };
+    text: toCsv(s.map(([t, tm, hm, v, st]) => [faceValue(t), "+00:00", tm, hm, v, st != null && st !== t ? faceValue(st) : ""]), prefs.csvLocale) };
 }
 function shareSelected() {
   const dev = $("histDev").value; if (!dev) { shareMsg("No stored data yet.", "status warn"); return; }
@@ -1645,7 +1771,7 @@ function shareAllDevices() {
 function shareRaw() {
   if (!lastRaw) return;
   shareFiles([{ name: `${fileLabel(lastRaw.dev)}-raw-${stamp()}.csv`, rows: lastRaw.rows.length,
-    text: toCsv(lastRaw.rows.map(([e, t, h, v]) => [faceValue(e), lastRaw.offset, t, h, v]), prefs.csvLocale) }],
+    text: toCsv(lastRaw.rows.map(([e, t, h, v, , c]) => [faceValue(c), lastRaw.offset, t, h, v, faceValue(e)]), prefs.csvLocale) }],
     `Thermometer download: ${histLabel(lastRaw.dev)}`);
 }
 function parseCsv(text) {
@@ -1654,15 +1780,16 @@ function parseCsv(text) {
   const hdr = lines[0].split(d).map(h => h.trim().toLowerCase());
   const ix = (...n) => { for (const x of n) { const i = hdr.indexOf(x); if (i >= 0) return i; } return -1; };
   const iT = Math.max(0, ix("timestamp", "utc_timestamp", "local_timestamp")), iO = ix("utc_offset");
-  const iTm = ix("temperature_c"), iH = ix("humidity_pct"), iV = ix("battery_mv");
+  const iTm = ix("temperature_c"), iH = ix("humidity_pct"), iV = ix("battery_mv"), iS = ix("sensor_timestamp");
   const out = [];
+  const faceOf = s => { const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(s || ""); return m ? Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]) / 1000 : null; };
   for (const ln of lines.slice(1)) {
     const c = ln.split(d); const num = s => parseFloat(hu ? String(s).replace(",", ".") : s);
-    const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(c[iT] || ""); if (!m) continue;
-    const face = Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]) / 1000;
-    const t = face - parseOffset(iO >= 0 ? c[iO] : "+00:00");
+    const face = faceOf(c[iT]); if (face == null) continue;
+    const off = parseOffset(iO >= 0 ? c[iO] : "+00:00"), t = face - off;
+    const sf = iS >= 0 ? faceOf(c[iS]) : null;
     const tm = num(c[iTm < 0 ? 1 : iTm]), hm = num(c[iH < 0 ? 2 : iH]), v = parseInt(c[iV < 0 ? 3 : iV]);
-    if (isFinite(tm) && isFinite(hm)) out.push([t, tm, hm, isFinite(v) ? v : 0]);
+    if (isFinite(tm) && isFinite(hm)) out.push(sf != null && sf - off !== t ? [t, tm, hm, isFinite(v) ? v : 0, sf - off] : [t, tm, hm, isFinite(v) ? v : 0]);
   }
   return out;
 }
@@ -2368,6 +2495,8 @@ function updateStatusBar() {
   $("btNameNew").oninput = () => delete $("btNameNew").dataset.auto;
   $("csvLocale").onchange = e => { prefs.csvLocale = e.target.value; savePrefs(); };
   $("idleTimeout").onchange = e => { prefs.idleTimeout = Math.max(5, parseInt(e.target.value) || 30); savePrefs(); };
+  $("driftCorr").checked = prefs.driftCorr !== false;
+  $("driftCorr").onchange = e => { prefs.driftCorr = e.target.checked; savePrefs(); };
   document.querySelectorAll("#rangeBtns .seg").forEach(b => {
     b.classList.toggle("on", +b.dataset.h === prefs.range);
     b.onclick = () => { prefs.range = +b.dataset.h; savePrefs(); view = null; drawChart(); updateZoomUi(); };
