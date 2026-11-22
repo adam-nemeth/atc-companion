@@ -144,7 +144,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
 
   <!-- Live overview (from broadcasts, no connection) -->
   <section class="card hidden" data-tab="single" id="roomsCard">
-    <h2>Rooms now</h2>
+    <h2>Sensors now</h2>
     <div class="rooms" id="roomTiles"></div>
     <p class="muted" id="roomsNote" style="font-size:12px;margin:8px 0 0"></p>
   </section>
@@ -382,6 +382,10 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
         <label>Idle timeout (s) <input type="number" id="idleTimeout" min="5" max="300" value="30"></label>
       </div>
       <div class="row">
+        <label><input type="checkbox" id="showNow"> Show “Sensors now” on the Sensor tab</label>
+      </div>
+      <p class="muted">Tiles with each sensor's latest values. Live values need a browser that passes on the sensors' broadcasts; Bluefy doesn't, so there they show the latest downloaded readings.</p>
+      <div class="row">
         <label><input type="checkbox" id="driftCorr"> Correct clock drift when downloading</label>
       </div>
       <p class="muted">The sensors' clocks run a little fast or slow (about 40 s/day). Before each download the clock is read, and the readings since the last clock set are shifted to the right time. The sensor's own times are kept in the “sensor_timestamp” column.</p>
@@ -502,7 +506,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 71;
+const APP_VERSION = 72;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -778,7 +782,7 @@ async function wakeRemembered(name, d, timeoutMs) {
 // Only while the page is visible (listening costs phone battery).
 const liveWatch = new Map(); // name -> { d, ctrl, onAdv }
 async function watchLive(name, d) {
-  if (liveNoData || liveWatch.has(name) || typeof d.watchAdvertisements !== "function" || removedSensors.has(name)) return;
+  if (!prefs.showNow || liveNoData || liveWatch.has(name) || typeof d.watchAdvertisements !== "function" || removedSensors.has(name)) return;
   let ctrl = null; try { ctrl = new AbortController(); } catch {}
   const onAdv = ev => {
     d._advSeen = Date.now(); d._advCount = (d._advCount || 0) + 1;
@@ -833,7 +837,8 @@ function renderRooms() {
   const box = $("roomTiles"); if (!box) return;
   // Shown whenever there are sensors, so it's visible what the live listening is doing.
   const names = knownNames();
-  $("roomsCard").classList.toggle("hidden", !names.length);
+  $("roomsCard").classList.toggle("hidden", !names.length || !prefs.showNow);
+  if (!prefs.showNow) return;
   box.innerHTML = "";
   for (const n of names) {
     let k = known[n] || {};
@@ -2819,6 +2824,8 @@ function updateStatusBar() {
     $(id).checked = prefs[key] !== false;
     $(id).onchange = e => { prefs[key] = e.target.checked; savePrefs(); };
   }
+  $("showNow").checked = !!prefs.showNow;   // off by default
+  $("showNow").onchange = e => { prefs.showNow = e.target.checked; savePrefs(); if (prefs.showNow) startLive(); else stopLive(); renderKnown(); };
   $("driftCorr").checked = prefs.driftCorr !== false;
   $("driftCorr").onchange = e => { prefs.driftCorr = e.target.checked; savePrefs(); };
   document.querySelectorAll("#rangeBtns .seg").forEach(b => {
