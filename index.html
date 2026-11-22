@@ -362,7 +362,11 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
         <label>% <input type="number" id="cfHLo" step="1" style="width:70px"> – <input type="number" id="cfHHi" step="1" style="width:70px"></label>
       </div>
       <div class="row">
-        <label><input type="checkbox" id="nightOn"> Shade night hours (22:00–06:00) when a week or less is shown</label>
+        <label><input type="checkbox" id="nightOn"> Shade night hours when a week or less is shown</label>
+      </div>
+      <div class="row">
+        <label>Night from <input type="time" id="nightFrom" step="900" style="width:110px"></label>
+        <label>to <input type="time" id="nightTo" step="900" style="width:110px"></label>
       </div>
       <div class="row">
         <label><input type="checkbox" id="fsOn"> Fixed scale (same axes for every sensor and zoom)</label>
@@ -462,7 +466,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 50;
+const APP_VERSION = 51;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1742,6 +1746,11 @@ function timeTicks(a, b, maxTicks, maxDateTicks = maxTicks) {
   }
   return { ticks, unit };
 }
+// Night hours for the chart shading (Settings), as [hours, minutes]; default 23:00 → 07:00.
+function nightHours() {
+  const parse = (s, d) => { const m = /^(\d{1,2}):(\d{2})$/.exec(s || ""); return m ? [Math.min(23, +m[1]), Math.min(59, +m[2])] : d; };
+  return { from: parse(prefs.nightFrom, [23, 0]), to: parse(prefs.nightTo, [7, 0]) };
+}
 // Comfort band limits (Settings), with defaults for a typical home.
 function comfortPrefs() {
   return Object.assign({ on: true, tLo: 20, tHi: 24, hLo: 40, hHi: 60 }, prefs.comfort || {});
@@ -1771,6 +1780,15 @@ function setupChartSettings() {
   bind("scale", scalePrefs, [["fsOn", "on"], ["fsTLo", "tLo"], ["fsTHi", "tHi"], ["fsHLo", "hLo"], ["fsHHi", "hHi"]]);
   $("nightOn").checked = prefs.nightShade !== false;
   $("nightOn").onchange = e => { prefs.nightShade = e.target.checked; savePrefs(); drawChart(); };
+  const hhmm = ([h, m]) => `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  $("nightFrom").value = hhmm(nightHours().from); $("nightTo").value = hhmm(nightHours().to);
+  const setNight = () => {
+    if (!$("nightFrom").value || !$("nightTo").value || $("nightFrom").value === $("nightTo").value) {
+      $("nightFrom").value = hhmm(nightHours().from); $("nightTo").value = hhmm(nightHours().to); return;
+    }
+    prefs.nightFrom = $("nightFrom").value; prefs.nightTo = $("nightTo").value; savePrefs(); drawChart();
+  };
+  $("nightFrom").onchange = setNight; $("nightTo").onchange = setNight;
   const setScale = on => { const s = scalePrefs(); s.on = on; prefs.scale = s; savePrefs(); $("fsOn").checked = on; syncScaleToggle(); drawChart(); };
   $("scAuto").onclick = () => setScale(false);
   $("scFixed").onclick = () => setScale(true);
@@ -1882,12 +1900,14 @@ function drawChart() {
   hp.appendChild(hl); defs.appendChild(hp);
   const clipX = (a, b) => [Math.max(L, x(a)), Math.min(L + pw, x(b))];
 
-  // Night shading (22:00-06:00 local) when a week or less is shown - makes daily rhythms easy to see.
+  // Night shading (Settings, default 23:00-07:00 local) when a week or less is shown - makes daily rhythms easy to see.
   if (prefs.nightShade !== false && span <= 8 * 86400) {
+    const [fh, fm] = nightHours().from, [th, tm] = nightHours().to;
+    const overnight = fh * 60 + fm >= th * 60 + tm;   // e.g. 23:00 → 07:00 runs into the next day
     const d = new Date(t0 * 1000); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - 1);
     while (d.getTime() / 1000 < t1) {
-      const s = new Date(d); s.setHours(22, 0, 0, 0);
-      const e = new Date(d); e.setDate(e.getDate() + 1); e.setHours(6, 0, 0, 0);
+      const s = new Date(d); s.setHours(fh, fm, 0, 0);
+      const e = new Date(d); if (overnight) e.setDate(e.getDate() + 1); e.setHours(th, tm, 0, 0);
       const [xa, xb] = clipX(s / 1000, e / 1000);
       if (xb > xa) el("rect", { x: xa, y: T, width: xb - xa, height: ph, fill: col("--muted"), "fill-opacity": 0.07 });
       d.setDate(d.getDate() + 1);
