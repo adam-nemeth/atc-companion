@@ -247,7 +247,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
       <label><input type="checkbox" id="optDelete" checked> Erase on sensor afterwards</label>
       <label><input type="checkbox" id="driftCorr"> Correct clock drift</label>
     </div>
-    <p class="muted" style="font-size:12px;margin:2px 0 0">Clock drift: the sensors' clocks gain about 40 s a day. The clock is read before downloading and the readings are shifted to the right time; the sensor's own times stay in the sensor_timestamp column.</p>
+    <p class="muted" style="font-size:12px;margin:2px 0 0">Clock drift: a sensor's clock can run fast or slow. The clock is read before downloading and, if it's off, the readings since the last clock set are shifted to the right time; the sensor's own times stay in the sensor_timestamp column.</p>
     <div class="row only-single">
       <button id="btnDump" class="primary" disabled>Download history</button>
       <button id="btnDeleteLog" class="danger" disabled>Erase history on sensor…</button>
@@ -508,7 +508,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 74;
+const APP_VERSION = 75;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1449,7 +1449,8 @@ async function dump(opts = {}) {
 const le32 = t => [t & 0xff, (t >>> 8) & 0xff, (t >>> 16) & 0xff, (t >>> 24) & 0xff];
 
 // ===== Clock drift correction =====
-// The sensors have no clock crystal, so their clocks gain or lose time steadily (≈40 s/day on these).
+// A sensor's clock can gain or lose time steadily (how much, and whether at all, is still being
+// measured: Read clock and the clock line on connect show it).
 // The sensor doesn't remember when its clock was set, but every clock set shows up in the log: the
 // sample after it jumps by (interval − error). Between two sets the error grows linearly from 0, so
 // each stretch between sets is corrected linearly. For the stretch still running, the error is
