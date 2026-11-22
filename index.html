@@ -275,8 +275,8 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
       <button id="btnZoomReset" class="seg hidden">Reset zoom</button>
     </div>
     <div class="legend">
-      <button class="lg t" id="lgTemp" aria-pressed="true" title="Show or hide temperature">Temperature °C</button>
-      <button class="lg h" id="lgHum" aria-pressed="true" title="Show or hide humidity">Humidity %</button>
+      <button class="lg t" id="lgTemp" aria-pressed="true" title="Show only temperature (tap again for both)">Temperature °C</button>
+      <button class="lg h" id="lgHum" aria-pressed="true" title="Show only humidity (tap again for both)">Humidity %</button>
       <span class="scalesw" role="group" aria-label="Chart scale" title="Fixed: same axes for every sensor and zoom (limits in Settings)">
         <span class="muted">Scale</span>
         <button class="seg" id="scAuto" aria-pressed="true">Auto</button><button class="seg" id="scFixed" aria-pressed="false">Fixed</button>
@@ -466,7 +466,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 51;
+const APP_VERSION = 52;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -2228,9 +2228,10 @@ function updateStatusBar() {
   setupChartGestures();
   // Legend toggles: hide/show temperature or humidity (at least one stays visible).
   const syncLegend = () => { $("lgTemp").setAttribute("aria-pressed", String(prefs.showT !== false)); $("lgHum").setAttribute("aria-pressed", String(prefs.showH !== false)); };
+  // Tap a legend entry to show only that line; tap it again (while it's the only one) to show both.
   const toggleSeries = (key, other) => {
-    prefs[key] = prefs[key] === false;          // flip
-    if (prefs[key] === false && prefs[other] === false) prefs[other] = true;  // never hide both
+    const onlyThis = prefs[key] !== false && prefs[other] === false;
+    prefs[key] = true; prefs[other] = onlyThis;
     savePrefs(); syncLegend(); drawChart();
   };
   $("lgTemp").onclick = () => toggleSeries("showT", "showH");
