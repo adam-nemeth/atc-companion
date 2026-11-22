@@ -338,7 +338,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
       <p class="muted">Must start with ATC_ (so the Connect picker still lists it), up to 20 letters, digits, _ or -. The sensor applies the new name after you disconnect; the iPhone may keep showing the old name until Bluetooth is turned off and on.</p>
 
       <h3 class="sub">Settings</h3>
-      <p class="muted">Read on connect. Change values, then “Write config”. Fields marked hardware‑specific mean different things per model; leave them unless you know.</p>
+      <p class="muted">Read from the sensor when you connect. Change values, then tap “Write config” - nothing is sent before that. Settings that say “leave as it is” mean different things on different models or firmware versions.</p>
       <div class="row">
         <button id="btnGetCfg" disabled>Re-read config</button>
         <button id="btnSetCfg" class="primary" disabled>Write config</button>
@@ -501,7 +501,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 65;
+const APP_VERSION = 66;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -894,7 +894,7 @@ function renderKnown() {
     row.append(left, btn, meta);
     const lw = logWarning(name);
     const logEl = document.createElement("div"); logEl.className = "loglvl " + (lw ? lw.level : "none");
-    logEl.textContent = lw ? lw.text : "Log fill level: known after the first full download";
+    logEl.textContent = lw.text;
     row.append(logEl);
     box.appendChild(row);
   }
@@ -1000,7 +1000,10 @@ async function identifySensor() {
   return null;
 }
 
-const cfgListener = b => { if (b[0] === 0x55 && b.length - 1 >= 9) { try { currentCfg = decodeCfg(b); renderCfg(); } catch (e) { log("Config decode failed: " + e.message); } } };
+const cfgListener = b => { if (b[0] === 0x55 && b.length - 1 >= 9) { try {
+  currentCfg = decodeCfg(b); renderCfg();
+  if (sensorName) rememberSensor(sensorName, { cfg: currentCfg, cfgRead: Date.now() });  // for the log fill level
+} catch (e) { log("Config decode failed: " + e.message); } } };
 
 async function connect(showAll) {
   showInfo("Opening Bluetooth picker…");
@@ -1094,7 +1097,8 @@ async function connectDevice(dev, expectedName, opts = {}) {
     step = "identifying the sensor";
     sensorName = (await identifySensor()) || expectedName || device.name || "unknown";
     unremoveSensor(sensorName);  // connecting on purpose brings a removed sensor back
-    rememberSensor(sensorName, { id: device.id, mac: macFromName(sensorName) || undefined });
+    rememberSensor(sensorName, Object.assign({ id: device.id, mac: macFromName(sensorName) || undefined },
+      currentCfg ? { cfg: currentCfg, cfgRead: Date.now() } : {}));  // config read before the sensor was identified
     if (!opts.batch) await readBtName();
     reachable.set(sensorName, device);
     const room = rooms[sensorName];
@@ -1728,16 +1732,30 @@ function noteSensorLog(name, n, intervalSec) {
   const prev = (known[name] && known[name].log) || {};
   rememberSensor(name, { log: { at: Math.floor(Date.now() / 1000), n, P: intervalSec || prev.P || 600 } });
 }
+// Seconds between logged samples, from the sensor's config: advertising interval × measurements per
+// advertising interval × measurements per logged sample (av_meas_mem; 0 = logging off). These sensors:
+// 2.5 s × 4 × 60 = 600 s. null if the config isn't known.
+function logIntervalFromCfg(c) {
+  if (!c || c.av_meas_mem_raw == null || !c.advertising_interval_ms_info || !c.measure_interval_raw) return null;
+  return c.av_meas_mem_raw ? c.advertising_interval_ms_info * c.measure_interval_raw * c.av_meas_mem_raw / 1000 : 0;
+}
+const fmtDays = d => d >= 2 ? `${Math.round(d)} days` : d >= 1 ? "1 day" : `${Math.max(1, Math.round(d * 24))} h`;
 function logWarning(name) {
-  const L = known[name] && known[name].log; if (!L) return null;
-  const now = Date.now() / 1000, P = L.P || 600;
+  const k = known[name] || {}, L = k.log;
+  const cfgP = logIntervalFromCfg(k.cfg);
+  if (cfgP === 0) return { level: "ok", text: "Logging is off in this sensor's config" };
+  const P = cfgP || (L && L.P) || 600;
+  const capDays = LOG_CAPACITY * P / 86400;
+  const every = P % 60 ? `${P} s` : `${P / 60} min`;
+  if (!L) return { level: "none", text: `Log holds ~${fmtDays(capDays)} at one sample every ${every} - fill level known after the next full download` };
+  const now = Date.now() / 1000;
   const est = Math.min(LOG_CAPACITY, L.n + Math.max(0, now - L.at) / P);
   const fullAt = L.at + Math.max(0, LOG_CAPACITY - L.n) * P, daysLeft = (fullAt - now) / 86400;
   const pct = Math.round(est / LOG_CAPACITY * 100);
   const when = new Date(fullAt * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" });
   if (daysLeft <= 0) return { level: "full", text: `Log full since ~${when}: the oldest readings are being overwritten - download now` };
-  if (daysLeft <= 7) return { level: "soon", text: `Log ${pct}% full: starts overwriting ~${when} (in ${Math.ceil(daysLeft)} d) - download soon` };
-  return { level: "ok", text: `Log ${pct}% full · full ~${when}` };
+  if (daysLeft <= 7) return { level: "soon", text: `Log ${pct}% full: full in ${fmtDays(daysLeft)} (~${when}), then the oldest readings are overwritten - download soon` };
+  return { level: "ok", text: `Log ${pct}% full (${fmtDays(est * P / 86400)} of ~${fmtDays(capDays)}) · full in ${fmtDays(daysLeft)} (~${when})` };
 }
 
 // ===== Config (0x55) =====
@@ -1786,49 +1804,79 @@ function encodeCfg(c) {
   }
   return p;
 }
-const FIELD_HELP = {
-  advertising_type: "0 = ATC1441, 1 = Custom (pvvx), 2 = Mi, 3 = BTHome",
-  advertising_interval_raw: v => `× 62.5 ms = ${(v * 62.5).toFixed(0)} ms`,
-  measure_interval_raw: "measurements every N advertising intervals",
-  connect_latency_raw: v => `(N+1) × 20 ms = ${(v + 1) * 20} ms`,
-  lcd_tint_raw: v => `× 0.05 s = ${(v * 0.05).toFixed(2)} s`,
-  av_meas_mem_raw: "log one sample every N measurements",
+// Plain-language label and explanation per setting. Explanations may be functions of the whole config,
+// so derived values (intervals, log length) update as you edit.
+const secs = s => s >= 3600 ? `${+(s / 3600).toFixed(1)} h` : s >= 60 ? `${+(s / 60).toFixed(1)} min` : `${+s.toFixed(2)} s`;
+const CFG_TEXT = {
+  advertising_type: ["Broadcast format", "How the sensor broadcasts its readings. Keep “Custom (pvvx)”: this app's live values read that format (ATC1441 also works). Mi and BTHome are for Xiaomi / Home Assistant receivers."],
+  comfort_smiley: ["Comfort smiley", "Show a smiley on the screen that depends on whether temperature and humidity are comfortable."],
+  hardware_specific_bit3: ["Screen option (bit 3)", "Display option whose meaning differs between sensor models - leave as it is."],
+  temperature_unit_fahrenheit: ["Show °F on the screen", "Only the sensor's own display; the app and downloaded data always use °C."],
+  hardware_specific_bit5: ["Screen option (bit 5)", "Display option whose meaning differs between sensor models - leave as it is."],
+  tx_measures_when_connected: ["Send readings while connected", "Push each new measurement to a connected app. Not needed by this app."],
+  low_power_measurements: ["Low-power measuring", "Measure in the sensor's low-power mode: saves battery."],
+  smiley_or_screen_type: ["Smiley", "Which smiley the screen shows (0 = none); on some models this number selects the screen type instead - leave as it is if unsure."],
+  adv_crypto: ["Encrypted broadcasts", "Encrypt the broadcasts with a bind key. Leave off: this app (and most receivers) can't read encrypted broadcasts."],
+  adv_flags: ["Broadcast “flags” field", "Adds the standard Bluetooth flags to each broadcast; some receivers need it. Leave as it is."],
+  bt5_phy: ["Bluetooth 5 PHY", "Broadcast with Bluetooth 5 radio modes. iPhones can't receive these broadcasts - leave off."],
+  long_range: ["Long range (Coded PHY)", "Bluetooth 5 long-range broadcasts. iPhones can't receive them - leave off."],
+  screen_off: ["Screen off", "Turn the display off to save battery."],
+  advertising_interval_raw: ["Broadcast interval", c => `× 62.5 ms = one broadcast every ${secs(c.advertising_interval_raw * 0.0625)}. Shorter = live values update faster, but uses more battery.`],
+  measure_interval_raw: ["Measure every N broadcasts", c => `= one measurement every ${secs(c.advertising_interval_raw * 0.0625 * c.measure_interval_raw)} (what the screen and broadcasts show).`],
+  rf_tx_power_raw: ["Radio power", "Transmit power code: higher = more range, more battery. Leave as it is unless a sensor is hard to reach."],
+  connect_latency_raw: ["Connection latency", c => `(N+1) × 20 ms = ${(c.connect_latency_raw + 1) * 20} ms: how long the sensor may wait before answering while connected. Higher saves battery; the sensor drops it by itself during downloads.`],
+  lcd_tint_raw: ["Screen update interval", c => `× 0.05 s = the screen updates at most every ${secs(c.lcd_tint_raw * 0.05)}.`],
+  hw_ver_raw: ["Hardware version", "Identifies the sensor model for the firmware - don't change."],
+  av_meas_mem_raw: ["Log every N measurements", c => {
+    const p = logIntervalFromCfg(c);
+    return p ? `= one logged sample every ${secs(p)}, so the log holds ~${fmtDays(LOG_CAPACITY * p / 86400)} before the oldest readings are overwritten. 0 = logging off.`
+      : "0 = logging off: nothing is recorded for download.";
+  }],
 };
 function renderCfg() {
   const f = $("cfgForm"); f.innerHTML = "";
   $("btnSetCfg").disabled = !chr || busy || !currentCfg; $("btnCfgExport").disabled = !currentCfg;
   if (!currentCfg) return;
-  const c = currentCfg;
+  const c = currentCfg, dyn = [];
+  const refresh = () => { for (const [el, fn] of dyn) el.textContent = fn(c); };
   const add = (label, input, help) => {
     const l = document.createElement("div"); l.textContent = label; f.append(l, input);
-    if (help) { const h = document.createElement("div"); h.className = "muted info"; h.textContent = help; f.append(h); }
+    if (help) {
+      const h = document.createElement("div"); h.className = "muted info"; f.append(h);
+      if (typeof help === "function") dyn.push([h, help]); else h.textContent = help;
+    }
   };
-  const num = (obj, key, min, max, path) => {
+  const num = (obj, key, min, max) => {
     const i = document.createElement("input"); i.type = "number"; i.min = min; i.max = max; i.value = obj[key];
-    i.oninput = () => { obj[key] = parseInt(i.value) || 0; const h = FIELD_HELP[key]; if (typeof h === "function" && i.nextSibling) i.nextSibling.textContent = h(obj[key]); };
+    i.oninput = () => { obj[key] = parseInt(i.value) || 0; refresh(); };
     return i;
   };
   const chk = (obj, key) => { const i = document.createElement("input"); i.type = "checkbox"; i.checked = !!obj[key]; i.onchange = () => obj[key] = i.checked; return i; };
-  const help = (k, v) => { const h = FIELD_HELP[k]; return typeof h === "function" ? h(v) : h; };
+  const T = k => CFG_TEXT[k] || [k.replace(/_raw$/, "").replace(/_/g, " "), ""];
   add(`Firmware protocol ${c.device_info.protocol_version_str}`, document.createElement("span"));
   const sel = document.createElement("select");
   ["ATC1441", "Custom (pvvx)", "Mi", "BTHome"].forEach((n, i) => sel.add(new Option(`${i}: ${n}`, i)));
   sel.value = c.flg.bits.advertising_type; sel.onchange = () => c.flg.bits.advertising_type = +sel.value;
-  add("Advertising type", sel);
-  for (const [k] of FLG_BITS.slice(1)) add(k.replace(/_/g, " "), chk(c.flg.bits, k));
-  add("smiley / screen type", num(c.flg2.bits, "smiley_or_screen_type", 0, 7));
-  for (const [k] of FLG2_BITS.slice(1)) add(k.replace(/_/g, " "), chk(c.flg2.bits, k));
-  const raws = ["advertising_interval_raw", "measure_interval_raw", "rf_tx_power_raw", "connect_latency_raw", "lcd_tint_raw", "hw_ver_raw", "av_meas_mem_raw"];
+  add(T("advertising_type")[0], sel, T("advertising_type")[1]);
+  // Intervals and logging first: they decide battery life and how long the log lasts.
   const signed = c.device_info.protocol_version_raw < CFG_NEW_LAYOUT_VER;
-  raws.push("temp_offset_raw", "humi_offset_raw");
-  for (const k of raws) {
-    if (c[k] == null) continue;
-    const lo = signed && /offset/.test(k) ? -128 : 0, hi = signed && /offset/.test(k) ? 127 : 255;
-    let h = help(k, c[k]);
-    if (k === "temp_offset_raw") h = signed ? "× 0.1 °C" : "repurposed on this firmware (adv delay / date flags)";
-    if (k === "humi_offset_raw") h = signed ? "× 0.1 %" : "repurposed on this firmware (event adv count)";
-    add(k.replace(/_raw$/, "").replace(/_/g, " "), num(c, k, lo, hi), h);
-  }
+  const numField = k => {
+    if (c[k] == null) return;
+    const off = /offset/.test(k), lo = signed && off ? -128 : 0, hi = signed && off ? 127 : 255;
+    let [label, h] = T(k);
+    if (k === "temp_offset_raw") [label, h] = signed ? ["Temperature correction", c => `× 0.1 °C = ${(c.temp_offset_raw / 10).toFixed(1)} °C added to every reading (calibration).`]
+      : ["Temperature offset byte", "On this firmware version this byte holds broadcast timing and date-display flags, not a calibration - leave as it is."];
+    if (k === "humi_offset_raw") [label, h] = signed ? ["Humidity correction", c => `× 0.1 % = ${(c.humi_offset_raw / 10).toFixed(1)} % added to every reading (calibration).`]
+      : ["Humidity offset byte", "On this firmware version this byte holds the event broadcast count, not a calibration - leave as it is."];
+    add(label, num(c, k, lo, hi), h);
+  };
+  ["advertising_interval_raw", "measure_interval_raw", "av_meas_mem_raw", "temp_offset_raw", "humi_offset_raw",
+   "rf_tx_power_raw", "connect_latency_raw", "lcd_tint_raw"].forEach(numField);
+  for (const [k] of FLG_BITS.slice(1)) { const [l, h] = T(k); add(l, chk(c.flg.bits, k), h); }
+  { const [l, h] = T("smiley_or_screen_type"); add(l, num(c.flg2.bits, "smiley_or_screen_type", 0, 7), h); }
+  for (const [k] of FLG2_BITS.slice(1)) { const [l, h] = T(k); add(l, chk(c.flg2.bits, k), h); }
+  numField("hw_ver_raw");
+  refresh();
 }
 async function getCfg() {
   const r = await request([0x55], b => b[0] === 0x55 && b.length - 1 >= 9);
