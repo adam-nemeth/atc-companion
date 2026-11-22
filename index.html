@@ -67,7 +67,7 @@ details summary { cursor: pointer; font-weight: 600; }
 #log { font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; max-height: 260px; overflow: auto;
   background: var(--input); border-radius: 8px; padding: 8px; margin-top: 8px; }
 .hidden { display: none !important; }
-/* Big line at the top of the Device section: which sensor, and whether it's connecting/connected */
+/* Big line at the top of the Sensor section: which sensor, and whether it's connecting/connected */
 .devstate { font-size: 16px; font-weight: 700; margin: -2px 0 10px; padding: 6px 10px; border-radius: 9px;
   background: var(--input); border: 1px solid var(--line); overflow-wrap: anywhere; }
 .devstate:not(.ok):not(.warn):not(.err) { color: var(--muted); font-weight: 600; }
@@ -140,11 +140,11 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
 
   <!-- Connection -->
   <section class="card" data-tab="single" id="deviceCard" style="scroll-margin-top:70px">
-    <h2>Device</h2>
+    <h2>Sensor</h2>
     <div id="connStatus" class="status devstate">Not connected</div>
     <div class="row">
       <button id="btnConnect" class="primary">Connect…</button>
-      <button id="btnConnectAll">Connect (all devices)…</button>
+      <button id="btnConnectAll">Connect (show all)…</button>
       <button id="btnDisconnect" disabled>Disconnect</button>
     </div>
     <div class="row"><span id="connMsg" class="muted"></span></div>
@@ -260,8 +260,8 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
     <div id="readout" class="muted"></div>
     <div class="stats" id="stats"></div>
     <div class="row" style="margin-top:10px">
-      <button id="btnShareSel" class="primary">Send / share this device…</button>
-      <button id="btnShareAll">Send all devices…</button>
+      <button id="btnShareSel" class="primary">Send / share this sensor…</button>
+      <button id="btnShareAll">Send all sensors…</button>
       <button id="btnExportRaw" disabled>Send last download (raw)…</button>
     </div>
     <div class="row"><span id="shareMsg" class="muted">Opens the iPhone share sheet: Mail, Messages, AirDrop, Save to Files… CSV times are UTC.</span></div>
@@ -269,13 +269,13 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
       <button id="btnImport">Import CSV…</button>
       <input type="file" id="fileImport" accept=".csv,text/csv" multiple class="hidden">
     </div>
-    <div class="row"><button id="btnForget" class="danger">Forget this device's stored data…</button></div>
+    <div class="row"><button id="btnForget" class="danger">Forget this sensor's stored data…</button></div>
   </section>
 
   <!-- Config -->
   <section class="card" data-tab="single">
     <details id="cfgDetails">
-      <summary>Device configuration</summary>
+      <summary>Sensor configuration</summary>
       <p class="muted">Read on connect. Change values, then “Write config”. Fields marked hardware‑specific mean different things per model; leave them unless you know.</p>
       <div class="row">
         <button id="btnGetCfg" disabled>Re-read config</button>
@@ -288,7 +288,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
       </div>
       <div id="cfgForm" class="cfg-grid" style="margin-top:12px"></div>
 
-      <h3 class="sub" id="renameBox">Bluetooth name (shown in the device picker)</h3>
+      <h3 class="sub" id="renameBox">Bluetooth name (shown in the Bluetooth picker)</h3>
       <p class="muted" id="btNameCur">Connect to a sensor to see its Bluetooth name.</p>
       <div class="row">
         <input id="btNameNew" maxlength="20" size="18" placeholder="ATC_Kitchen" autocapitalize="off" autocorrect="off" spellcheck="false" disabled>
@@ -418,7 +418,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 43;
+const APP_VERSION = 44;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -709,7 +709,7 @@ function renderKnown() {
     if (isCur) btn.classList.add("is-current");
     btn.disabled = !dev || isCur || busy;
     btn.onclick = () => {
-      // Show the Device card (where connection progress and errors appear) straight away.
+      // Show the Sensor card (where connection progress and errors appear) straight away.
       showTab("single");
       $("deviceCard").scrollIntoView({ behavior: "smooth", block: "start" });
       withBusy(async () => {
@@ -833,7 +833,7 @@ async function identifySensor() {
 const cfgListener = b => { if (b[0] === 0x55 && b.length - 1 >= 9) { try { currentCfg = decodeCfg(b); renderCfg(); } catch (e) { log("Config decode failed: " + e.message); } } };
 
 async function connect(showAll) {
-  showInfo("Opening Bluetooth device picker…");
+  showInfo("Opening Bluetooth picker…");
   const optionalServices = [SVC, ES_SVC, BATT_SVC];
   const opts = showAll ? { acceptAllDevices: true, optionalServices }
     : { filters: NAME_PREFIXES.map(p => ({ namePrefix: p })), optionalServices };
@@ -844,7 +844,7 @@ async function connect(showAll) {
     device = await navigator.bluetooth.requestDevice(opts);
   } catch (e) { dbg(`Picker returned error after ${since(s)}`); pickerFailed(e); return; }
   dbg(`Picker returned after ${since(s)}: name="${device && device.name}" id=${device && device.id}`);
-  if (!device) { showError("Device picker", "returned no device"); return; }
+  if (!device) { showError("Bluetooth picker", "returned no sensor"); return; }
   await connectDevice(device);
 }
 // Returns true when connected. opts.batch skips the extras (name read, live values) to save time.
@@ -956,8 +956,8 @@ async function disconnectAndWait() {
 }
 function pickerFailed(e) {
   if (e && e.name === "NotFoundError" && /cancel/i.test(e.message || "")) { showInfo("Picker cancelled."); return; }
-  showError("Device picker", e);
-  $("connMsg").textContent += " - try “Connect (all devices)”, and check that Bluetooth is on and Bluefy is allowed to use it (iPhone Settings → Privacy & Security → Bluetooth).";
+  showError("Bluetooth picker", e);
+  $("connMsg").textContent += " - try “Connect (show all)”, and check that Bluetooth is on and Bluefy is allowed to use it (iPhone Settings → Privacy & Security → Bluetooth).";
 }
 function onDisconnected(ev) {
   // Events from a sensor we already switched away from must not tear down the current connection.
@@ -1012,7 +1012,7 @@ function showLatestSample(s) {
 // ===== History download (0x35) =====
 let lastRaw = null; // {dev, rows:[rawEpoch,t,h,v], offset}
 function devKey() {
-  const n = sensorName || "device"; const r = rooms[n];
+  const n = sensorName || "sensor"; const r = rooms[n];
   return r ? `${n}__${r}` : n;
 }
 // Returns { n, total, finished, deleted } (or null if cancelled). opts.skipConfirm: batch already asked.
@@ -1021,7 +1021,7 @@ async function dump(opts = {}) {
   // opts.sync / opts.del override the checkboxes (used by the combined batch button).
   const del = opts.del != null ? opts.del : $("optDelete").checked;
   const sync = opts.sync != null ? opts.sync : $("optSync").checked;
-  if (del && !opts.skipConfirm && !confirm("After a successful download, PERMANENTLY erase the history stored on the device?")) return null;
+  if (del && !opts.skipConfirm && !confirm("After a successful download, PERMANENTLY erase the history stored on the sensor?")) return null;
   const result = { n: 0, total: 0, finished: false, deleted: false };
   const raw = []; let done = false;
   const prog = $("dumpProg"), bar = prog.firstElementChild; prog.style.display = "block"; bar.style.width = "0";
@@ -1046,7 +1046,7 @@ async function dump(opts = {}) {
     listeners.delete(l);
     const secs = (performance.now() - sDump) / 1000;
     dbg(`Transfer stats: ${raw.length} samples in ${secs.toFixed(1)} s (${(raw.length / Math.max(secs, 0.001)).toFixed(0)}/s)` +
-      (raw.length ? `; device times ${faceValue(Math.min(...raw.map(r => r[0])))} … ${faceValue(Math.max(...raw.map(r => r[0])))}` : ""));
+      (raw.length ? `; sensor times ${faceValue(Math.min(...raw.map(r => r[0])))} … ${faceValue(Math.max(...raw.map(r => r[0])))}` : ""));
     if (!finished) log(`Idle timeout; keeping the ${raw.length} sample(s) received so far.`, "warn");
     else {
       log(`Transfer complete: ${raw.length} samples.`);
@@ -1057,7 +1057,7 @@ async function dump(opts = {}) {
       }
       if (del) {
         const r = await request([0x36, 0x12, 0x34], b => b[0] === 0x36);
-        log(r ? "Device confirmed: history deleted." : "No reply to delete; check with another download.");
+        log(r ? "Sensor confirmed: history deleted." : "No reply to delete; check with another download.");
         result.deleted = !!r;
       }
     }
@@ -1066,8 +1066,8 @@ async function dump(opts = {}) {
     raw.sort((a, b) => a[0] - b[0]);
     const offStr = prefs.timeMode === "utc" ? "+00:00" : fmtOffset(localOffsetSec());
     const offSec = parseOffset(offStr);
-    const key = devKey();
-    lastRaw = { dev: key, rows: raw, offset: offStr };
+    const key = histId(sensorName || "sensor");  // stored per sensor ID; the description is only for file names
+    lastRaw = { dev: devKey(), rows: raw, offset: offStr };
     $("btnExportRaw").disabled = !raw.length;
     const total = await mergeInto(key, raw.map(([e, t, h, v]) => [e - offSec, t, h, v]));
     log(`Stored ${raw.length} new samples for ${key} (${total} total).`);
@@ -1344,7 +1344,7 @@ async function setTime() {
   const r = await request([0x23, ...le32(t)], b => b[0] === 0x23 && b.length >= 5);
   if (r) {
     const got = new DataView(r.buffer).getUint32(1, true);
-    log("Device confirmed clock: " + faceValue(got));
+    log("Sensor confirmed clock: " + faceValue(got));
     $("clockMsg").textContent = `Clock set to ${faceValue(got)} (${modeLabel(prefs.timeMode)}).`; $("clockMsg").className = "status ok";
     return { ok: true, text: `set to ${faceValue(got)} ${prefs.timeMode === "utc" ? "UTC" : "local"}` };
   }
@@ -1361,7 +1361,7 @@ async function getTime() {
   const ref = deviceEpochNow(prefs.timeMode) - rtt / 2000;
   const diff = Math.round(dev - ref);
   const other = Math.round(dev - deviceEpochNow(prefs.timeMode === "utc" ? "local" : "utc"));
-  log(`Device clock ${faceValue(dev)}; phone (${modeLabel(prefs.timeMode)}) ${faceValue(Math.round(ref))}; difference ${diff} s (vs ${prefs.timeMode === "utc" ? "local" : "UTC"}: ${other} s); reply ${Math.round(rtt)} ms`);
+  log(`Sensor clock ${faceValue(dev)}; phone (${modeLabel(prefs.timeMode)}) ${faceValue(Math.round(ref))}; difference ${diff} s (vs ${prefs.timeMode === "utc" ? "local" : "UTC"}: ${other} s); reply ${Math.round(rtt)} ms`);
   let txt = `Sensor clock: ${faceValue(dev)} - `;
   if (Math.abs(diff) <= 2) txt += `matches ${modeLabel(prefs.timeMode)}.`;
   else if (Math.abs(other) <= 120) txt += `matches ${prefs.timeMode === "utc" ? "local time" : "UTC"} instead (${other} s) - it was set with the other time zone setting.`;
@@ -1379,7 +1379,7 @@ async function updateStorageInfo() {
     }
     if (navigator.storage && navigator.storage.persisted) {
       const p = await navigator.storage.persisted();
-      txt += p ? " Marked persistent." : " Not marked persistent: clearing Bluefy's website data, deleting Bluefy, or iOS clean-up can erase it - use “Send all devices” now and then as a backup.";
+      txt += p ? " Marked persistent." : " Not marked persistent: clearing Bluefy's website data, deleting Bluefy, or iOS clean-up can erase it - use “Send all sensors” now and then as a backup.";
     }
   } catch (e) { dbg(`storage info error: ${describeErr(e)}`); }
   $("storageInfo").textContent = txt;
@@ -1387,7 +1387,7 @@ async function updateStorageInfo() {
 async function deleteLog() {
   if (!confirm(`PERMANENTLY erase all recorded history on the sensor ${devKey().replace("__", " · ")}? This cannot be undone. (Data already downloaded to this phone is kept.)`)) return;
   const r = await request([0x36, 0x12, 0x34], b => b[0] === 0x36);
-  log(r ? "Device confirmed: history deleted." : "No reply (idle timeout); it may still have deleted.");
+  log(r ? "Sensor confirmed: history deleted." : "No reply (idle timeout); it may still have deleted.");
 }
 
 // ===== Config (0x55) =====
@@ -1488,7 +1488,7 @@ async function setCfg() {
   const payload = encodeCfg(currentCfg);
   if (!confirm(`Write ${payload.length} config bytes to ${devKey().replace("__", " · ")}?`)) return;
   const r = await request([0x55, ...payload], b => b[0] === 0x55 && b.length - 1 >= 9);
-  log(r ? "Device confirmed the new config." : "No reply (idle timeout); re-read to check.");
+  log(r ? "Sensor confirmed the new config." : "No reply (idle timeout); re-read to check.");
 }
 
 // ===== CSV export / import =====
@@ -1498,7 +1498,7 @@ function toCsv(rows, loc) { // rows: [tsStr, offStr, t, h, v]
   return ["timestamp", "utc_offset", "temperature_c", "humidity_pct", "battery_mv"].join(d) + "\r\n" +
     rows.map(r => [r[0], r[1], fmtNum(r[2], loc), fmtNum(r[3], loc), r[4]].join(d)).join("\r\n") + "\r\n";
 }
-const safe = s => s.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "device";
+const safe = s => s.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "sensor";
 function shareMsg(text, cls) { const m = $("shareMsg"); m.textContent = text; m.className = cls || "muted"; }
 // Opens the iOS share sheet (Mail, Messages, AirDrop, Save to Files…) with the CSV file(s) attached.
 // iOS only allows the share sheet straight from a tap, so everything is prepared synchronously
@@ -1536,18 +1536,20 @@ function downloadFiles(items) {
   }
 }
 const fileSafe = s => s.replace(/[^A-Za-z0-9._-]+/g, "_");
+// File name label like the Windows scripts': "ATC_xxxxxx__Description" (description only if set).
+function fileLabel(id) { return rooms[id] ? `${id}__${rooms[id]}` : id; }
 function csvAllFor(dev) {
   const s = histCache.get(dev) || [];
-  return { name: `history_${fileSafe(dev)}_all.csv`, rows: s.length,
+  return { name: `history_${fileSafe(fileLabel(dev))}_all.csv`, rows: s.length,
     text: toCsv(s.map(([t, tm, hm, v]) => [faceValue(t), "+00:00", tm, hm, v]), prefs.csvLocale) };
 }
 function shareSelected() {
   const dev = $("histDev").value; if (!dev) { shareMsg("No stored data yet.", "status warn"); return; }
-  shareFiles([csvAllFor(dev)], `Thermometer history: ${dev.replace("__", " · ")}`);
+  shareFiles([csvAllFor(dev)], `Thermometer history: ${histLabel(dev)}`);
 }
 function shareAllDevices() {
   const items = [...histCache.keys()].sort().map(csvAllFor).filter(it => it.rows);
-  shareFiles(items, `Thermometer history: ${items.length} device(s)`);
+  shareFiles(items, `Thermometer history: ${items.length} sensor(s)`);
 }
 function shareRaw() {
   if (!lastRaw) return;
@@ -1578,15 +1580,44 @@ async function importFiles(files) {
   for (const f of files) {
     // history_<name>[__<room>]_(raw_YYYYMMDD_HHMMSS|all|merged|...).csv
     const m = /^history_(.+?)_(raw_\d{8}_\d{6}|all|merged|daily_\d+|monthly_\d+|yearly_\d+)\.csv$/i.exec(f.name);
-    let dev = m ? m[1] : prompt(`Device name for ${f.name}?`, f.name.replace(/\.csv$/i, ""));
+    let dev = m ? m[1] : prompt(`Sensor name for ${f.name}?`, f.name.replace(/\.csv$/i, ""));
     if (!dev) continue;
-    if (!dev.includes("__")) { const r = rooms[dev]; if (r) dev = `${dev}__${r}`; }
+    dev = histId(dev);
     const rows = parseCsv(await f.text());
     const total = await mergeInto(dev, rows);
     log(`Imported ${rows.length} rows from ${f.name} into ${dev} (${total} total).`);
     last = dev;
   }
   if (last) await refreshDeviceList(last);
+}
+
+// History is stored per sensor under its fixed ID (ATC_xxxxxx). Older versions stored it as
+// "ATC_xxxxxx__Description", so a sensor whose description changed ended up in several stores.
+function histId(key) {
+  const id = String(key).split("__")[0];
+  return /^ATC_[0-9A-F]{6}$/i.test(id) ? "ATC_" + id.slice(4).toUpperCase() : key;
+}
+function histLabel(d) { return knownNames().includes(d) ? shownName(d) : d.replace("__", " · "); }
+// One-time clean-up: merge every store of the same sensor into one keyed by its ID (duplicates by
+// time are dropped by mergeInto), and pick up the description from the old key if none is set.
+async function mergeDuplicateHistory() {
+  const keys = await listDevices(), groups = {};
+  for (const k of keys) (groups[histId(k)] = groups[histId(k)] || []).push(k);
+  let merged = 0;
+  for (const [id, ks] of Object.entries(groups)) {
+    if (ks.length === 1 && ks[0] === id) continue;
+    const all = [];
+    for (const k of ks) {
+      all.push(...await loadHistory(k));
+      const desc = k.split("__")[1];
+      if (desc && !rooms[id]) { rooms[id] = desc; lsSet("rooms", rooms); }
+    }
+    for (const k of ks) if (k !== id) await deleteHistory(k);
+    const total = await mergeInto(id, all);
+    log(`History merged for ${id}: ${ks.join(", ")} → ${total} samples`);
+    merged++;
+  }
+  return merged;
 }
 
 // ===== Chart =====
@@ -1599,8 +1630,7 @@ async function refreshDeviceList(select) {
   const sel = $("histDev"), keep = select || sel.value || lsGet("histDev", "");
   sel.innerHTML = "";
   if (!devs.length) sel.add(new Option("(no data yet)", ""));
-  // Stored keys are "ATC_xxxxxx__Room"; show and sort them the same way as the sensor list.
-  const histLabel = d => { const id = d.split("__")[0]; return knownNames().includes(id) ? shownName(id) : d.replace("__", " · "); };
+  // Shown and sorted the same way as the sensor list.
   for (const d of devs.slice().sort((a, b) => byText(histLabel(a), histLabel(b)))) sel.add(new Option(histLabel(d), d));
   if (devs.includes(keep)) sel.value = keep;
   await loadChart();
@@ -1928,7 +1958,7 @@ function updateStatusBar() {
   $("fileImport").onchange = async e => { await importFiles([...e.target.files]); e.target.value = ""; };
   $("btnForget").onclick = async () => {
     const d = $("histDev").value; if (!d) return;
-    if (confirm(`Delete all stored history for ${d} from this phone? (The device itself is not affected.)`)) { await deleteHistory(d); await refreshDeviceList(); }
+    if (confirm(`Delete all stored history for ${histLabel(d)} from this phone? (The sensor itself is not affected.)`)) { await deleteHistory(d); await refreshDeviceList(); }
   };
   $("chart").addEventListener("pointermove", onChartPointer);
   setupChartGestures();
@@ -1941,6 +1971,7 @@ function updateStatusBar() {
   // Ask the browser not to evict our data under storage pressure (may be ignored).
   try { if (navigator.storage && navigator.storage.persist) dbg(`storage.persist() → ${await navigator.storage.persist()}`); } catch (e) { dbg(`storage.persist() error: ${describeErr(e)}`); }
   updateStorageInfo();
+  try { const n = await mergeDuplicateHistory(); if (n) renderKnown(); } catch (e) { log("History merge failed: " + errDetail(e), "err"); }
   await refreshDeviceList();
   setButtons(false);
 })();
