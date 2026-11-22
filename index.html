@@ -54,7 +54,7 @@ label { display: inline-flex; gap: 6px; align-items: center; }
 .tile .k { font-size: 12px; color: var(--muted); }
 .progress { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 8px; display: none; }
 .progress > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
-#chartWrap { position: relative; margin-top: 10px; touch-action: pan-y; -webkit-user-select: none; user-select: none; }
+#chartWrap { position: relative; margin-top: 10px; touch-action: pan-y; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 #chart { width: 100%; height: 276px; display: block; }
 #readout { font-size: 13px; min-height: 20px; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .legend { display: flex; gap: 14px; font-size: 13px; color: var(--muted); }
@@ -271,7 +271,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
       <svg id="chart" role="img" aria-label="Temperature and humidity chart"></svg>
     </div>
     <div class="row" style="margin-top:4px">
-      <span id="zoomInfo" class="muted">Pinch to zoom · drag sideways to move · double-tap to reset</span>
+      <span id="zoomInfo" class="muted">Tap or hold to read values · drag sideways to move · pinch to zoom · double-tap to reset</span>
       <button id="btnZoomReset" class="seg hidden">Reset zoom</button>
     </div>
     <div class="legend">
@@ -466,7 +466,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 52;
+const APP_VERSION = 53;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1974,14 +1974,25 @@ function drawChart() {
     ["Battery", `${(last[3] / 1000).toFixed(2)} V`],
   ].map(([k, v]) => `<div><div class="muted">${k}</div>${v}</div>`).join("");
 }
-function onChartPointer(ev) {
+// Time marker + reading under the chart, at the point nearest to a screen x position.
+function showReadoutAt(clientX) {
   if (!plotted) return;
   const svg = $("chart"), r = svg.getBoundingClientRect();
-  const px = (ev.clientX - r.left) * (svg.viewBox.baseVal.width / r.width);
+  const px = (clientX - r.left) * (svg.viewBox.baseVal.width / r.width);
   const { pts, x, cursor } = plotted;
   let best = pts[0]; for (const p of pts) if (Math.abs(x(p[0]) - px) < Math.abs(x(best[0]) - px)) best = p;
   cursor.setAttribute("x1", x(best[0])); cursor.setAttribute("x2", x(best[0])); cursor.setAttribute("visibility", "visible");
   $("readout").textContent = `${localStr(best[0])}  ·  ${best[1].toFixed(2)} °C  ·  ${best[2].toFixed(1)} %`;
+}
+function hideReadout() {
+  if (plotted) plotted.cursor.setAttribute("visibility", "hidden");
+  $("readout").textContent = "";
+}
+// Mouse only: the marker follows the pointer. Touch is handled in setupChartGestures():
+// tap = reading at that point, press-and-hold then slide = move the marker, sideways drag = move the window.
+function onChartPointer(ev) {
+  if (ev.pointerType && ev.pointerType !== "mouse") return;
+  showReadoutAt(ev.clientX);
 }
 
 // ===== Chart zoom & pan (pinch, one-finger sideways drag, double-tap, mouse wheel) =====
@@ -1999,7 +2010,7 @@ function clampShift(a, span) {
 function updateZoomUi() {
   const zr = $("btnZoomReset"), zi = $("zoomInfo"); if (!zr) return;
   zr.classList.toggle("hidden", !view);
-  zi.textContent = view ? `${localStr(view.a)} → ${localStr(view.b)}` : "Pinch to zoom · drag sideways to move · double-tap to reset";
+  zi.textContent = view ? `${localStr(view.a)} → ${localStr(view.b)}` : "Tap or hold to read values · drag sideways to move · pinch to zoom · double-tap to reset";
   document.querySelectorAll("#rangeBtns .seg").forEach(x => x.classList.toggle("on", !view && +x.dataset.h === prefs.range));
 }
 let drawQueued = false;
@@ -2020,6 +2031,9 @@ function setupChartGestures() {
       if (now - lastTap < 300) { lastTap = 0; g = null; e.preventDefault(); resetZoom(); return; }
       lastTap = now;
       g = { mode: "?", x0: t.clientX, y0: t.clientY, sx0: svgX(t.clientX), dom };
+      // Press and hold (finger still) → "scrub": the marker follows the finger, the window stays put.
+      const mine = g;
+      g.holdTimer = setTimeout(() => { if (g === mine && g.mode === "?") { g.mode = "scrub"; lastTap = 0; showReadoutAt(g.x0); } }, 350);
     }
   }, { passive: false });
   chart.addEventListener("touchmove", e => {
@@ -2035,7 +2049,13 @@ function setupChartGestures() {
       requestDraw();
     } else if (e.touches.length === 1 && g.mode !== "pinch") {
       const t = e.touches[0], dx = t.clientX - g.x0, dy = t.clientY - g.y0;
-      if (g.mode === "?") { if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return; g.mode = Math.abs(dx) > Math.abs(dy) ? "pan" : "scroll"; lastTap = 0; }
+      if (g.mode === "scrub") { e.preventDefault(); showReadoutAt(t.clientX); return; }
+      if (g.mode === "?") {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        clearTimeout(g.holdTimer);
+        g.mode = Math.abs(dx) > Math.abs(dy) ? "pan" : "scroll"; lastTap = 0;
+        if (g.mode === "pan") hideReadout();
+      }
       if (g.mode === "pan") {
         e.preventDefault();
         const span = g.dom.b - g.dom.a;
@@ -2044,7 +2064,12 @@ function setupChartGestures() {
       }
     }
   }, { passive: false });
-  const end = e => { if (e.touches.length === 0 || (g && g.mode === "pinch")) g = null; };
+  const end = e => {
+    if (g && g.holdTimer) clearTimeout(g.holdTimer);
+    // A quick tap (no movement, released before the hold) shows the reading at that point.
+    if (g && g.mode === "?" && e.touches.length === 0 && e.type === "touchend") showReadoutAt(g.x0);
+    if (e.touches.length === 0 || (g && g.mode === "pinch")) g = null;
+  };
   chart.addEventListener("touchend", end); chart.addEventListener("touchcancel", end);
   // Stop iOS from zooming the whole page when pinching on the chart.
   for (const ev of ["gesturestart", "gesturechange"]) chart.addEventListener(ev, e => e.preventDefault(), { passive: false });
