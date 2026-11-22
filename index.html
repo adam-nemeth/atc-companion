@@ -171,6 +171,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
       <div class="tile"><div class="k">Humidity</div><div class="v" id="liveH">–</div></div>
       <div class="tile"><div class="k">Battery</div><div class="v" id="liveB">–</div></div>
     </div>
+    <div class="row"><span class="muted" id="clockState"></span></div>
     <div class="row"><span class="muted" id="liveNote"></span></div>
   </section>
 
@@ -483,7 +484,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 61;
+const APP_VERSION = 62;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -936,7 +937,7 @@ async function connect(showAll) {
 // Returns true when connected. opts.batch skips the extras (name read, live values) to save time.
 async function connectDevice(dev, expectedName, opts = {}) {
   if (chr && device && device !== dev) { log(`Switching from ${sensorName} to ${expectedName || dev.name || dev.id}`); await disconnectAndWait(); }
-  device = dev; sensorName = null;
+  device = dev; sensorName = null; $("clockState").textContent = "";
   showInfo("");
   // Diagnostics: is this a fresh handle from the picker/scan, or one reused from an earlier connection?
   dev._uses = (dev._uses || 0) + 1;
@@ -1024,7 +1025,7 @@ async function connectDevice(dev, expectedName, opts = {}) {
     if (!opts.batch && histCache.has(histId(sensorName)) && $("histDev").value !== histId(sensorName)) {
       $("histDev").value = histId(sensorName); loadChart();
     }
-    if (!opts.batch) readLive(server);
+    if (!opts.batch) { await showClockState(); readLive(server); }
     return true;
   } catch (e) {
     showError(`Connect failed while ${step}`, e); setStatus(`Couldn't connect to ${connectingTo}`, "err");
@@ -1092,6 +1093,25 @@ async function readLive(server) {
   if (out.h != null) $("liveH").textContent = out.h.toFixed(1) + "%";
   if (out.b != null) $("liveB").textContent = out.b + "%";
   $("liveNote").textContent = out.t == null ? "Live values not exposed; showing the latest downloaded sample once you download history." : "";
+}
+// On connect: read the sensor clock and show how far off it is (under the live values).
+async function showClockState() {
+  const el = $("clockState"); el.textContent = "Clock: reading…"; el.className = "muted";
+  let c = null; try { c = await readSensorClock(); } catch (e) { dbg(`Clock read on connect failed: ${describeErr(e)}`); }
+  if (!c) { el.textContent = "Clock: no reply"; return; }
+  const E = Math.round(c.sensor - c.phone), zone = prefs.timeMode === "utc" ? "UTC" : "local time";
+  const other = Math.round(c.sensor - deviceEpochNow(prefs.timeMode === "utc" ? "local" : "utc"));
+  let txt;
+  if (Math.abs(E) <= 2) txt = `correct (${zone}, within 2 s)`;
+  else if (Math.abs(E) > 600 && Math.abs(other) <= 120) txt = `set to ${prefs.timeMode === "utc" ? "local time" : "UTC"} instead of ${zone}`;
+  else txt = `${fmtDur(E)} ${E > 0 ? "fast" : "slow"} (${zone})`;
+  // Drift rate since the last clock set this app made, when that's long enough ago to mean something.
+  const last = clockLog(histId(sensorName || "")).sets.slice(-1)[0];
+  const days = last ? (c.phone - last.at) / 86400 : 0;
+  if (last && days > 0.5 && Math.abs(E) > 2) txt += ` · ≈${Math.abs(E / days).toFixed(0)} s/day since it was set ${localStr(last.at - (prefs.timeMode === "utc" ? 0 : localOffsetSec()))}`;
+  el.textContent = "Clock: " + txt;
+  el.className = Math.abs(E) <= 60 ? "status ok" : "status warn";
+  log(`Clock on connect: ${txt} (sensor ${faceValue(c.sensor)}, reply ${Math.round(c.rtt)} ms)`);
 }
 function showLatestSample(s) {
   if (!s) return;
@@ -1559,6 +1579,7 @@ async function setTime() {
     const got = new DataView(r.buffer).getUint32(1, true);
     log("Sensor confirmed clock: " + faceValue(got));
     $("clockMsg").textContent = `Clock set to ${faceValue(got)} (${modeLabel(prefs.timeMode)}).`; $("clockMsg").className = "status ok";
+    $("clockState").textContent = `Clock: correct (${prefs.timeMode === "utc" ? "UTC" : "local time"}, just set)`; $("clockState").className = "status ok";
     return { ok: true, text: `set to ${faceValue(got)} ${prefs.timeMode === "utc" ? "UTC" : "local"}` };
   }
   log("No reply (idle timeout).", "warn"); $("clockMsg").textContent = "No reply from the sensor."; $("clockMsg").className = "status err";
