@@ -56,6 +56,10 @@ label { display: inline-flex; gap: 6px; align-items: center; }
 .progress > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
 #chartWrap { position: relative; margin-top: 10px; touch-action: pan-y; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 #chart { width: 100%; height: 276px; display: block; }
+/* A touch belongs to the element it started on; redrawing replaces every shape inside the chart, and
+   iOS then stops sending that touch's moves. So shapes never take touches - the <svg> (never
+   replaced) always does, and a drag keeps working through redraws. */
+#chart * { pointer-events: none; }
 #readout { font-size: 13px; min-height: 20px; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .legend { display: flex; gap: 14px; font-size: 13px; color: var(--muted); }
 /* Legend entries are toggle buttons: tap to hide/show that line */
@@ -506,7 +510,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 72;
+const APP_VERSION = 73;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
