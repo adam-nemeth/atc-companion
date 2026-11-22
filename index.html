@@ -501,7 +501,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 66;
+const APP_VERSION = 67;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -703,7 +703,23 @@ function removeSensor(name) {
   renderKnown(); refreshDeviceList();
 }
 let renderPending = false;
-function scheduleKnownRender() { if (renderPending) return; renderPending = true; setTimeout(() => { renderPending = false; renderKnown(); }, 300); }
+// While a finger is on the chart, the page must not re-render above it (the chart would move under
+// the finger); renders wait until the gesture ends.
+let chartTouching = false;
+function scheduleKnownRender(delay = 300) {
+  if (renderPending) return; renderPending = true;
+  const run = () => { if (chartTouching) { setTimeout(run, 400); return; } renderPending = false; renderKnown(); };
+  setTimeout(run, delay);
+}
+// Live broadcasts arrive several times a second across all sensors: keep them in memory, and only
+// re-render every few seconds and save every half minute.
+let saveSoonTimer = null;
+function liveUpdate(name, data) {
+  if (removedSensors.has(name)) return;
+  known[name] = Object.assign(known[name] || {}, data);
+  if (!saveSoonTimer) saveSoonTimer = setTimeout(() => { saveSoonTimer = null; saveKnown(); }, 30000);
+  scheduleKnownRender(4000);
+}
 function ago(ms) { const s = Math.round((Date.now() - ms) / 1000); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; }
 // ===== Remembered sensors (picked on an earlier visit) =====
 const remembered = new Map(); // name -> BluetoothDevice from getDevices()
@@ -754,16 +770,24 @@ async function watchLive(name, d) {
   if (liveWatch.has(name) || typeof d.watchAdvertisements !== "function" || removedSensors.has(name)) return;
   let ctrl = null; try { ctrl = new AbortController(); } catch {}
   const onAdv = ev => {
-    d._advSeen = Date.now();
+    d._advSeen = Date.now(); d._advCount = (d._advCount || 0) + 1;
     if (!reachable.has(name)) reachable.set(name, d);
-    let p = null;
-    try { if (ev.serviceData) for (const [k, v] of ev.serviceData) if (String(k).toLowerCase().startsWith("0000181a")) p = parseAdv(v); } catch {}
-    if (p) rememberSensor(name, Object.assign({ seen: Date.now() }, p));
+    let p = null, keys = [];
+    try { if (ev.serviceData) for (const [k, v] of ev.serviceData) { keys.push(`${String(k).slice(4, 8)}:${v.byteLength}B`); if (String(k).toLowerCase().startsWith("0000181a")) p = parseAdv(v); } } catch (e) { keys.push("error " + describeErr(e)); }
+    if (p) d._advParsed = (d._advParsed || 0) + 1;
+    // Log the first few broadcasts per sensor in full, then one per minute, to see what arrives.
+    if (d._advCount <= 3 || Date.now() - (d._advLogged || 0) > 60000) {
+      d._advLogged = Date.now();
+      dbg(`${name} live #${d._advCount}: rssi ${ev.rssi}, service data [${keys.join(", ") || "none"}]${p ? " " + JSON.stringify(p) : " - no readings in it"}`);
+    }
+    if (p) liveUpdate(name, Object.assign({ seen: Date.now() }, p));
+    else scheduleKnownRender(4000);
   };
   d.addEventListener("advertisementreceived", onAdv);
   liveWatch.set(name, { d, ctrl, onAdv });
   try { await d.watchAdvertisements(ctrl ? { signal: ctrl.signal } : undefined); d._liveWatching = true; dbg(`${name}: live watching started`); }
-  catch (e) { dbg(`${name}: live watching failed: ${errDetail(e)}`); d.removeEventListener("advertisementreceived", onAdv); liveWatch.delete(name); }
+  catch (e) { dbg(`${name}: live watching failed: ${errDetail(e)}`); d.removeEventListener("advertisementreceived", onAdv); liveWatch.delete(name); d._liveFailed = describeErr(e); }
+  scheduleKnownRender();
 }
 function startLive() { if (!document.hidden) for (const [n, d] of remembered) watchLive(n, d); }
 function stopLive() {
@@ -777,11 +801,18 @@ function stopLive() {
 // Tiles: one per sensor with readings, newest values from broadcasts (or the last connection).
 function renderRooms() {
   const box = $("roomTiles"); if (!box) return;
-  const names = knownNames().filter(n => known[n] && known[n].t != null);
+  // Shown whenever there are sensors, so it's visible what the live listening is doing.
+  const names = knownNames();
   $("roomsCard").classList.toggle("hidden", !names.length);
   box.innerHTML = "";
   for (const n of names) {
-    const k = known[n], age = k.seen ? Date.now() - k.seen : Infinity;
+    const k = known[n] || {}, age = k.seen ? Date.now() - k.seen : Infinity;
+    if (k.t == null) {
+      const tile = document.createElement("div"); tile.className = "room stale";
+      tile.innerHTML = `<div class="rn"></div><div class="rt">–</div><div class="rh">&nbsp;</div><div class="rm">no reading yet</div>`;
+      tile.querySelector(".rn").textContent = rooms[n] || k.btName || n;
+      box.appendChild(tile); continue;
+    }
     const tile = document.createElement("div"); tile.className = "room" + (age > 600000 ? " stale" : "");
     const title = rooms[n] || k.btName || n;
     tile.innerHTML = `<div class="rn"></div><div class="rt"></div><div class="rh"></div><div class="rm"></div>`;
@@ -789,12 +820,20 @@ function renderRooms() {
     tile.querySelector(".rt").textContent = `${k.t.toFixed(1)}°`;
     tile.querySelector(".rh").textContent = `${k.h.toFixed(0)} %`;
     const logW = logWarning(n);
-    tile.querySelector(".rm").textContent = [k.b != null ? `🔋${k.b}%` : "", k.seen ? ago(k.seen) : "", logW && logW.level !== "ok" ? "⚠ log" : ""].filter(Boolean).join(" · ");
+    tile.querySelector(".rm").textContent = [k.b != null ? `🔋${k.b}%` : "", k.seen ? ago(k.seen) : "", logW && (logW.level === "soon" || logW.level === "full") ? "⚠ log" : ""].filter(Boolean).join(" · ");
     tile.title = `${shownName(n)}${k.seen ? " - heard " + ago(k.seen) : ""}`;
     box.appendChild(tile);
   }
-  $("roomsNote").textContent = liveWatch.size ? `Live: listening to ${liveWatch.size} sensor(s) - no connection needed.`
-    : remembered.size ? "Not listening (page in the background)." : "Values from the last connection. Sensors picked on earlier visits update live.";
+  // Status: what the live listening is doing, so a silent card can be explained.
+  let heard = 0, parsed = 0; for (const [, w] of liveWatch) { heard += w.d._advCount || 0; parsed += w.d._advParsed || 0; }
+  const ble = navigator.bluetooth, noWatch = [...remembered.values()].some(d => typeof d.watchAdvertisements !== "function");
+  $("roomsNote").textContent =
+    !ble ? "No Bluetooth in this browser - showing values from earlier connections." :
+    !ble.getDevices ? "This browser can't list sensors from earlier visits, so it can't listen live - values are from connections." :
+    noWatch ? "This browser can't listen to broadcasts (no watchAdvertisements) - values are from connections." :
+    !remembered.size ? "No sensors remembered from earlier visits yet - connect to each once, then they update live here." :
+    liveWatch.size ? `Live: listening to ${liveWatch.size} of ${remembered.size} remembered sensor(s) · ${heard} broadcasts heard${heard && !parsed ? " but none contained readings (check the broadcast format in the sensor configuration)" : ""}.` :
+    document.hidden ? "Paused while the page is in the background." : "Starting to listen…";
 }
 
 const batchSel = new Set(lsGet("batchSel", null) || knownNames());
@@ -2540,6 +2579,7 @@ function setupChartGestures() {
   let g = null, lastTap = 0;
   chart.addEventListener("touchstart", e => {
     if (!plotted || !histData.length) return;
+    chartTouching = true;
     const dom = view || rangeDomain();
     if (e.touches.length === 2) {
       const [p, q] = e.touches;
@@ -2588,6 +2628,7 @@ function setupChartGestures() {
     // A quick tap (no movement, released before the hold) shows the reading at that point.
     if (g && g.mode === "?" && e.touches.length === 0 && e.type === "touchend") showReadoutAt(g.x0);
     if (e.touches.length === 0 || (g && g.mode === "pinch")) g = null;
+    if (e.touches.length === 0) chartTouching = false;
   };
   chart.addEventListener("touchend", end); chart.addEventListener("touchcancel", end);
   // Stop iOS from zooming the whole page when pinching on the chart.
@@ -2764,8 +2805,8 @@ function updateStatusBar() {
       renderKnown();
     }).catch(e => dbg(`getDevices() error: ${describeErr(e)}`));
   }
-  setInterval(() => { if (!document.hidden) renderKnown(); }, 15000);
-  document.addEventListener("visibilitychange", () => { if (document.hidden) stopLive(); else { startLive(); renderKnown(); } });
+  setInterval(() => { if (!document.hidden) scheduleKnownRender(0); }, 15000);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) { stopLive(); saveKnown(); } else { startLive(); renderKnown(); } });
   renderKnown();
   $("histDev").onchange = loadChart;
   $("btnShareSel").onclick = shareSelected;
