@@ -222,7 +222,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
         </select>
       </label>
       <label><input type="checkbox" id="optSync" checked> <span id="optSyncLabel">Set clock afterwards (UTC)</span></label>
-      <label><input type="checkbox" id="optDelete"> Erase on sensor afterwards</label>
+      <label><input type="checkbox" id="optDelete" checked> Erase on sensor afterwards</label>
     </div>
     <div class="row only-single">
       <button id="btnDump" class="primary" disabled>Download history</button>
@@ -484,7 +484,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 62;
+const APP_VERSION = 63;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1130,7 +1130,9 @@ function devKey() {
 async function dump(opts = {}) {
   const cnt = opts.all ? 0xffff : parseInt($("dumpCount").value, 10) & 0xffff;
   // opts.sync / opts.del override the checkboxes (used by the combined batch button).
-  const del = opts.del != null ? opts.del : $("optDelete").checked;
+  let del = opts.del != null ? opts.del : $("optDelete").checked;
+  // Erasing after downloading only the last N samples would lose the older ones never downloaded.
+  if (del && cnt !== 0xffff) { log(`Not erasing: only the last ${cnt} samples are downloaded (choose “All stored” to erase).`, "warn"); del = false; }
   const sync = opts.sync != null ? opts.sync : $("optSync").checked;
   if (del && !opts.skipConfirm && !confirm("After a successful download, PERMANENTLY erase the history stored on the sensor?")) return null;
   const result = { n: 0, total: 0, finished: false, deleted: false };
@@ -2516,6 +2518,12 @@ function updateStatusBar() {
   $("btNameNew").oninput = () => delete $("btNameNew").dataset.auto;
   $("csvLocale").onchange = e => { prefs.csvLocale = e.target.value; savePrefs(); };
   $("idleTimeout").onchange = e => { prefs.idleTimeout = Math.max(5, parseInt(e.target.value) || 30); savePrefs(); };
+  // Download options are remembered; both are on by default (set clock + erase keeps every
+  // stretch of the sensor's log starting at a known clock set - see driftCorrect()).
+  for (const [id, key] of [["optSync", "dlSync"], ["optDelete", "dlErase"]]) {
+    $(id).checked = prefs[key] !== false;
+    $(id).onchange = e => { prefs[key] = e.target.checked; savePrefs(); };
+  }
   $("driftCorr").checked = prefs.driftCorr !== false;
   $("driftCorr").onchange = e => { prefs.driftCorr = e.target.checked; savePrefs(); };
   document.querySelectorAll("#rangeBtns .seg").forEach(b => {
