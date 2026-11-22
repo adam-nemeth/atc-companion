@@ -111,6 +111,16 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
 #batchStatus { scroll-margin-top: 70px; } /* stay clear of the sticky tab bar when scrolled to */
 #knownList .nm input[type=checkbox] { width: 20px; height: 20px; }
 .ks .vals { font-variant-numeric: tabular-nums; }
+.rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
+.room { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; min-width: 0; }
+.room .rn { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.room .rt { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--temp); line-height: 1.2; }
+.room .rh { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--hum); }
+.room .rm { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.room.stale .rt, .room.stale .rh { opacity: .45; }
+.ks .loglvl { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+.ks .loglvl.soon { color: var(--warn); font-weight: 600; }
+.ks .loglvl.full { color: var(--err); font-weight: 700; }
 .ks .meta { grid-column: 1 / -1; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; word-break: break-all; }
 /* The connected sensor's button reads "Connected" in green (full strength, although it's disabled) */
 .ks.current button.is-current { color: var(--ok); border-color: var(--ok); opacity: 1; font-weight: 600; }
@@ -131,6 +141,13 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
     On iPhone, open this page in the <b>Bluefy</b> browser (free on the App Store). Safari doesn't support Bluetooth.
     You can still view stored history and import CSV files here.
   </div>
+
+  <!-- Live overview (from broadcasts, no connection) -->
+  <section class="card hidden" data-tab="single" id="roomsCard">
+    <h2>Rooms now</h2>
+    <div class="rooms" id="roomTiles"></div>
+    <p class="muted" id="roomsNote" style="font-size:12px;margin:8px 0 0"></p>
+  </section>
 
   <!-- Known sensors -->
   <section class="card" data-tab="single all">
@@ -484,7 +501,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 63;
+const APP_VERSION = 64;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -695,6 +712,15 @@ const remembered = new Map(); // name -> BluetoothDevice from getDevices()
 async function wakeRemembered(name, d, timeoutMs) {
   if (typeof d.watchAdvertisements !== "function") { if (!d._noWatchLogged) { dbg(`${name}: watchAdvertisements not supported - can't wake remembered sensor`); d._noWatchLogged = true; } return false; }
   if (d._advSeen && Date.now() - d._advSeen < 10000) return true;
+  if (d._liveWatching) {
+    // Already listening continuously (live overview): just wait for its next broadcast. Starting and
+    // aborting a second watch here would stop the live one.
+    return new Promise(res => {
+      const on = () => { d.removeEventListener("advertisementreceived", on); res(true); };
+      d.addEventListener("advertisementreceived", on);
+      setTimeout(() => { d.removeEventListener("advertisementreceived", on); res(false); }, timeoutMs);
+    });
+  }
   d._waking = true; scheduleKnownRender();
   const s = t0();
   let ctrl = null; try { ctrl = new AbortController(); } catch {}
@@ -718,6 +744,57 @@ async function wakeRemembered(name, d, timeoutMs) {
   d._waking = false; scheduleKnownRender();
   if (!ok) dbg(`${name}: no advertisement within ${timeoutMs / 1000} s`);
   return ok;
+}
+
+// ===== Live overview: keep listening to every remembered sensor's broadcasts =====
+// The firmware broadcasts temperature, humidity and battery every few seconds; no connection needed.
+// Only while the page is visible (listening costs phone battery).
+const liveWatch = new Map(); // name -> { d, ctrl, onAdv }
+async function watchLive(name, d) {
+  if (liveWatch.has(name) || typeof d.watchAdvertisements !== "function" || removedSensors.has(name)) return;
+  let ctrl = null; try { ctrl = new AbortController(); } catch {}
+  const onAdv = ev => {
+    d._advSeen = Date.now();
+    if (!reachable.has(name)) reachable.set(name, d);
+    let p = null;
+    try { if (ev.serviceData) for (const [k, v] of ev.serviceData) if (String(k).toLowerCase().startsWith("0000181a")) p = parseAdv(v); } catch {}
+    if (p) rememberSensor(name, Object.assign({ seen: Date.now() }, p));
+  };
+  d.addEventListener("advertisementreceived", onAdv);
+  liveWatch.set(name, { d, ctrl, onAdv });
+  try { await d.watchAdvertisements(ctrl ? { signal: ctrl.signal } : undefined); d._liveWatching = true; dbg(`${name}: live watching started`); }
+  catch (e) { dbg(`${name}: live watching failed: ${errDetail(e)}`); d.removeEventListener("advertisementreceived", onAdv); liveWatch.delete(name); }
+}
+function startLive() { if (!document.hidden) for (const [n, d] of remembered) watchLive(n, d); }
+function stopLive() {
+  for (const [n, w] of liveWatch) {
+    try { if (w.ctrl) w.ctrl.abort(); else if (w.d.unwatchAdvertisements) w.d.unwatchAdvertisements(); } catch {}
+    w.d.removeEventListener("advertisementreceived", w.onAdv); w.d._liveWatching = false;
+  }
+  if (liveWatch.size) dbg(`Live watching stopped (${liveWatch.size} sensors)`);
+  liveWatch.clear();
+}
+// Tiles: one per sensor with readings, newest values from broadcasts (or the last connection).
+function renderRooms() {
+  const box = $("roomTiles"); if (!box) return;
+  const names = knownNames().filter(n => known[n] && known[n].t != null);
+  $("roomsCard").classList.toggle("hidden", !names.length);
+  box.innerHTML = "";
+  for (const n of names) {
+    const k = known[n], age = k.seen ? Date.now() - k.seen : Infinity;
+    const tile = document.createElement("div"); tile.className = "room" + (age > 600000 ? " stale" : "");
+    const title = rooms[n] || k.btName || n;
+    tile.innerHTML = `<div class="rn"></div><div class="rt"></div><div class="rh"></div><div class="rm"></div>`;
+    tile.querySelector(".rn").textContent = title;
+    tile.querySelector(".rt").textContent = `${k.t.toFixed(1)}°`;
+    tile.querySelector(".rh").textContent = `${k.h.toFixed(0)} %`;
+    const logW = logWarning(n);
+    tile.querySelector(".rm").textContent = [k.b != null ? `🔋${k.b}%` : "", k.seen ? ago(k.seen) : "", logW && logW.level !== "ok" ? "⚠ log" : ""].filter(Boolean).join(" · ");
+    tile.title = `${shownName(n)}${k.seen ? " - heard " + ago(k.seen) : ""}`;
+    box.appendChild(tile);
+  }
+  $("roomsNote").textContent = liveWatch.size ? `Live: listening to ${liveWatch.size} sensor(s) - no connection needed.`
+    : remembered.size ? "Not listening (page in the background)." : "Values from the last connection. Sensors picked on earlier visits update live.";
 }
 
 const batchSel = new Set(lsGet("batchSel", null) || knownNames());
@@ -814,8 +891,14 @@ function renderKnown() {
     rm.className = "linkbtn"; rm.textContent = "Remove"; rm.title = "Remove from the list";
     rm.onclick = () => removeSensor(name);
     meta.append(" · ", rm);
-    row.append(left, btn, meta); box.appendChild(row);
+    row.append(left, btn, meta);
+    const lw = logWarning(name);
+    const logEl = document.createElement("div"); logEl.className = "loglvl " + (lw ? lw.level : "none");
+    logEl.textContent = lw ? lw.text : "Log fill level: known after the first full download";
+    row.append(logEl);
+    box.appendChild(row);
   }
+  renderRooms();
   const rm = $("readyMsg"); if (rm) rm.textContent = `${ready} available · ${ticked} ticked`;
   for (const id of ["bDump", "bDumpSyncErase", "bGetTime", "bSetTime", "bGetCfg", "bSetCfg", "btnAddSensors"]) { const b = $(id); if (b) b.disabled = busy || (id !== "btnAddSensors" && !ticked); }
 }
@@ -1180,6 +1263,13 @@ async function dump(opts = {}) {
         log(r ? "Sensor confirmed: history deleted." : "No reply to delete; check with another download.");
         result.deleted = !!r;
       }
+    }
+    // Log fill tracking: what's left on the sensor now (only known after a full download or an erase).
+    if (sensorName && finished && (result.deleted || cnt === 0xffff)) {
+      const st = raw.map(r => r[0]).sort((a, b) => a - b), d = [];
+      for (let i = 1; i < st.length; i++) { const x = st[i] - st[i - 1]; if (x >= 30 && x <= 7200) d.push(x); }
+      d.sort((a, b) => a - b);
+      noteSensorLog(sensorName, result.deleted ? 0 : raw.length, d.length ? d[d.length >> 1] : null);
     }
     result.finished = finished;
     if (del && !finished) log("Download incomplete - skipped delete for safety.");
@@ -1621,6 +1711,29 @@ async function deleteLog() {
   if (!confirm(`PERMANENTLY erase all recorded history on the sensor ${devKey().replace("__", " · ")}? This cannot be undone. (Data already downloaded to this phone is kept.)`)) return;
   const r = await request([0x36, 0x12, 0x34], b => b[0] === 0x36);
   log(r ? "Sensor confirmed: history deleted." : "No reply (idle timeout); it may still have deleted.");
+  if (r && sensorName) noteSensorLog(sensorName, 0);
+}
+// ===== Sensor log fill level =====
+// The firmware keeps history in a flash ring buffer: 52 sectors of 4 KB, and when it's full the
+// oldest whole sector is erased. pvvx logger.c: 51 usable sectors x 340 records (12-byte records;
+// up to 409 if the compiler packs them to 10 bytes). The lower figure is used so the warning comes
+// early rather than late. The sensor can't report its record count, so the app tracks it: records
+// left on the sensor at the last download (0 after an erase) plus one per interval since.
+const LOG_CAPACITY = 51 * 340;
+function noteSensorLog(name, n, intervalSec) {
+  const prev = (known[name] && known[name].log) || {};
+  rememberSensor(name, { log: { at: Math.floor(Date.now() / 1000), n, P: intervalSec || prev.P || 600 } });
+}
+function logWarning(name) {
+  const L = known[name] && known[name].log; if (!L) return null;
+  const now = Date.now() / 1000, P = L.P || 600;
+  const est = Math.min(LOG_CAPACITY, L.n + Math.max(0, now - L.at) / P);
+  const fullAt = L.at + Math.max(0, LOG_CAPACITY - L.n) * P, daysLeft = (fullAt - now) / 86400;
+  const pct = Math.round(est / LOG_CAPACITY * 100);
+  const when = new Date(fullAt * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  if (daysLeft <= 0) return { level: "full", text: `Log full since ~${when}: the oldest readings are being overwritten - download now` };
+  if (daysLeft <= 7) return { level: "soon", text: `Log ${pct}% full: starts overwriting ~${when} (in ${Math.ceil(daysLeft)} d) - download soon` };
+  return { level: "ok", text: `Log ${pct}% full · full ~${when}` };
 }
 
 // ===== Config (0x55) =====
@@ -2594,12 +2707,13 @@ function updateStatusBar() {
         if (!n || removedSensors.has(n)) continue;
         d._remembered = true;
         remembered.set(n, d);
-        wakeRemembered(n, d, 20000).then(ok => { if (ok && !reachable.has(n)) { reachable.set(n, d); renderKnown(); } });
+        wakeRemembered(n, d, 20000).then(ok => { if (ok && !reachable.has(n)) { reachable.set(n, d); renderKnown(); } watchLive(n, d); });
       }
       renderKnown();
     }).catch(e => dbg(`getDevices() error: ${describeErr(e)}`));
   }
-  setInterval(() => { if (!document.hidden) renderKnown(); }, 30000);
+  setInterval(() => { if (!document.hidden) renderKnown(); }, 15000);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) stopLive(); else { startLive(); renderKnown(); } });
   renderKnown();
   $("histDev").onchange = loadChart;
   $("btnShareSel").onclick = shareSelected;
