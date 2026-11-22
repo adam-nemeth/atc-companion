@@ -502,7 +502,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 69;
+const APP_VERSION = 70;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -787,7 +787,11 @@ async function watchLive(name, d) {
     try {
       for (const [k, dv] of advEntries(ev.serviceData)) {
         keys.push(`${k.length > 8 ? k.slice(4, 8) : k}:${dv ? dv.byteLength + "B" : "?"}`);
-        if (dv && (k.startsWith("0000181a") || k === "181a")) p = parseAdv(dv);
+        if (dv && (k.startsWith("0000181a") || k === "181a")) {
+          // Only trust it if the MAC inside is this sensor's (guards the guessed Bluefy layouts).
+          const q = parseAdv(dv), mac = (known[name] && known[name].mac) || macFromName(name);
+          if (q && (!mac || q.mac === mac)) p = q; else if (q) keys.push(`MAC ${q.mac} ≠ ${mac}`);
+        }
       }
     } catch (e) { keys.push("error " + describeErr(e)); }
     if (p) d._advParsed = (d._advParsed || 0) + 1;
@@ -994,6 +998,20 @@ function toDataView(v) {
 }
 function advEntries(sd) {
   if (!sd) return [];
+  // Bluefy (v68 log): serviceData is one bare DataView, not a Map. It may hold the raw advertising
+  // structures ([len][type][data]…, service data = type 0x16 + 16-bit UUID), the 0x181A data with its
+  // UUID in front, or just the 0x181A payload - try each; callers check the MAC inside before using it.
+  if (sd instanceof DataView || sd instanceof ArrayBuffer || ArrayBuffer.isView(sd)) {
+    const dv = toDataView(sd), u = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength), out = [];
+    for (let i = 0; i + 1 < u.length;) {
+      const len = u[i]; if (!len || i + 1 + len > u.length) break;
+      if (u[i + 1] === 0x16 && len >= 3) out.push([`0000${u[i + 3].toString(16).padStart(2, "0")}${u[i + 2].toString(16).padStart(2, "0")}-0000-1000-8000-00805f9b34fb`, new DataView(u.buffer, u.byteOffset + i + 4, len - 3)]);
+      i += 1 + len;
+    }
+    if (out.length) return out.map(([k, v]) => [k, v, v]);
+    if (u.length >= 15 && u[0] === 0x1a && u[1] === 0x18) return [["181a", new DataView(u.buffer, u.byteOffset + 2, u.length - 2), sd]];
+    return u.length ? [["181a", dv, sd]] : [];
+  }
   let pairs = [];
   if (typeof sd.forEach === "function" && typeof sd.get === "function") sd.forEach((v, k) => pairs.push([k, v]));
   else if (typeof sd === "object") pairs = Object.entries(sd);
@@ -1001,7 +1019,9 @@ function advEntries(sd) {
 }
 // One-line description of what a browser put into an advertisement event (for the debug log).
 function describeAdvEvent(ev) {
-  const d = x => { if (x == null) return String(x); const c = x.constructor ? x.constructor.name : typeof x;
+  const d = x => { if (x == null) return String(x);
+    if (x instanceof DataView || x instanceof ArrayBuffer || ArrayBuffer.isView(x)) { const v = toDataView(x); return `${x.constructor.name}(${v.byteLength} B${v.byteLength ? ": " + hex(new Uint8Array(v.buffer, v.byteOffset, Math.min(v.byteLength, 40))) : ""})`; }
+    const c = x.constructor ? x.constructor.name : typeof x;
     let keys = []; try { keys = typeof x.keys === "function" && typeof x.get === "function" ? [...x.keys()] : Object.keys(x); } catch {}
     let json = ""; try { json = JSON.stringify(x).slice(0, 120); } catch {}
     return `${c}(${keys.length} keys${keys.length ? ": " + keys.slice(0, 4).join(",") : ""})${json && json !== "{}" ? " " + json : ""}`; };
