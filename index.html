@@ -501,7 +501,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 64;
+const APP_VERSION = 65;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1191,7 +1191,7 @@ async function showClockState() {
   // Drift rate since the last clock set this app made, when that's long enough ago to mean something.
   const last = clockLog(histId(sensorName || "")).sets.slice(-1)[0];
   const days = last ? (c.phone - last.at) / 86400 : 0;
-  if (last && days > 0.5 && Math.abs(E) > 2) txt += ` · ≈${Math.abs(E / days).toFixed(0)} s/day since it was set ${localStr(last.at - (prefs.timeMode === "utc" ? 0 : localOffsetSec()))}`;
+  if (last && days >= 1 && Math.abs(E) > 2) txt += ` · ≈${Math.abs(E / days).toFixed(0)} s/day since it was set ${localStr(last.at - (prefs.timeMode === "utc" ? 0 : localOffsetSec()))}`;
   el.textContent = "Clock: " + txt;
   el.className = Math.abs(E) <= 60 ? "status ok" : "status warn";
   log(`Clock on connect: ${txt} (sensor ${faceValue(c.sensor)}, reply ${Math.round(c.rtt)} ms)`);
@@ -1360,7 +1360,8 @@ function driftCorrect(ts, opts = {}) {
     else { res.stretches.push({ from: ts[a], to: ts[b], n: b - a + 1, E: null, applied: false, why: "clock not read" }); continue; }
     const span = te - s0, perDay = span > 0 ? E / span * 86400 : 0;
     const st = { from: ts[a], to: ts[b], n: b - a + 1, E, perDay, applied: false, startKnown: a > 0 || s0 !== ts[a] };
-    if (span <= 0 || Math.abs(E) < 1) st.why = "no drift";
+    // The clock counts whole seconds and the read has ~1 s of uncertainty: ±2 s is "correct".
+    if (span <= 0 || Math.abs(E) <= 2) st.why = "no drift (within 2 s)";
     // More error than drift can build up in that time = the clock was set to another value (or samples
     // were missed), not drift: leave those times alone.
     else if (Math.abs(E) > DRIFT_TOL + DRIFT_MAX_PER_DAY * span / 86400) st.why = "jump, not drift - not corrected";
@@ -1381,9 +1382,12 @@ const fmtDur = s => { const a = Math.abs(Math.round(s)); return a >= 3600 ? `${M
 function driftSummary(r) {
   if (r.note) return r.note;
   const ap = r.stretches.filter(s => s.applied);
-  if (!ap.length) { const s = r.stretches[r.stretches.length - 1]; return s && s.why === "clock not read" ? "clock not read - times not corrected" : "no clock drift to correct"; }
+  if (!ap.length) { const s = r.stretches[r.stretches.length - 1]; return s && s.why === "clock not read" ? "clock not read - times not corrected" : "clock correct (within 2 s)"; }
   const last = ap[ap.length - 1];
-  return `clock was ${fmtDur(last.E)} ${last.E > 0 ? "fast" : "slow"} (${Math.abs(last.perDay).toFixed(0)} s/day since ${localStr(last.from - (prefs.timeMode === "utc" ? 0 : localOffsetSec()))})` +
+  // A rate only means something over a day or more (1 s in an hour would read as 24 s/day).
+  const span = (last.E / last.perDay) * 86400;
+  const rate = span >= 86400 ? `${Math.abs(last.perDay).toFixed(0)} s/day since ` : "since ";
+  return `clock was ${fmtDur(last.E)} ${last.E > 0 ? "fast" : "slow"} (${rate}${localStr(last.from - (prefs.timeMode === "utc" ? 0 : localOffsetSec()))})` +
     (ap.length > 1 ? `; ${ap.length} stretches between clock sets corrected` : "") + ` - ${ap.reduce((n, s) => n + s.n, 0)} samples corrected`;
 }
 // Read the sensor clock: { sensor, phone } as face values in the selected time zone (phone time is
