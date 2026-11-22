@@ -66,6 +66,7 @@ label { display: inline-flex; gap: 6px; align-items: center; }
 /* Scale switch: "Scale  [Auto|Fixed]" with the active option filled in */
 #stepBtns { margin-top: 6px; }
 #stepBtns .nav { padding: 6px 14px; font-size: 14px; }
+.legend .scalesw + .scalesw { margin-left: 8px; }
 .legend .scalesw { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .legend .scalesw .seg { padding: 4px 10px; font-size: 13px; }
 .legend .scalesw .seg:first-of-type { border-radius: 9px 0 0 9px; }
@@ -277,6 +278,10 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
     <div class="legend">
       <button class="lg t" id="lgTemp" aria-pressed="true" title="Show only temperature (tap again for both)">Temperature °C</button>
       <button class="lg h" id="lgHum" aria-pressed="true" title="Show only humidity (tap again for both)">Humidity %</button>
+      <span class="scalesw" role="group" aria-label="Chart style" title="Candles: first, highest, lowest and last reading per period">
+        <span class="muted">Style</span>
+        <button class="seg" id="stLine" aria-pressed="true">Line</button><button class="seg" id="stCandle" aria-pressed="false">Candles</button>
+      </span>
       <span class="scalesw" role="group" aria-label="Chart scale" title="Fixed: same axes for every sensor and zoom (limits in Settings)">
         <span class="muted">Scale</span>
         <button class="seg" id="scAuto" aria-pressed="true">Auto</button><button class="seg" id="scFixed" aria-pressed="false">Fixed</button>
@@ -467,7 +472,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 55;
+const APP_VERSION = 56;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1791,9 +1796,18 @@ function setupChartSettings() {
   };
   $("nightFrom").onchange = setNight; $("nightTo").onchange = setNight;
   const setScale = on => { const s = scalePrefs(); s.on = on; prefs.scale = s; savePrefs(); $("fsOn").checked = on; syncScaleToggle(); drawChart(); };
+  const setStyle = s => { prefs.chartStyle = s; savePrefs(); syncStyleToggle(); drawChart(); };
+  $("stLine").onclick = () => setStyle("line");
+  $("stCandle").onclick = () => setStyle("candle");
+  syncStyleToggle();
   $("scAuto").onclick = () => setScale(false);
   $("scFixed").onclick = () => setScale(true);
   syncScaleToggle();
+}
+function syncStyleToggle() {
+  const c = prefs.chartStyle === "candle";
+  $("stLine").setAttribute("aria-pressed", String(!c));
+  $("stCandle").setAttribute("aria-pressed", String(c));
 }
 function syncScaleToggle() {
   const on = scalePrefs().on;
@@ -1984,9 +1998,31 @@ function drawChart() {
   const gaps = []; for (let i = 1; i < pts.length; i++) gaps.push(pts[i][0] - pts[i - 1][0]);
   const med = gaps.slice().sort((a, b) => a - b)[gaps.length >> 1] || 1;
   const path = fy => pts.map((p, i) => `${i && p[0] - pts[i - 1][0] <= Math.max(med * 6, gapMin) ? "L" : "M"}${x(p[0]).toFixed(1)},${fy(p).toFixed(1)}`).join("");
+  const candleMode = prefs.chartStyle === "candle";
+  let candles = null;
+  if (candleMode) {
+    // Candles: one per calendar period (chosen to fit ~7 px per candle), from the raw readings in view.
+    // open = first reading, high/low = extremes, close = last reading. Hollow = rose, filled = fell.
+    candles = buildCandles(data, t0, t1, Math.max(8, Math.floor(pw / 7)));
+    const both = showT && showH;
+    for (const c of candles.list) {
+      const cx = x((c.start + c.end) / 2), full = Math.max(1.5, (x(c.end) - x(c.start)) * 0.7);
+      const w = both ? full / 2 : full;
+      const draw = (o, h, l, cl, fy, color, dx) => {
+        const xx = cx + dx;
+        el("line", { x1: xx, x2: xx, y1: fy(h), y2: fy(l), stroke: color, "stroke-width": 1, "clip-path": "url(#plotClip)" });
+        const top = Math.min(fy(o), fy(cl)), hgt = Math.max(1.5, Math.abs(fy(o) - fy(cl)));
+        const rising = cl >= o;
+        el("rect", { x: xx - w / 2, y: top, width: w, height: hgt, fill: rising ? col("--card") : color, stroke: color,
+          "stroke-width": w > 3 ? 1 : 0, "clip-path": "url(#plotClip)" });
+      };
+      if (showT) draw(c.t[0], c.t[1], c.t[2], c.t[3], yT, col("--temp"), both ? -w / 2 : 0);
+      if (showH) draw(c.h[0], c.h[1], c.h[2], c.h[3], yH, col("--hum"), both ? w / 2 : 0);
+    }
+  }
   // Min–max bands when points are averages: a shaded area from each slice's lowest to highest reading,
   // split at the same gaps as the lines.
-  if (averaged) {
+  if (averaged && !candleMode) {
     const segments = []; let seg = [];
     pts.forEach((p, i) => { if (i && p[0] - pts[i - 1][0] > Math.max(med * 6, gapMin)) { segments.push(seg); seg = []; } seg.push(p); });
     segments.push(seg);
@@ -1999,14 +2035,19 @@ function drawChart() {
     if (showH) band(6, 7, yH, col("--hum"));
     if (showT) band(4, 5, yT, col("--temp"));
   }
-  if (showH) el("path", { d: path(p => yH(p[2])), fill: "none", stroke: col("--hum"), "stroke-width": 1.6, "stroke-linejoin": "round", "clip-path": "url(#plotClip)" });
-  if (showT) el("path", { d: path(p => yT(p[1])), fill: "none", stroke: col("--temp"), "stroke-width": 2, "stroke-linejoin": "round", "clip-path": "url(#plotClip)" });
+  if (showH && !candleMode) el("path", { d: path(p => yH(p[2])), fill: "none", stroke: col("--hum"), "stroke-width": 1.6, "stroke-linejoin": "round", "clip-path": "url(#plotClip)" });
+  if (showT && !candleMode) el("path", { d: path(p => yT(p[1])), fill: "none", stroke: col("--temp"), "stroke-width": 2, "stroke-linejoin": "round", "clip-path": "url(#plotClip)" });
   const cursor = el("line", { x1: 0, x2: 0, y1: T, y2: T + ph, stroke: col("--muted"), "stroke-dasharray": "3 3", visibility: "hidden" });
-  plotted = { pts: inWin.length ? inWin : pts, x, cursor, L, pw };
-  // Note under the chart while points are averages.
+  const markerLayer = el("g", {});   // value labels next to the marker (showReadoutAt)
+  plotted = { pts: inWin.length ? inWin : pts, x, cursor, L, pw, T, ph, yT, yH, showT, showH, markerLayer,
+    candles: candles && candles.list, colT: col("--temp"), colH: col("--hum"), colBg: col("--card"), colText: col("--text") };
+  // Note under the chart while points are averages (or candles are shown).
   const note = $("avgNote");
   if (note) {
-    if (averaged) {
+    if (candleMode) {
+      note.textContent = `Each candle is ${candles.label}: first, highest, lowest and last reading. Hollow = rose, filled = fell.`;
+      note.classList.remove("hidden");
+    } else if (averaged) {
       const ns = pts.map(p => p[3]).sort((a, b) => a - b), nMed = ns[ns.length >> 1];
       note.textContent = `Each point is an average of ~${fmtDuration(span / buckets)} (~${nMed} readings); the shaded band shows the lowest–highest reading. Zoom in for single readings.`;
       note.classList.remove("hidden");
@@ -2031,6 +2072,18 @@ function showReadoutAt(clientX) {
   const svg = $("chart"), r = svg.getBoundingClientRect();
   const px = (clientX - r.left) * (svg.viewBox.baseVal.width / r.width);
   const { pts, x, cursor } = plotted;
+  if (plotted.candles && plotted.candles.length) {
+    // Candle mode: snap to the nearest candle; label its close (last reading).
+    let c = plotted.candles[0];
+    for (const k of plotted.candles) if (Math.abs(x((k.start + k.end) / 2) - px) < Math.abs(x((c.start + c.end) / 2) - px)) c = k;
+    const cx = x((c.start + c.end) / 2);
+    cursor.setAttribute("x1", cx); cursor.setAttribute("x2", cx); cursor.setAttribute("visibility", "visible");
+    const f = (v, d) => v.toFixed(d);
+    $("readout").textContent = `${localStr(c.start)} – ${localStr(c.end)}  ·  °C open ${f(c.t[0], 1)} high ${f(c.t[1], 1)} low ${f(c.t[2], 1)} close ${f(c.t[3], 1)}` +
+      `  ·  % open ${f(c.h[0], 0)} high ${f(c.h[1], 0)} low ${f(c.h[2], 0)} close ${f(c.h[3], 0)}  ·  ${c.n} readings`;
+    drawMarkerLabels(cx, c.t[3], c.h[3]);
+    return;
+  }
   let best = pts[0]; for (const p of pts) if (Math.abs(x(p[0]) - px) < Math.abs(x(best[0]) - px)) best = p;
   cursor.setAttribute("x1", x(best[0])); cursor.setAttribute("x2", x(best[0])); cursor.setAttribute("visibility", "visible");
   const [t, tm, hm, n, tLo, tHi, hLo, hHi, tA, tB] = best;
@@ -2038,6 +2091,58 @@ function showReadoutAt(clientX) {
     // Averaged point: say so, with its time span, the range of readings behind it, and how many.
     ? `${localStr(tA)} – ${localStr(tB)}  ·  avg ${tm.toFixed(1)} °C (${tLo.toFixed(1)}–${tHi.toFixed(1)})  ·  avg ${hm.toFixed(0)} % (${hLo.toFixed(0)}–${hHi.toFixed(0)})  ·  ${n} readings`
     : `${localStr(t)}  ·  ${tm.toFixed(2)} °C  ·  ${hm.toFixed(1)} %`;
+  drawMarkerLabels(x(best[0]), tm, hm);
+}
+// Small value tags with a dot right on each line where the marker crosses it ("21.3°", "56%").
+// They go right of the marker, or left near the right edge, and never overlap each other.
+function drawMarkerLabels(cx, tVal, hVal) {
+  const P = plotted, g = P.markerLayer; if (!g) return;
+  g.innerHTML = "";
+  const ns = "http://www.w3.org/2000/svg";
+  const mk = (tag, attrs, text) => { const e = document.createElementNS(ns, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; g.appendChild(e); return e; };
+  const tags = [];
+  if (P.showT) tags.push({ y: P.yT(tVal), text: `${tVal.toFixed(1)}°`, color: P.colT });
+  if (P.showH) tags.push({ y: P.yH(hVal), text: `${hVal.toFixed(0)}%`, color: P.colH });
+  // Keep tags at least 18 px apart vertically and inside the plot.
+  tags.sort((a, b) => a.y - b.y);
+  tags.forEach(t => t.ty = Math.max(P.T + 8, Math.min(P.T + P.ph - 8, t.y)));
+  if (tags.length === 2 && tags[1].ty - tags[0].ty < 18) { const m = (tags[0].ty + tags[1].ty) / 2; tags[0].ty = m - 9; tags[1].ty = m + 9; }
+  const left = cx > P.L + P.pw - 52;
+  for (const t of tags) {
+    mk("circle", { cx, cy: t.y, r: 3.5, fill: t.color, stroke: P.colBg, "stroke-width": 1.5 });
+    const w = t.text.length * 6.6 + 8, bx = left ? cx - 7 - w : cx + 7;
+    mk("rect", { x: bx, y: t.ty - 8, width: w, height: 16, rx: 4, fill: P.colBg, stroke: t.color, "stroke-width": 1 });
+    mk("text", { x: bx + w / 2, y: t.ty + 4, "text-anchor": "middle", "font-size": 11, "font-weight": 700, fill: t.color }, t.text);
+  }
+}
+// Candles over calendar periods (local time): picks the shortest period giving at most maxCandles.
+// Returns { list: [{start, end, n, t:[open, high, low, close], h:[...]}], label: "1 day" }.
+function buildCandles(data, a, b, maxCandles) {
+  const periods = [[600, "10 minutes"], [1800, "30 minutes"], [3600, "1 hour"], [10800, "3 hours"], [21600, "6 hours"],
+    [43200, "12 hours"], [86400, "1 day"], [604800, "1 week"], [2629800, "1 month"]];
+  const [period, label] = periods.find(([p]) => (b - a) / p <= maxCandles) || periods[periods.length - 1];
+  // Start of the period containing t, in local time (days start at midnight, weeks on Monday, months on the 1st).
+  const periodStart = t => {
+    const d = new Date(t * 1000);
+    if (period === 2629800) return new Date(d.getFullYear(), d.getMonth(), 1).getTime() / 1000;
+    if (period === 604800) { d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime() / 1000; }
+    const m = new Date(d); m.setHours(0, 0, 0, 0);
+    return m.getTime() / 1000 + Math.floor((t - m.getTime() / 1000) / period) * period;
+  };
+  const periodEnd = s => {
+    if (period === 2629800) { const d = new Date(s * 1000); return new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime() / 1000; }
+    if (period === 604800) { const d = new Date(s * 1000); d.setDate(d.getDate() + 7); return d.getTime() / 1000; }
+    return s + period;
+  };
+  const list = []; let cur = null;
+  for (const [t, tm, hm] of data) {
+    const s = periodStart(t);
+    if (!cur || cur.start !== s) { cur = { start: s, end: periodEnd(s), n: 0, t: [tm, tm, tm, tm], h: [hm, hm, hm, hm] }; list.push(cur); }
+    cur.n++;
+    cur.t[1] = Math.max(cur.t[1], tm); cur.t[2] = Math.min(cur.t[2], tm); cur.t[3] = tm;
+    cur.h[1] = Math.max(cur.h[1], hm); cur.h[2] = Math.min(cur.h[2], hm); cur.h[3] = hm;
+  }
+  return { list, label };
 }
 function fmtDuration(sec) {
   if (sec < 90 * 60) return `${Math.max(1, Math.round(sec / 60))} min`;
@@ -2045,7 +2150,7 @@ function fmtDuration(sec) {
   const d = sec / 86400; return `${d < 10 ? d.toFixed(1) : Math.round(d)} days`;
 }
 function hideReadout() {
-  if (plotted) plotted.cursor.setAttribute("visibility", "hidden");
+  if (plotted) { plotted.cursor.setAttribute("visibility", "hidden"); if (plotted.markerLayer) plotted.markerLayer.innerHTML = ""; }
   $("readout").textContent = "";
 }
 // Mouse only: the marker follows the pointer. Touch is handled in setupChartGestures():
