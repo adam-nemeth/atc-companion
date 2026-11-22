@@ -466,7 +466,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 53;
+const APP_VERSION = 54;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1807,7 +1807,17 @@ function rangeDomain() {
   return { a: prefs.range ? Math.max(first, last - prefs.range * 3600) : first, b: last };
 }
 function lowerIdx(t) { let lo = 0, hi = histData.length; while (lo < hi) { const m = (lo + hi) >> 1; if (histData[m][0] < t) lo = m + 1; else hi = m; } return lo; }
+// ◀ / ▶ only when there is older / newer data outside the visible window; Today only with data.
+function syncStepButtons() {
+  const prev = $("btnPrev"), next = $("btnNext"), today = $("btnToday"); if (!prev) return;
+  const dom = histData.length ? (view || rangeDomain()) : null;
+  const first = dom && histData[0][0], last = dom && histData[histData.length - 1][0];
+  prev.disabled = !dom || dom.a <= first + 1;
+  next.disabled = !dom || dom.b >= last - 1;
+  today.disabled = !dom;
+}
 function drawChart() {
+  syncStepButtons();
   const svg = $("chart"); const W = svg.clientWidth || 600, H = 276;
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.innerHTML = "";
   const css = getComputedStyle(document.documentElement);
