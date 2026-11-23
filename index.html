@@ -516,7 +516,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 79;
+const APP_VERSION = 80;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -2397,7 +2397,10 @@ function drawChart() {
     let [lo, hi] = range(i);
     if (fixed.on && !(bat && i === 2)) [lo, hi] = i === 1 ? [fixed.tLo, fixed.tHi] : [fixed.hLo, fixed.hHi];  // same axes everywhere
     if (hi - lo < minSpan) { const c = (lo + hi) / 2; lo = c - minSpan / 2; hi = c + minSpan / 2; }
-    const step = niceStep((hi - lo) / nTarget), a = Math.floor(lo / step + 1e-9) * step;
+    // Temperature ticks are whole degrees (steps of 1, 2, 5, 10 - never 0.5 or 2.5).
+    let step = niceStep((hi - lo) / nTarget);
+    if (i === 1 && !bat) step = [1, 2, 5, 10, 20, 50].find(s => s >= step - 1e-9) || step;
+    const a = Math.floor(lo / step + 1e-9) * step;
     return { step, lo: a, n: Math.max(1, Math.ceil((hi - a) / step - 1e-9)) };
   };
   const aT = axis(1, 1), aH = axis(2, bat ? 0.05 : 5);
