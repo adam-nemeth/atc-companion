@@ -438,7 +438,6 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
       <div id="log"></div>
     </details>
   </section>
-  <p class="muted" style="text-align:center" id="appVersion"></p>
 </main>
 
 <script>
@@ -517,7 +516,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 77;
+const APP_VERSION = 78;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -2837,7 +2836,6 @@ function updateStatusBar() {
   document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => showTab(b.dataset.go));
   showTab(lsGet("tab", "single"));
   setInterval(updateStatusBar, 1000);
-  $("appVersion").textContent = `App version ${APP_VERSION}`;
   $("appVersionTop").textContent = `v${APP_VERSION}`;
   logEnvironment(); flushLog();
   $("btnLogSend").onclick = sendLog;
