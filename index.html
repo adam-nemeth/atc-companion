@@ -8,19 +8,19 @@
 <style>
 :root {
   --bg: #f4f5f7; --card: #ffffff; --text: #16181d; --muted: #6b7280; --line: #e3e5e9;
-  --accent: #2563eb; --accent-text: #ffffff; --temp: #e4572e; --hum: #2a7fd4;
+  --accent: #2563eb; --accent-text: #ffffff; --temp: #e4572e; --hum: #2a7fd4; --batt: #2f8a3e;
   --ok: #15803d; --warn: #b45309; --err: #b91c1c; --input: #f9fafb;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #0f1115; --card: #181b21; --text: #e8eaee; --muted: #9aa1ad; --line: #2a2e36;
-    --accent: #4f8cff; --accent-text: #0b0d10; --temp: #ff7a52; --hum: #5aa9ff;
+    --accent: #4f8cff; --accent-text: #0b0d10; --temp: #ff7a52; --hum: #5aa9ff; --batt: #5fd07a;
     --ok: #4ade80; --warn: #fbbf24; --err: #f87171; --input: #11141a;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0f1115; --card: #181b21; --text: #e8eaee; --muted: #9aa1ad; --line: #2a2e36;
-  --accent: #4f8cff; --accent-text: #0b0d10; --temp: #ff7a52; --hum: #5aa9ff;
+  --accent: #4f8cff; --accent-text: #0b0d10; --temp: #ff7a52; --hum: #5aa9ff; --batt: #5fd07a;
   --ok: #4ade80; --warn: #fbbf24; --err: #f87171; --input: #11141a;
 }
 * { box-sizing: border-box; }
@@ -61,11 +61,12 @@ label { display: inline-flex; gap: 6px; align-items: center; }
    replaced) always does, and a drag keeps working through redraws. */
 #chart * { pointer-events: none; }
 #readout { font-size: 13px; min-height: 20px; margin-top: 4px; font-variant-numeric: tabular-nums; }
-.legend { display: flex; gap: 14px; font-size: 13px; color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 13px; color: var(--muted); }
 /* Legend entries are toggle buttons: tap to hide/show that line */
 .legend button.lg { font-size: 13px; padding: 5px 10px; border-radius: 999px; background: transparent; }
 .legend button.lg::before { content: ""; display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; background: currentColor; }
 .legend .t { color: var(--temp); border-color: var(--temp); } .legend .h { color: var(--hum); border-color: var(--hum); }
+.legend .b { color: var(--batt); border-color: var(--batt); }
 .legend button.lg[aria-pressed="false"] { color: var(--muted); border-color: var(--line); text-decoration: line-through; }
 /* Scale switch: "Scale  [Auto|Fixed]" with the active option filled in */
 #stepBtns { margin-top: 6px; }
@@ -304,6 +305,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
     <div class="legend">
       <button class="lg t" id="lgTemp" aria-pressed="true" title="Show only temperature (tap again for both)">Temperature °C</button>
       <button class="lg h" id="lgHum" aria-pressed="true" title="Show only humidity (tap again for both)">Humidity %</button>
+      <button class="lg b" id="lgBatt" aria-pressed="false" title="Show the battery voltage (tap again for temperature and humidity)">Battery V</button>
       <span class="scalesw" role="group" aria-label="Chart style" title="Candles: first, highest, lowest and last reading per period">
         <span class="muted">Style</span>
         <button class="seg" id="stLine" aria-pressed="true">Line</button><button class="seg" id="stCandle" aria-pressed="false">Candles</button>
@@ -508,7 +510,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 75;
+const APP_VERSION = 76;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -2311,8 +2313,14 @@ function drawChart() {
   $("stats").innerHTML = ""; $("readout").textContent = "";
   // Samples inside the window (for stats) plus one neighbour on each side so lines reach the edges.
   const i0 = dom ? lowerIdx(dom.a) : 0, i1 = dom ? lowerIdx(dom.b + 1e-6) : 0;
-  const data = histData.slice(i0, i1);
-  const lineData = histData.slice(Math.max(0, i0 - 1), Math.min(histData.length, i1 + 1));
+  // Battery view: the second line (normally humidity) carries the battery voltage instead - same
+  // averaging, bands, candles and readout, with its own axis in volts. Readings without a battery
+  // value (0 mV, e.g. some imported files) are left out.
+  const bat = prefs.showB === true;
+  const asBat = arr => arr.filter(s => s[3] > 0).map(s => [s[0], s[1], s[3] / 1000, s[3]]);
+  const data = bat ? asBat(histData.slice(i0, i1)) : histData.slice(i0, i1);
+  const lineData = bat ? asBat(histData.slice(Math.max(0, i0 - 1), Math.min(histData.length, i1 + 1)))
+    : histData.slice(Math.max(0, i0 - 1), Math.min(histData.length, i1 + 1));
   if (!dom || lineData.length < 2 || dom.b - dom.a <= 0) {
     svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" fill="${col("--muted")}" font-size="14">No data in this range</text>`;
     plotted = null; return;
@@ -2337,7 +2345,8 @@ function drawChart() {
       .map(([, a]) => [a[0] / a[3], a[1] / a[3], a[2] / a[3], a[3], a[4], a[5], a[6], a[7], a[8], a[9]]);
     averaged = pts.some(p => p[3] > 1);
   }
-  const showT = prefs.showT !== false, showH = prefs.showH !== false;
+  const showT = !bat && prefs.showT !== false, showH = bat || prefs.showH !== false;
+  const colH = col(bat ? "--batt" : "--hum"), unitH = bat ? "V" : "%";
   // Left axis = temperature (humidity when temperature is hidden); right axis only when both are shown.
   const L = 40, R = showT && showH ? 40 : 14, T = 22, B = 40, pw = W - L - R, ph = H - T - B;
   const inWin = pts.filter(p => p[0] >= t0 && p[0] <= t1);
@@ -2356,12 +2365,12 @@ function drawChart() {
   const fixed = scalePrefs();
   const axis = (i, minSpan) => {
     let [lo, hi] = range(i);
-    if (fixed.on) [lo, hi] = i === 1 ? [fixed.tLo, fixed.tHi] : [fixed.hLo, fixed.hHi];  // same axes everywhere
+    if (fixed.on && !(bat && i === 2)) [lo, hi] = i === 1 ? [fixed.tLo, fixed.tHi] : [fixed.hLo, fixed.hHi];  // same axes everywhere
     if (hi - lo < minSpan) { const c = (lo + hi) / 2; lo = c - minSpan / 2; hi = c + minSpan / 2; }
     const step = niceStep((hi - lo) / nTarget), a = Math.floor(lo / step + 1e-9) * step;
     return { step, lo: a, n: Math.max(1, Math.ceil((hi - a) / step - 1e-9)) };
   };
-  const aT = axis(1, 1), aH = axis(2, 5);
+  const aT = axis(1, 1), aH = axis(2, bat ? 0.05 : 5);
   if (showT && showH) {
     const n = Math.max(aT.n, aH.n);
     for (const a of [aT, aH]) { a.lo -= Math.floor((n - a.n) / 2) * a.step; a.n = n; }  // pad evenly below/above
@@ -2387,18 +2396,18 @@ function drawChart() {
         if (y >= T && y <= T + ph) el("line", { x1: L, x2: L + pw, y1: y, y2: y, stroke: color, "stroke-width": 1, "stroke-dasharray": "4 4", "stroke-opacity": 0.6 });
     };
     if (showT) band(yT(cf.tHi), yT(cf.tLo), col("--temp"));
-    if (showH) band(yH(cf.hHi), yH(cf.hLo), col("--hum"));
+    if (showH && !bat) band(yH(cf.hHi), yH(cf.hLo), col("--hum"));
   }
   // grid + axis labels + units
   for (let k = 0; k <= N; k++) {
     const y = T + ph * (1 - k / N);
     el("line", { x1: L, x2: W - R, y1: y, y2: y, stroke: col("--line"), "stroke-width": 1 });
     if (showT) el("text", { x: L - 5, y: y + 4, "text-anchor": "end", "font-size": 11, fill: col("--temp") }, fmtTick(aT, k));
-    else el("text", { x: L - 5, y: y + 4, "text-anchor": "end", "font-size": 11, fill: col("--hum") }, fmtTick(aH, k));
-    if (showT && showH) el("text", { x: W - R + 5, y: y + 4, "font-size": 11, fill: col("--hum") }, fmtTick(aH, k));
+    else el("text", { x: L - 5, y: y + 4, "text-anchor": "end", "font-size": 11, fill: colH }, fmtTick(aH, k));
+    if (showT && showH) el("text", { x: W - R + 5, y: y + 4, "font-size": 11, fill: colH }, fmtTick(aH, k));
   }
-  el("text", { x: L - 5, y: T - 9, "text-anchor": "end", "font-size": 11, "font-weight": 600, fill: col(showT ? "--temp" : "--hum") }, showT ? "°C" : "%");
-  if (showT && showH) el("text", { x: W - R + 5, y: T - 9, "font-size": 11, "font-weight": 600, fill: col("--hum") }, "%");
+  el("text", { x: L - 5, y: T - 9, "text-anchor": "end", "font-size": 11, "font-weight": 600, fill: showT ? col("--temp") : colH }, showT ? "°C" : unitH);
+  if (showT && showH) el("text", { x: W - R + 5, y: T - 9, "font-size": 11, "font-weight": 600, fill: colH }, unitH);
   // Clip everything drawn inside the plot area (lines extend to the neighbours just outside the window).
   const defs = el("defs", {}); const cp = document.createElementNS(ns, "clipPath"); cp.setAttribute("id", "plotClip");
   const cr = document.createElementNS(ns, "rect"); [["x", L], ["y", T - 2], ["width", pw], ["height", ph + 4]].forEach(([k, v]) => cr.setAttribute(k, v));
@@ -2502,7 +2511,7 @@ function drawChart() {
           "stroke-width": w > 3 ? 1 : 0, "clip-path": "url(#plotClip)" });
       };
       if (showT) draw(c.t[0], c.t[1], c.t[2], c.t[3], yT, col("--temp"), both ? -w / 2 : 0);
-      if (showH) draw(c.h[0], c.h[1], c.h[2], c.h[3], yH, col("--hum"), both ? w / 2 : 0);
+      if (showH) draw(c.h[0], c.h[1], c.h[2], c.h[3], yH, colH, both ? w / 2 : 0);
     }
   }
   // Min–max bands when points are averages: a shaded area from each slice's lowest to highest reading,
@@ -2522,15 +2531,16 @@ function drawChart() {
       for (const idx of [hi, lo])
         el("path", { d: edge(idx), fill: "none", stroke: color, "stroke-width": 1, "stroke-opacity": 0.75, "stroke-linejoin": "round", "clip-path": "url(#plotClip)" });
     };
-    if (showH) band(6, 7, yH, col("--hum"));
+    if (showH) band(6, 7, yH, colH);
     if (showT) band(4, 5, yT, col("--temp"));
   }
-  if (showH && !candleMode) el("path", { d: path(p => yH(p[2])), fill: "none", stroke: col("--hum"), "stroke-width": 1.6, "stroke-linejoin": "round", "clip-path": "url(#plotClip)" });
+  if (showH && !candleMode) el("path", { d: path(p => yH(p[2])), fill: "none", stroke: colH, "stroke-width": 1.6, "stroke-linejoin": "round", "clip-path": "url(#plotClip)" });
   if (showT && !candleMode) el("path", { d: path(p => yT(p[1])), fill: "none", stroke: col("--temp"), "stroke-width": 2, "stroke-linejoin": "round", "clip-path": "url(#plotClip)" });
   const cursor = el("line", { x1: 0, x2: 0, y1: T, y2: T + ph, stroke: col("--muted"), "stroke-dasharray": "3 3", visibility: "hidden" });
   const markerLayer = el("g", {});   // value labels next to the marker (showReadoutAt)
   plotted = { pts: inWin.length ? inWin : pts, x, cursor, L, pw, T, ph, yT, yH, showT, showH, markerLayer,
-    candles: candles && candles.list, colT: col("--temp"), colH: col("--hum"), colBg: col("--card"), colText: col("--text") };
+    candles: candles && candles.list, colT: col("--temp"), colH, colBg: col("--card"), colText: col("--text"),
+    unitH, decH: bat ? 3 : 0, decH1: bat ? 3 : 1 };
   // Note under the chart while points are averages (or candles are shown).
   const note = $("avgNote");
   if (note) {
@@ -2544,6 +2554,18 @@ function drawChart() {
     } else note.classList.add("hidden");
   }
   if (!data.length) return;
+  if (bat) {  // battery view: stats of the voltage (data[i][2] = volts here)
+    let bmn = data[0], bmx = data[0], bs = 0;
+    for (const s of data) { if (s[2] < bmn[2]) bmn = s; if (s[2] > bmx[2]) bmx = s; bs += s[2]; }
+    const lastB = data[data.length - 1];
+    $("stats").innerHTML = [
+      ["Latest", `${lastB[2].toFixed(3)} V`],
+      ["Lowest", `${bmn[2].toFixed(3)} V <span class=muted>${localStr(bmn[0])}</span>`],
+      ["Highest", `${bmx[2].toFixed(3)} V <span class=muted>${localStr(bmx[0])}</span>`],
+      ["Average", `${(bs / data.length).toFixed(3)} V`],
+    ].map(([k, v]) => `<div><div class="muted">${k}</div>${v}</div>`).join("");
+    return;
+  }
   // stats on raw data in range
   let mn = data[0], mx = data[0], sum = 0, hs = 0;
   for (const s of data) { if (s[1] < mn[1]) mn = s; if (s[1] > mx[1]) mx = s; sum += s[1]; hs += s[2]; }
@@ -2569,18 +2591,22 @@ function showReadoutAt(clientX) {
     const cx = x((c.start + c.end) / 2);
     cursor.setAttribute("x1", cx); cursor.setAttribute("x2", cx); cursor.setAttribute("visibility", "visible");
     const f = (v, d) => v.toFixed(d);
-    $("readout").textContent = `${localStr(c.start)} – ${localStr(c.end)}  ·  °C open ${f(c.t[0], 1)} high ${f(c.t[1], 1)} low ${f(c.t[2], 1)} close ${f(c.t[3], 1)}` +
-      `  ·  % open ${f(c.h[0], 0)} high ${f(c.h[1], 0)} low ${f(c.h[2], 0)} close ${f(c.h[3], 0)}  ·  ${c.n} readings`;
+    const dh = plotted.decH, u = plotted.unitH;
+    $("readout").textContent = `${localStr(c.start)} – ${localStr(c.end)}` +
+      (plotted.showT ? `  ·  °C open ${f(c.t[0], 1)} high ${f(c.t[1], 1)} low ${f(c.t[2], 1)} close ${f(c.t[3], 1)}` : "") +
+      (plotted.showH ? `  ·  ${u} open ${f(c.h[0], dh)} high ${f(c.h[1], dh)} low ${f(c.h[2], dh)} close ${f(c.h[3], dh)}` : "") + `  ·  ${c.n} readings`;
     drawMarkerLabels(cx, c.t[3], c.h[3]);
     return;
   }
   let best = pts[0]; for (const p of pts) if (Math.abs(x(p[0]) - px) < Math.abs(x(best[0]) - px)) best = p;
   cursor.setAttribute("x1", x(best[0])); cursor.setAttribute("x2", x(best[0])); cursor.setAttribute("visibility", "visible");
   const [t, tm, hm, n, tLo, tHi, hLo, hHi, tA, tB] = best;
+  const u = plotted.unitH, dh = plotted.decH, dh1 = plotted.decH1;
   $("readout").textContent = n > 1
     // Averaged point: say so, with its time span, the range of readings behind it, and how many.
-    ? `${localStr(tA)} – ${localStr(tB)}  ·  avg ${tm.toFixed(1)} °C (${tLo.toFixed(1)}–${tHi.toFixed(1)})  ·  avg ${hm.toFixed(0)} % (${hLo.toFixed(0)}–${hHi.toFixed(0)})  ·  ${n} readings`
-    : `${localStr(t)}  ·  ${tm.toFixed(2)} °C  ·  ${hm.toFixed(1)} %`;
+    ? `${localStr(tA)} – ${localStr(tB)}` + (plotted.showT ? `  ·  avg ${tm.toFixed(1)} °C (${tLo.toFixed(1)}–${tHi.toFixed(1)})` : "") +
+      (plotted.showH ? `  ·  avg ${hm.toFixed(dh)} ${u} (${hLo.toFixed(dh)}–${hHi.toFixed(dh)})` : "") + `  ·  ${n} readings`
+    : `${localStr(t)}` + (plotted.showT ? `  ·  ${tm.toFixed(2)} °C` : "") + (plotted.showH ? `  ·  ${hm.toFixed(dh1)} ${u}` : "");
   drawMarkerLabels(x(best[0]), tm, hm);
 }
 // Small value tags with a dot right on each line where the marker crosses it ("21.3°", "56%").
@@ -2592,7 +2618,7 @@ function drawMarkerLabels(cx, tVal, hVal) {
   const mk = (tag, attrs, text) => { const e = document.createElementNS(ns, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; g.appendChild(e); return e; };
   const tags = [];
   if (P.showT) tags.push({ y: P.yT(tVal), text: `${tVal.toFixed(1)}°`, color: P.colT });
-  if (P.showH) tags.push({ y: P.yH(hVal), text: `${hVal.toFixed(0)}%`, color: P.colH });
+  if (P.showH) tags.push({ y: P.yH(hVal), text: P.unitH === "V" ? `${hVal.toFixed(2)} V` : `${hVal.toFixed(0)}%`, color: P.colH });
   // Keep tags at least 18 px apart vertically and inside the plot.
   tags.sort((a, b) => a.y - b.y);
   tags.forEach(t => t.ty = Math.max(P.T + 8, Math.min(P.T + P.ph - 8, t.y)));
@@ -2922,15 +2948,26 @@ function updateStatusBar() {
   $("chart").addEventListener("pointermove", onChartPointer);
   setupChartGestures();
   // Legend toggles: hide/show temperature or humidity (at least one stays visible).
-  const syncLegend = () => { $("lgTemp").setAttribute("aria-pressed", String(prefs.showT !== false)); $("lgHum").setAttribute("aria-pressed", String(prefs.showH !== false)); };
+  const syncLegend = () => {
+    const b = prefs.showB === true;
+    $("lgTemp").setAttribute("aria-pressed", String(!b && prefs.showT !== false));
+    $("lgHum").setAttribute("aria-pressed", String(!b && prefs.showH !== false));
+    $("lgBatt").setAttribute("aria-pressed", String(b));
+  };
   // Tap a legend entry to show only that line; tap it again (while it's the only one) to show both.
+  // Battery is shown on its own (its own axis in volts); tapping it again goes back to the other two.
   const toggleSeries = (key, other) => {
-    const onlyThis = prefs[key] !== false && prefs[other] === false;
-    prefs[key] = true; prefs[other] = onlyThis;
+    if (prefs.showB) { prefs.showB = false; prefs[key] = true; prefs[other] = false; }
+    else { const onlyThis = prefs[key] !== false && prefs[other] === false; prefs[key] = true; prefs[other] = onlyThis; }
     savePrefs(); syncLegend(); drawChart();
   };
   $("lgTemp").onclick = () => toggleSeries("showT", "showH");
   $("lgHum").onclick = () => toggleSeries("showH", "showT");
+  $("lgBatt").onclick = () => {
+    prefs.showB = !prefs.showB;
+    if (!prefs.showB) { prefs.showT = true; prefs.showH = true; }
+    savePrefs(); syncLegend(); drawChart();
+  };
   syncLegend();
   setupChartSettings();
   $("chart").addEventListener("pointerdown", onChartPointer);
