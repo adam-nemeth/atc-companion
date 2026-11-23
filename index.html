@@ -465,7 +465,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=82"></script>
+<script src="core.js?v=83"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -516,7 +516,7 @@ function lsGet(k, d) {
 }
 function lsSet(k, v) { if (DEMO) { demoLS.set(k, v); return; } try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 
-// Sensors and their room names live only in this browser's storage (import a devices.json in Settings).
+// Sensors and their descriptions live only in this browser's storage (import a devices.json in Settings).
 let rooms = lsGet("rooms", {});
 const prefs = Object.assign({ timeMode: "utc", csvLocale: "en", idleTimeout: 30, range: 168 }, lsGet("prefs", {}));
 // v10: UTC became the default (matching the Windows scripts' --time-mode utc). Older versions saved
@@ -572,7 +572,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 82;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 83;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -619,7 +619,7 @@ document.addEventListener("visibilitychange", () => dbg(`Page ${document.hidden 
 window.addEventListener("pagehide", () => { dbg("pagehide"); flushLog(true); });
 document.addEventListener("visibilitychange", () => { if (document.hidden) flushLog(true); });
 function setStatus(text, cls) { const s = $("connStatus"); s.textContent = text; s.className = "status devstate " + (cls || ""); }
-// Best guess of which sensor a device handle is, before it's been identified over the connection.
+// Best guess of which sensor a Bluetooth handle is, before it's been identified over the connection.
 function guessLabel(dev, expectedName) {
   const n = expectedName || sensorFromBtName(dev && dev.name) || Object.keys(known).find(k => dev && known[k].id === dev.id);
   return n ? shownName(n) : (dev && dev.name) || "sensor";
@@ -740,12 +740,12 @@ function sensorFromBtName(btName) {
   return Object.keys(known).find(n => known[n].btName && known[n].btName === btName) || null;
 }
 function knownNames() {
-  // Sorted by exactly the text shown in the list ("Room · Bluetooth name").
+  // Sorted by exactly the text shown in the list ("Description · Bluetooth name").
   return [...new Set([...Object.keys(rooms), ...Object.keys(known)])].filter(n => /^ATC_/i.test(n))
     .sort((a, b) => byText(shownName(a), shownName(b)));
 }
 const byText = (a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
-// What the lists show for a sensor: its room (if any) and its Bluetooth name.
+// What the lists show for a sensor: its description (if any) and its Bluetooth name.
 function shownName(n) {
   const bt = (known[n] && known[n].btName) || n;
   return rooms[n] ? `${rooms[n]} · ${bt}` : bt;
@@ -934,7 +934,7 @@ function renderRooms() {
 
 const batchSel = new Set(lsGet("batchSel", null) || knownNames());
 const saveSel = () => lsSet("batchSel", [...batchSel]);
-// ===== Sensor list import / export (devices.json format of the Windows scripts) =====
+// ===== Sensor list import / export (devices.json, the same format as the Python tool) =====
 function sensorsMsg(t) { $("sensorsMsg").textContent = t; }
 function sensorsCountText() { const n = knownNames().length; return `${n} sensor${n === 1 ? "" : "s"} saved in this browser.`; }
 async function importSensors(file) {
@@ -1164,7 +1164,7 @@ async function connectDevice(dev, expectedName, opts = {}) {
   showInfo("");
   // Diagnostics: is this a fresh handle from the picker/scan, or one reused from an earlier connection?
   dev._uses = (dev._uses || 0) + 1;
-  dbg(`Device handle ${dev._remembered ? "remembered from an earlier visit, " : ""}${dev._uses === 1 ? "first use" : `reused (use #${dev._uses})`}; gatt.connected=${dev.gatt.connected}`);
+  dbg(`Sensor handle ${dev._remembered ? "remembered from an earlier visit, " : ""}${dev._uses === 1 ? "first use" : `reused (use #${dev._uses})`}; gatt.connected=${dev.gatt.connected}`);
   if (dev._remembered && !dev.gatt.connected) {
     showInfo("Waiting to hear the remembered sensor…");
     const heard = await wakeRemembered(expectedName || dev.name, dev, 8000);
@@ -1949,7 +1949,7 @@ function downloadFiles(items) {
 }
 const fileSafe = s => s.replace(/[^A-Za-z0-9._-]+/g, "_");
 // File name label like the Windows scripts': "ATC_xxxxxx__Description" (description only if set).
-// File names: "<Description>-<ATC_ID>-<kind>", description first so files sort by room (same as the
+// File names: "<Description>-<ATC_ID>-<kind>", description first so files sort by description (same as the
 // Python tools). Spaces/hyphens in the description become "_", so "-" only separates the parts.
 function fileLabel(id) {
   const desc = (rooms[id] || "").trim().replace(/[\s-]+/g, "_").replace(/[^A-Za-z0-9._]+/g, "_").replace(/^_+|_+$/g, "");
@@ -2786,7 +2786,7 @@ function updateStatusBar() {
   $("bSendCfg").disabled = !Object.values(known).some(k => k.cfg);
   $("bStop").onclick = () => { batchAbort = true; $("bStop").textContent = "Stopping after this sensor…"; setTimeout(() => $("bStop").textContent = "Stop", 4000); };
   if (navigator.bluetooth && navigator.bluetooth.addEventListener) navigator.bluetooth.addEventListener("advertisementreceived", onAdvertisement);
-  // Devices this site was already allowed to use can be reconnected without the picker (if supported).
+  // Sensors this site was already allowed to use can be reconnected without the picker (if supported).
   if (navigator.bluetooth && navigator.bluetooth.getDevices) {
     // Sensors picked on earlier visits. Connecting to them directly failed with error 2 in Bluefy
     // (v13/v14 logs). In Chrome such handles must first "see" an advertisement (watchAdvertisements)

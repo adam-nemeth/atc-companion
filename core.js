@@ -155,7 +155,7 @@ function decodeCfg(b) {
   const len = b.length - 1; if (len < 9) throw new Error("config too short");
   const ver = b[1], flg = b[2], flg2 = b[3], to = b[4], ho = b[5];
   const cfg = {
-    _note: "Raw device config (CMD_ID_CFG 0x55). Fields ending '_raw', and the bit fields under flg/flg2, are what --set-config writes back. Fields ending '_info' or under 'device_info' are read-only / computed for convenience and are ignored on write. Bits labelled 'hardware_specific' mean different things on different screen/model variants of this firmware - leave them alone unless you know what your specific device does with them.",
+    _note: "Raw sensor config (CMD_ID_CFG 0x55). Fields ending '_raw', and the bit fields under flg/flg2, are what --set-config writes back. Fields ending '_info' or under 'device_info' are read-only / computed for convenience and are ignored on write. Bits labelled 'hardware_specific' mean different things on different screen/model variants of this firmware - leave them alone unless you know what your specific sensor does with them.",
     device_info: { protocol_version_raw: ver, protocol_version_str: `${ver >> 4}.${ver & 15}` },
     flg: { raw: flg, bits: {
       advertising_type: flg & 3, comfort_smiley: !!(flg & 4), hardware_specific_bit3: !!(flg & 8),

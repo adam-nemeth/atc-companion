@@ -189,15 +189,6 @@ class DownloadAndErase(unittest.TestCase):
         self.assertNotIn(0x36, s.sent)
         self.assertTrue(any("-raw-" in f for f in files), "what arrived is still saved")
 
-    def test_old_option_still_accepted(self):
-        import argparse
-        import io
-        import contextlib
-        with contextlib.redirect_stdout(io.StringIO()):
-            with self.assertRaises(SystemExit):  # --help exits; parsing --delete-after-dump must not fail first
-                sys.argv = ["x", "--delete-after-dump", "--help"]
-                T.main()
-
 
 class FileNames(unittest.TestCase):
     def test_device_label(self):

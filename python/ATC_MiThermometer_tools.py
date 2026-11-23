@@ -9,17 +9,17 @@ ATC_MiThermometer custom firmware, over BLE, from the command line:
   --dump               download recorded temperature/humidity history to CSV
                        (raw per-import files, plus regenerated aggregate
                        file(s) - see --merge-levels)
-  --get-config         read the device's live config into a JSON file
-  --set-config         write a (possibly edited) config JSON file back to the device
-  --set-time           set the device's clock (--time-mode is required)
-  --delete-log         erase all recorded history from the device's flash
+  --get-config         read the sensor's live config into a JSON file
+  --set-config         write a (possibly edited) config JSON file back to the sensor
+  --set-time           set the sensor's clock (UTC unless --time-mode local)
+  --delete-log         erase all recorded history from the sensor's flash
   --keep-log           (with --dump) keep the sensor's log; by default it's erased
                        once the whole log is downloaded and saved
-  --devices FILE       run any of the above against a whole list of devices at
+  --devices FILE       run any of the above against a whole list of sensors at
                         once, loaded from a JSON file (see "Batch mode" below)
 
 Run with --help for a full list of examples covering every action, both
-single-device and batch.
+single-sensor and batch.
 
 No browser required. Protocol reverse-engineered from pvvx's own sources:
   https://github.com/pvvx/ATC_MiThermometer  (src/cmd_parser.h, src/cmd_parser.c)
@@ -34,8 +34,8 @@ Command IDs used here (see src/cmd_parser.h CMD_ID_KEYS):
   0x36  CMD_ID_CLRLOG  - delete memory measures (--delete-log, and --dump unless --keep-log),
                           requires the magic confirmation bytes 0x12 0x34 as a
                           safety check
-  0x55  CMD_ID_CFG     - get/set device config (--get-config / --set-config)
-  0x23  CMD_ID_UTC_TIME- get/set device clock (used internally by --dump - see
+  0x55  CMD_ID_CFG     - get/set sensor config (--get-config / --set-config)
+  0x23  CMD_ID_UTC_TIME- get/set sensor clock (used internally by --dump - see
                           below - and by --set-time)
 
 NOTE ON BLE NOTIFICATION TIMING: right after subscribing to notifications,
@@ -49,18 +49,18 @@ actually care about; every command in this script does the same.
 NOTE ON --timeout: it's an IDLE timeout, not a fixed overall deadline. The
 clock only starts counting from the last message sent or received on the
 BLE link, and resets on every one (including --dump's many samples as
-they stream in); it only actually fires when the device goes quiet for
+they stream in); it only actually fires when the sensor goes quiet for
 that long. So a large --dump won't get cut off partway just because the
 whole transfer takes longer than --timeout - only if the sensor genuinely
 stalls with no new data for that long.
 
 NOTE ON THE POST-DUMP CLOCK SYNC (--no-clock-sync): by default, once a
 --dump finishes successfully, this script also writes the current time to
-the device's clock, and (unless --keep-log is given) deletes the
-device's history - both reusing the SAME already-open connection rather
+the sensor's clock, and (unless --keep-log is given) deletes the
+sensor's history - both reusing the SAME already-open connection rather
 than reconnecting, which is faster. Checked against the actual firmware
 source (src/ble.c: send_memo_blk()) - the history transfer is already
-fully complete and the device has already cleaned up its read state
+fully complete and the sensor has already cleaned up its read state
 (reset rd_memo.cnt, restored normal connection latency) the moment it
 sends the short trailing 0x35 packet. Nothing about finishing the
 transfer depends on a clock write afterward. The clock sync is purely a
@@ -74,7 +74,7 @@ always written to its CSV file before the sensor is erased.
 NOTE ON CLOCK DRIFT (--no-drift-correction): a sensor's clock can gain or
 lose time steadily (how much, and whether at all, is still being measured
 on these sensors). --dump therefore reads
-the device clock (0x23) before downloading and corrects the timestamps:
+the sensor clock (0x23) before downloading and corrects the timestamps:
   - every clock set is visible in the log as a step that isn't one
     interval (the sample after it jumps by interval - error);
   - between two sets the error grows linearly from 0, so each stretch is
@@ -88,7 +88,7 @@ a later download with an updated correction replaces the earlier copy. The
 iPhone app (webapp/index.html, driftCorrect()) does exactly the same.
 
 --- History transfer (0x35) ---
-  Write 0x35 <cnt_lo> <cnt_hi> 0x00 0x00 -> device streams back samples as
+  Write 0x35 <cnt_lo> <cnt_hi> 0x00 0x00 -> sensor streams back samples as
   notifications (0xFFFF = "give me all of them").
   Each sample notification (13 bytes):
         byte 0      : 0x35 (block id)
@@ -114,23 +114,23 @@ iPhone app (webapp/index.html, driftCorrect()) does exactly the same.
         kept as UTC too.
   Every CSV row also gets a 'utc_offset' column (e.g. '+02:00' or
   '+00:00') recording which of the above was in effect - NOT queried from
-  the device (the device has no timezone; --dump reads its clock only to
+  the sensor (the sensor has no timezone; --dump reads its clock only to
   measure drift, see NOTE ON CLOCK DRIFT); it's simply what --time-mode implies: '+00:00' for 'utc', or this
   computer's own current UTC offset for 'local'. This is what lets
   --merge-tz correctly combine files recorded under different offsets
   later (e.g. across a DST change, or a switch between --time-mode
-  values) without needing to re-derive anything from the device. Pick one
-  --time-mode convention and stick with it for a given device; 'utc' is
+  values) without needing to re-derive anything from the sensor. Pick one
+  --time-mode convention and stick with it for a given sensor; 'utc' is
   the default when --time-mode is omitted. Whichever mode is used, the current time is read from this
-  computer immediately before it's sent to the device (not earlier in the
+  computer immediately before it's sent to the sensor (not earlier in the
   connection), so it isn't stale by the time it's written.
 
 --- Config (0x55) ---
-  Write 0x55                                   -> device replies with its
+  Write 0x55                                   -> sensor replies with its
                                                    current config (below)
   Write 0x55 <flg><flg2><temp_off><humi_off><adv_int><meas_int><rf_tx>
              <conn_lat>[<lcd_tint>[<hw_ver><av_meas_mem>]]
-                                                -> sets config; device saves
+                                                -> sets config; sensor saves
                                                    to flash and replies with
                                                    the new config (same
                                                    format as a plain get)
@@ -146,10 +146,10 @@ iPhone app (webapp/index.html, driftCorrect()) does exactly the same.
 Requirements:
     pip install bleak
 
-Batch mode (multiple devices):
+Batch mode (multiple sensors):
   Put your sensors in a JSON file (--scan --save-devices writes exactly
-  this format, with "description" left blank for you to fill in - it's
-  meant as the room/location name):
+  this format, with "description" left blank for you to fill in, e.g. where
+  the sensor is):
 
       [
         {"name": "ATC_a1b2c3", "description": "living_room", "address": "AA:BB:CC:DD:EE:01"},
@@ -163,19 +163,19 @@ Batch mode (multiple devices):
   its own (see device_label() below). {"devices": [...]} with the same list
   also works.
 
-File names (batch mode), description first so files sort by room:
+File names (batch mode), description first so files sort by description:
       <Description>-<ATC_name>-raw-<YYYYMMDD_HHMMSS>.csv   one per download
       <Description>-<ATC_name>-all.csv                     merged (also -daily-/-monthly-/-yearly-)
       <Description>-<ATC_name>-config.json                 --get-config / --set-config
   Spaces and hyphens inside a description become underscores. Older names
   (history_<name>__<description>_raw_<stamp>.csv etc.) are still read when
-  merging, and per-device config_<name>_<description>.json files are still
+  merging, and per-sensor config_<name>_<description>.json files are still
   found by --set-config; rename_to_new_names.py converts old files.
 
   Then pass --devices and use any action WITHOUT an address to run it
-  against every device in the file, one at a time, continuing past any
-  single device's failure and printing a summary at the end. See --help
-  for a full worked example of every action in both single-device and
+  against every sensor in the file, one at a time, continuing past any
+  single sensor's failure and printing a summary at the end. See --help
+  for a full worked example of every action in both single-sensor and
   batch form.
 """
 
@@ -254,11 +254,11 @@ def parse_offset_str(s: str) -> int:
 
 def dump_utc_offset(time_mode: str) -> str:
     """The offset recorded in every row of a dump's CSV, in the 'utc_offset'
-    column - NOT queried from the device (the device isn't asked for its
+    column - NOT queried from the sensor (the sensor isn't asked for its
     clock or timezone at dump start); it's simply what --time-mode implies:
     '+00:00' for 'utc', or this computer's own current UTC offset for
     'local' (the same offset device_epoch_now() itself uses when writing
-    'local'-mode epochs to the device)."""
+    'local'-mode epochs to the sensor)."""
     if time_mode == "utc":
         return "+00:00"
     return format_offset_seconds(_local_utc_offset_seconds())
@@ -369,12 +369,12 @@ SENSOR_ID_RE = re.compile(r"ATC_[0-9A-Fa-f]{6}(?![0-9A-Za-z])")
 
 
 def find_raw_files(directory: Path, base: str):
-    """All raw per-download CSVs belonging to one device: '<base>-raw-*.csv'
+    """All raw per-download CSVs belonging to one sensor: '<base>-raw-*.csv'
     (current naming), '<base>_raw_*.csv' (older naming), and - when <base>
-    contains the device's ATC_xxxxxx name - any raw file in the directory for
-    that same device under another description or the old
+    contains the sensor's ATC_xxxxxx name - any raw file in the directory for
+    that same sensor under another description or the old
     'history_<name>__<description>_raw_*' naming, so renaming a description
-    never splits a device's history."""
+    never splits a sensor's history."""
     files = {Path(p) for p in glob.glob(str(directory / f"{glob.escape(base)}-raw-*.csv"))}
     files |= {Path(p) for p in glob.glob(str(directory / f"{glob.escape(base)}_raw_*.csv"))}
     m = SENSOR_ID_RE.search(base)
@@ -392,8 +392,8 @@ ALL_STEM_RE = re.compile(r"[-_]all$")
 
 def find_existing_all_files(directory: Path, base: str):
     """Existing merged '<base>-all.csv' (and, when <base> contains the
-    device's ATC_xxxxxx name, any other '-all' / old '_all' file for that
-    device). merge_history() reads these too, so a merged file that holds
+    sensor's ATC_xxxxxx name, any other '-all' / old '_all' file for that
+    sensor). merge_history() reads these too, so a merged file that holds
     readings with no raw file behind them - e.g. one shared from the phone
     app and saved here - is extended instead of being overwritten."""
     files = {directory / f"{base}-all.csv", directory / f"{base}_all.csv"}
@@ -409,7 +409,7 @@ def find_existing_all_files(directory: Path, base: str):
 
 def merge_history(prefix: str, out_locale: str, merge_tz: str = "source",
                    levels=("all",)):
-    """Merge all raw files ('<prefix>-raw-*.csv', see find_raw_files()) for one device into aggregate
+    """Merge all raw files ('<prefix>-raw-*.csv', see find_raw_files()) for one sensor into aggregate
     file(s), de-duplicated by true instant, correctly parsing whichever
     locale each raw file happens to be in.
 
@@ -515,7 +515,7 @@ def _local_utc_offset_seconds() -> float:
 
 
 def device_epoch_now(time_mode: str) -> int:
-    """The epoch value to write to the device's clock right now. Call this
+    """The epoch value to write to the sensor's clock right now. Call this
     immediately before the write, not earlier in the connection, so the
     value isn't stale by the time it's actually sent."""
     if time_mode == "utc":
@@ -551,7 +551,7 @@ def device_epoch_as_datetime(raw_epoch: int) -> datetime:
 
 DRIFT_TOL = 20            # s: steps this close to one interval are normal jitter
 DRIFT_MAX_PER_DAY = 150   # s/day: more than this is a clock jump, not drift - left alone
-CLOCK_LOG = Path("clock_log.json")  # clock sets this tool made, per device address
+CLOCK_LOG = Path("clock_log.json")  # clock sets this tool made, per sensor address
 
 
 def drift_correct(ts, now_sensor=None, now_true=None, sets=(), rate=None):
@@ -682,7 +682,7 @@ def drift_summary(stretches, note: str) -> str:
 
 
 async def read_device_clock(client, clock_reply: dict, clock_event: asyncio.Event, activity=None):
-    """Asks for the device clock (0x23). Returns (sensor_epoch, computer_epoch) - the computer time
+    """Asks for the sensor clock (0x23). Returns (sensor_epoch, computer_epoch) - the computer time
     taken half-way through the request to cancel the BLE delay - or None. The notify handler must
     put the 0x23 reply's epoch into clock_reply['epoch'] and set clock_event."""
     clock_event.clear()
@@ -727,13 +727,13 @@ def decode_cfg(data: bytes) -> dict:
 
     cfg = {
         "_note": (
-            "Raw device config (CMD_ID_CFG 0x55). Fields ending '_raw', and the "
+            "Raw sensor config (CMD_ID_CFG 0x55). Fields ending '_raw', and the "
             "bit fields under flg/flg2, are what --set-config writes back. "
             "Fields ending '_info' or under 'device_info' are read-only / "
             "computed for convenience and are ignored on write. Bits labelled "
             "'hardware_specific' mean different things on different screen/model "
             "variants of this firmware - leave them alone unless you know what "
-            "your specific device does with them."
+            "your specific sensor does with them."
         ),
         "device_info": {
             "protocol_version_raw": ver,
@@ -952,17 +952,17 @@ async def scan(timeout: float, save: bool = False):
 
     found_list = list(found.values())
     if not found_list:
-        log("  No matching devices found. Make sure the sensor is powered,")
+        log("  No matching sensors found. Make sure the sensor is powered,")
         log("  in range, and not already connected to another app/browser tab.")
         return
 
-    log(f"Found {len(found_list)} device(s) total.")
+    log(f"Found {len(found_list)} sensor(s) total.")
     if save:
         save_path = f"devices_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         with open(save_path, "w") as f:
             json.dump(found_list, f, indent=2)
-        log(f"Wrote {len(found_list)} device(s) to {save_path} - fill in each "
-            f"'description' with the room/location name if you'd like it "
+        log(f"Wrote {len(found_list)} sensor(s) to {save_path} - fill in each "
+            f"'description' (e.g. where the sensor is) if you'd like it "
             f"folded into output filenames.")
 
 
@@ -1008,11 +1008,11 @@ async def dump(address: str, out_prefix: str, requested_count: int, timeout: flo
             got = await read_device_clock(client, clock_reply, clock_event, activity)
             if got:
                 clk = (got[0], got[1] + mode_offset)
-                log(f"Device clock {device_epoch_as_datetime(clk[0]).isoformat(sep=' ')} - "
+                log(f"Sensor clock {device_epoch_as_datetime(clk[0]).isoformat(sep=' ')} - "
                     f"{fmt_dur(clk[0] - clk[1])} {'fast' if clk[0] >= clk[1] else 'slow'} "
                     f"[{time_mode_label(time_mode)}]")
             else:
-                log("Couldn't read the device clock - the newest samples won't be drift-corrected.")
+                log("Couldn't read the sensor clock - the newest samples won't be drift-corrected.")
 
         cnt = requested_count & 0xFFFF
         log(f"Requesting {'all stored' if cnt == 0xFFFF else cnt} samples...")
@@ -1023,7 +1023,7 @@ async def dump(address: str, out_prefix: str, requested_count: int, timeout: flo
 
         finished = await wait_idle(done, activity, timeout)
         if not finished:
-            log(f"No response from the device for {timeout:.0f}s (idle timeout); "
+            log(f"No response from the sensor for {timeout:.0f}s (idle timeout); "
                 f"writing the {len(samples)} sample(s) received so far. (This only "
                 "fires when the sensor goes quiet, not from the transfer's total "
                 "length - raise --timeout if the sensor is just slow to respond.)")
@@ -1041,13 +1041,13 @@ async def dump(address: str, out_prefix: str, requested_count: int, timeout: flo
                 try:
                     await client.write_gatt_char(CHAR_UUID, payload)
                     activity.touch()
-                    log(f"Updated device clock to "
+                    log(f"Updated sensor clock to "
                         f"{device_epoch_as_datetime(t).isoformat(sep=' ')} "
                         f"[{time_mode_label(time_mode)}]")
                     if clk:
                         save_clock_log(address, {"before": t + round(clk[0] - clk[1]), "at": t})
                 except Exception as e:
-                    log(f"(non-fatal) failed to sync device clock after dump: {e}")
+                    log(f"(non-fatal) failed to sync sensor clock after dump: {e}")
 
             if delete_after and cnt != 0xFFFF:
                 log(f"Not erasing the sensor: only the last {cnt} samples were downloaded "
@@ -1064,9 +1064,9 @@ async def dump(address: str, out_prefix: str, requested_count: int, timeout: flo
                 await client.write_gatt_char(CHAR_UUID, bytes([0x36, 0x12, 0x34]))
                 activity.touch()
                 if await wait_idle(delete_done, activity, timeout):
-                    log("Device confirmed: recorded history deleted.")
+                    log("Sensor confirmed: recorded history deleted.")
                 else:
-                    log(f"No response from the device for {timeout:.0f}s (idle timeout); "
+                    log(f"No response from the sensor for {timeout:.0f}s (idle timeout); "
                         "it may still have processed the deletion. Consider trying "
                         "--dump again to check whether the history is actually empty.")
 
@@ -1168,11 +1168,11 @@ async def get_config(address: str, out_path: str, timeout: float = DEFAULT_TIMEO
         await client.start_notify(CHAR_UUID, handle_notify)
         await _warm_up(client, activity)
         armed["on"] = True
-        log("Requesting device config...")
+        log("Requesting sensor config...")
         await client.write_gatt_char(CHAR_UUID, bytes([0x55]))
         activity.touch()
         if not await wait_idle(done, activity, timeout):
-            log(f"No response from the device for {timeout:.0f}s (idle timeout).")
+            log(f"No response from the sensor for {timeout:.0f}s (idle timeout).")
             await client.stop_notify(CHAR_UUID)
             return
         await client.stop_notify(CHAR_UUID)
@@ -1209,13 +1209,13 @@ async def set_config(address: str, in_path: str, timeout: float = DEFAULT_TIMEOU
         await client.write_gatt_char(CHAR_UUID, bytes([0x55]) + payload)
         activity.touch()
         if not await wait_idle(done, activity, timeout):
-            log(f"No response from the device for {timeout:.0f}s (idle timeout); "
+            log(f"No response from the sensor for {timeout:.0f}s (idle timeout); "
                 "it may or may not have applied. Re-run --get-config to check.")
             await client.stop_notify(CHAR_UUID)
             return
         await client.stop_notify(CHAR_UUID)
 
-    log("Device confirmed the new config:")
+    log("Sensor confirmed the new config:")
     print(json.dumps(confirmed["cfg"], indent=2))
 
 
@@ -1247,21 +1247,21 @@ async def set_time(address: str, timeout: float, time_mode: str):
         t = device_epoch_now(time_mode)
         if before:
             err = round(before[0] - (before[1] + (0 if time_mode == "utc" else _local_utc_offset_seconds())))
-            log(f"Device clock was {fmt_dur(err)} {'fast' if err >= 0 else 'slow'}.")
+            log(f"Sensor clock was {fmt_dur(err)} {'fast' if err >= 0 else 'slow'}.")
             save_clock_log(address, {"before": t + err, "at": t})
         payload = bytes([0x23]) + t.to_bytes(4, "little")
-        log(f"Setting device clock to {device_epoch_as_datetime(t).isoformat(sep=' ')} "
+        log(f"Setting sensor clock to {device_epoch_as_datetime(t).isoformat(sep=' ')} "
             f"[{time_mode_label(time_mode)}]...")
         await client.write_gatt_char(CHAR_UUID, payload)
         activity.touch()
         if not await wait_idle(done, activity, timeout):
-            log(f"No response from the device for {timeout:.0f}s (idle timeout).")
+            log(f"No response from the sensor for {timeout:.0f}s (idle timeout).")
             await client.stop_notify(CHAR_UUID)
             return
         await client.stop_notify(CHAR_UUID)
 
     confirmed_dt = device_epoch_as_datetime(confirmed["epoch"])
-    log(f"Device confirmed clock set to: {confirmed_dt.isoformat(sep=' ')}")
+    log(f"Sensor confirmed clock set to: {confirmed_dt.isoformat(sep=' ')}")
 
 
 async def delete_log(address: str, timeout: float = DEFAULT_TIMEOUT):
@@ -1285,24 +1285,24 @@ async def delete_log(address: str, timeout: float = DEFAULT_TIMEOUT):
         await client.write_gatt_char(CHAR_UUID, bytes([0x36, 0x12, 0x34]))
         activity.touch()
         if await wait_idle(done, activity, timeout):
-            log("Device confirmed: recorded history deleted.")
+            log("Sensor confirmed: recorded history deleted.")
         else:
-            log(f"No response from the device for {timeout:.0f}s (idle timeout); it may "
+            log(f"No response from the sensor for {timeout:.0f}s (idle timeout); it may "
                 "still have processed the deletion. Consider trying --dump to check "
                 "whether the history is actually empty.")
         await client.stop_notify(CHAR_UUID)
 
 
 # ==========================================================================
-# Batch (multiple devices from a JSON file)
+# Batch (multiple sensors from a JSON file)
 # ==========================================================================
 
 def load_devices(path: str):
-    """Devices file is either a JSON list of
+    """The sensor list (devices.json) is either a JSON list of
     {"name": ..., "description": ..., "address": ...} objects, or
     {"devices": [...]} with the same shape. 'name' is optional (falls back
-    to the address with ':' stripped). 'description' is optional - it's
-    meant as the room/location name and gets folded into output filenames
+    to the address with ':' stripped). 'description' is optional - e.g.
+    where the sensor is - and gets folded into output filenames
     alongside 'name' (see device_label())."""
     with open(path, "r") as f:
         data = json.load(f)
@@ -1310,34 +1310,34 @@ def load_devices(path: str):
         data = data["devices"]
     if not isinstance(data, list):
         raise ValueError(
-            "Devices file must be a JSON list of {\"name\": ..., \"description\": ..., "
+            "The sensor list must be a JSON list of {\"name\": ..., \"description\": ..., "
             "\"address\": ...} objects, or {\"devices\": [...]} with the same shape."
         )
     devices = []
     for i, d in enumerate(data):
         if "address" not in d:
-            raise ValueError(f"Device entry #{i + 1} in {path} is missing 'address'")
+            raise ValueError(f"Sensor #{i + 1} in {path} is missing 'address'")
         name = d.get("name") or d["address"].replace(":", "")
         description = d.get("description") or ""
         devices.append({"name": name, "description": description, "address": d["address"]})
     if not devices:
-        raise ValueError(f"No devices found in {path}")
+        raise ValueError(f"No sensors found in {path}")
     return devices
 
 
 def device_label(dev: dict) -> str:
-    """Combine a device's description (room name) and name for use in
+    """Combine a sensor's description and name for use in
     output filenames: 'Description-name', description first so files sort
-    by room, or 'name' alone if there's no description. Spaces and hyphens
+    by description, or 'name' alone if there's no description. Spaces and hyphens
     inside the description become underscores, so the hyphen only ever
     separates the parts and the files can be split back apart reliably
-    (the ATC_xxxxxx name is what identifies the device)."""
+    (the ATC_xxxxxx name is what identifies the sensor)."""
     desc = re.sub(r"[\s\-]+", "_", (dev.get("description") or "").strip()).strip("_")
     return f"{desc}-{dev['name']}" if desc else dev["name"]
 
 
 def legacy_config_names(dev: dict, stem: str = "config"):
-    """Per-device config file names used by earlier versions, still looked
+    """Per-sensor config file names used by earlier versions, still looked
     for by --set-config: config_<name>__<description>.json and
     config_<name>_<description>.json (or just config_<name>.json)."""
     name, desc = dev["name"], (dev.get("description") or "")
@@ -1357,14 +1357,14 @@ def device_display(dev: dict) -> str:
 
 
 def sanitize_name(name: str) -> str:
-    """Make a device name safe to use in a filename."""
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_") or "device"
+    """Make a sensor name safe to use in a filename."""
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_") or "sensor"
 
 
 async def run_batch(devices, label, coro_fn):
-    """Run coro_fn(device_dict) for every device, sequentially (BLE adapters
+    """Run coro_fn(device_dict) for every sensor, sequentially (BLE adapters
     generally only handle one connection at a time), continuing past
-    per-device failures, then print a summary."""
+    per-sensor failures, then print a summary."""
     results = []
     for i, dev in enumerate(devices, 1):
         log(f"=== [{i}/{len(devices)}] {device_display(dev)} - {label} ===")
@@ -1417,9 +1417,9 @@ examples:
 
     python ATC_MiThermometer_tools.py --devices devices.json --set-time
     python ATC_MiThermometer_tools.py --devices devices.json --get-config
-        -> <Description>-<name>-config.json per device
+        -> <Description>-<name>-config.json per sensor
     python ATC_MiThermometer_tools.py --devices devices.json --set-config
-        -> uses <Description>-<name>-config.json per device if present (or an older
+        -> uses <Description>-<name>-config.json per sensor if present (or an older
            config_<name>_<description>.json), otherwise the shared config.json
     python ATC_MiThermometer_tools.py --devices devices.json --delete-log
         -> erase without downloading (asks first; --yes skips the question)
@@ -1444,35 +1444,34 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--scan", action="store_true",
-                         help="Scan for nearby ATC-firmware devices, logging each one as it's "
+                         help="Scan for nearby ATC-firmware sensors, logging each one as it's "
                               "found; press Enter at any time to stop early")
     parser.add_argument("--save-devices", action="store_true",
-                         help="(--scan) Save the found devices to a timestamped "
+                         help="(--scan) Save the found sensors to a timestamped "
                               "devices_<timestamp>.json, in the JSON format --devices expects")
     parser.add_argument("--devices", metavar="FILE",
-                         help="JSON file listing multiple devices ([{\"name\":..,\"description\":.."
+                         help="JSON file listing multiple sensors ([{\"name\":..,\"description\":.."
                               ",\"address\":..}, ...] or {\"devices\": [...]}). When given, use "
                               "--dump/--get-config/--set-config/--set-time/--delete-log WITHOUT an "
-                              "address to run that action against every device in the file.")
+                              "address to run that action against every sensor in the file.")
     parser.add_argument("--dump", nargs="?", const="__ALL__", default=None, metavar="ADDRESS",
-                         help="MAC address of the device to read history from "
+                         help="MAC address of the sensor to read history from "
                               "(omit the address, and use with --devices, to run on all of them)")
     parser.add_argument("--get-config", nargs="?", const="__ALL__", default=None, metavar="ADDRESS",
-                         help="MAC address of the device to read config from (use with --config-out); "
+                         help="MAC address of the sensor to read config from (use with --config-out); "
                               "omit the address (with --devices) to run on all of them")
     parser.add_argument("--set-config", nargs="?", const="__ALL__", default=None, metavar="ADDRESS",
-                         help="MAC address of the device to write config to (use with --config-in); "
+                         help="MAC address of the sensor to write config to (use with --config-in); "
                               "omit the address (with --devices) to run on all of them")
     parser.add_argument("--delete-log", nargs="?", const="__ALL__", default=None, metavar="ADDRESS",
-                         help="MAC address of the device to erase all recorded history on; "
+                         help="MAC address of the sensor to erase all recorded history on; "
                               "omit the address (with --devices) to run on all of them")
     parser.add_argument("--keep-log", action="store_true",
                          help="(--dump) Don't erase the sensor's log after downloading. By default "
                               "it's erased once the whole log has been downloaded and saved to a "
                               "file (never after an incomplete download, or with --count).")
-    parser.add_argument("--delete-after-dump", action="store_true", help=argparse.SUPPRESS)  # now the default; kept so old scripts still run
     parser.add_argument("--no-clock-sync", action="store_true",
-                         help="(--dump) Skip updating the device's clock after a successful dump. "
+                         help="(--dump) Skip updating the sensor's clock after a successful dump. "
                               "On by default to keep the clock from drifting, matching pvvx's own "
                               "tools - but this is NOT required to complete the transfer (see this "
                               "file's docstring for why); pass this flag to skip it.")
@@ -1482,7 +1481,7 @@ def main():
                               "shifted to the right time (see NOTE ON CLOCK DRIFT); the sensor's own "
                               "times stay in the 'sensor_timestamp' column.")
     parser.add_argument("--set-time", nargs="?", const="__ALL__", default=None, metavar="ADDRESS",
-                         help="MAC address of the device to set the clock on (--time-mode, "
+                         help="MAC address of the sensor to set the clock on (--time-mode, "
                               "default utc); omit the address (with --devices) to run on all of them")
     parser.add_argument("--yes", "-y", action="store_true",
                          help="Skip the confirmation question of --delete-log")
@@ -1491,18 +1490,18 @@ def main():
                          help="(--dump) Output filename prefix. Each run writes "
                               "'<prefix>-raw-<import-timestamp>.csv' so raw files are never "
                               "overwritten, and (re)generates aggregate file(s) from every raw file "
-                              "on disk - see --merge-levels. Single device: default 'atc_history'. "
+                              "on disk - see --merge-levels. Single sensor: default 'atc_history'. "
                               "Batch mode (--devices): files are named '<Description>-<name>-…' by "
                               "default; a given --out is put in front ('<out>-<Description>-<name>-…').")
     parser.add_argument("--config-out", default="config.json",
                          help="(--get-config) Path to write the config JSON to (default: config.json). "
-                              "In batch mode (--devices), each device gets '<Description>-<name>-config.json' "
+                              "In batch mode (--devices), each sensor gets '<Description>-<name>-config.json' "
                               "(or '<stem>-<Description>-<name>.json' if you pass another --config-out).")
     parser.add_argument("--config-in", default="config.json",
                          help="(--set-config) Path to read the config JSON from (default: config.json). "
-                              "In batch mode (--devices), a per-device '<Description>-<name>-config.json' "
+                              "In batch mode (--devices), a per-sensor '<Description>-<name>-config.json' "
                               "(or an older config_<name>_<description>.json) is used automatically if it "
-                              "exists; otherwise this shared file is used for every device.")
+                              "exists; otherwise this shared file is used for every sensor.")
 
     parser.add_argument("--count", type=lambda x: int(x, 0), default=0xFFFF,
                          help="(--dump) Number of most recent samples to request (default: all, 0xFFFF)")
@@ -1517,7 +1516,7 @@ def main():
                               "(Hungarian Excel)")
     parser.add_argument("--time-mode", choices=["local", "utc"], default="utc",
                          help="(--dump/--set-time, default: utc) Clock convention to write to the "
-                              "device: 'local' matches pvvx's own web tools - local wall-clock time "
+                              "sensor: 'local' matches pvvx's own web tools - local wall-clock time "
                               "packed into a UTC-shaped field; 'utc' writes the true UTC epoch "
                               "instead. Every CSV row also records which was used in its "
                               "'utc_offset' column. See the NOTE in this file's docstring - pick "
@@ -1536,7 +1535,7 @@ def main():
                               "offset; may need pip install tzdata on Windows).")
     parser.add_argument("--merge-levels", default="all",
                          help="(--dump) Comma-separated list of aggregate file(s) to (re)generate "
-                              "from every raw file on disk for this device (all "
+                              "from every raw file on disk for this sensor (all "
                               "always stored as true UTC - see --merge-tz): 'all' (default) -> "
                               "<prefix>-all.csv (everything); 'daily' -> one "
                               "<prefix>-daily-<YYYYMMDD>.csv per calendar day; 'monthly' -> one "
@@ -1567,10 +1566,6 @@ def main():
             sys.exit(1)
         return load_devices(args.devices)
 
-    def require_time_mode():
-        if args.time_mode is None:
-            parser.error("--time-mode {local,utc} is required for --dump and --set-time")
-
     def confirm_destructive(prompt: str) -> bool:
         if args.yes:
             return True
@@ -1584,7 +1579,6 @@ def main():
         asyncio.run(scan(args.timeout, args.save_devices))
 
     elif args.dump is not None:
-        require_time_mode()
         sync_time = not args.no_clock_sync
         # Erasing after a download is the default (like the iPhone app). It only happens when the
         # whole log was downloaded and saved to a file first; --keep-log turns it off.
@@ -1645,7 +1639,6 @@ def main():
             asyncio.run(set_config(args.set_config, args.config_in, args.timeout))
 
     elif args.set_time is not None:
-        require_time_mode()
         if want_batch(args.set_time):
             devices = require_devices()
 
@@ -1662,7 +1655,7 @@ def main():
             names = ", ".join(device_display(d) for d in devices)
             if not confirm_destructive(
                 f"This will PERMANENTLY erase all recorded history on {len(devices)} "
-                f"device(s): {names}. Type YES to continue: "
+                f"sensor(s): {names}. Type YES to continue: "
             ):
                 sys.exit(1)
 
@@ -1672,7 +1665,7 @@ def main():
             asyncio.run(run_batch(devices, "delete-log", _one))
         else:
             if not confirm_destructive(
-                "This will PERMANENTLY erase all recorded history on the device. "
+                "This will PERMANENTLY erase all recorded history on the sensor. "
                 "Type YES to continue: "
             ):
                 sys.exit(1)

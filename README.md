@@ -5,7 +5,7 @@ A companion for [pvvx's ATC firmware](https://github.com/pvvx/ATC_MiThermometer)
 **Open the app:** https://adam-nemeth.github.io/atc-companion/ · **Try it without a sensor:** [demo](https://adam-nemeth.github.io/atc-companion/?demo)
 
 <p>
-  <img src="screenshots/sensor.png" width="270" alt="Sensor tab: latest values per room, sensor list with log fill level">
+  <img src="screenshots/sensor.png" width="270" alt="Sensor tab: latest values per sensor, sensor list with log fill level">
   <img src="screenshots/history.png" width="270" alt="History tab: temperature and humidity chart with min/max table">
 </p>
 
@@ -25,7 +25,7 @@ Your data stays on your phone. Nothing is sent anywhere. The app reminds you to 
 
 ## On a computer
 
-[`python/ATC_MiThermometer_tools.py`](python/) is a command-line tool for Windows, macOS and Linux. It does the same jobs (download, clocks, settings) for many sensors at once and keeps a growing CSV archive per room, in the same format as the app. See [its README](python/README.md).
+[`python/ATC_MiThermometer_tools.py`](python/) is a command-line tool for Windows, macOS and Linux. It does the same jobs (download, clocks, settings) for many sensors at once and keeps a growing CSV archive per sensor, in the same format as the app. See [its README](python/README.md).
 
 ## For developers
 
