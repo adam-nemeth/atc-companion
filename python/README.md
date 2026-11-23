@@ -1,10 +1,21 @@
 # ATC_MiThermometer_tools.py
 
-Command-line companion to the [iPhone app](../README.md): the same jobs from a computer (Windows, macOS or Linux with Bluetooth LE) for Xiaomi LYWSD03MMC sensors running [pvvx's ATC_MiThermometer firmware](https://github.com/pvvx/ATC_MiThermometer).
+A command-line tool for **Xiaomi LYWSD03MMC** thermometers running [pvvx's ATC_MiThermometer firmware](https://github.com/pvvx/ATC_MiThermometer). It runs on any computer with Bluetooth LE (Windows, macOS, Linux).
 
-It can find sensors, download their history to CSV, set the clock, erase the log, and read or write the configuration. It works on one sensor or on a whole list. The CSV files it writes have the same format as the app's, so either can read the other's.
+## What it's for
+
+The pvvx firmware makes each sensor log a reading every few minutes into its own memory, typically a few months' worth. This tool collects those logs onto your computer and keeps them:
+
+- **Downloads the history** of one sensor or of all your sensors in one run. It's made for running regularly, e.g. weekly by hand or from Task Scheduler / cron.
+- **Builds a growing archive.** Every download is kept as its own file and merged into one `-all.csv` per room. Each reading appears once, no matter how often it was downloaded or how much the downloads overlap. Readings shared from the [iPhone app](../README.md) are merged in too.
+- **Keeps the sensors healthy:** sets their clocks (in UTC), optionally erases their logs after a successful download, and reads or writes their settings (measurement and logging intervals, display options, calibration).
+- **Corrects clock drift.** The sensors' clocks run fast or slow. Before each download the tool reads the clock and moves the readings back to the right time.
+
+It talks to the sensors directly over Bluetooth: no app, no gateway, no cloud.
 
 ## Setup
+
+Python 3.9 or newer, plus one package:
 
 ```
 pip install bleak
@@ -13,13 +24,13 @@ python ATC_MiThermometer_tools.py --help
 
 ## Examples
 
-Find sensors and save them to a list:
+**1. Find your sensors** and save them to a list:
 
 ```
 python ATC_MiThermometer_tools.py --scan --save-devices
 ```
 
-This writes `devices_<timestamp>.json`. Fill in a `description` (room) for each sensor and rename the file to `devices.json`:
+This writes `devices_<timestamp>.json`. Give each sensor a `description` (its room) and rename the file to `devices.json`:
 
 ```json
 [
@@ -28,27 +39,27 @@ This writes `devices_<timestamp>.json`. Fill in a `description` (room) for each 
 ]
 ```
 
-Download every sensor's history (the clock is set afterwards):
+**2. Download every sensor's history.** The clocks are set afterwards:
 
 ```
 python ATC_MiThermometer_tools.py --devices devices.json --dump
 ```
 
-This writes `Kitchen-ATC_A1B2C3-raw-<timestamp>.csv` per download and merges all downloads into `Kitchen-ATC_A1B2C3-all.csv`.
+Each run writes `Kitchen-ATC_A1B2C3-raw-<timestamp>.csv` and updates `Kitchen-ATC_A1B2C3-all.csv`, which holds everything so far.
 
-Download and then erase the sensors' logs (asks for confirmation; `--yes` skips it):
+**3. Download, then erase the sensors' logs.** It asks first; `--yes` skips the question. A sensor is only erased if its download finished:
 
 ```
 python ATC_MiThermometer_tools.py --devices devices.json --dump --delete-after-dump
 ```
 
-One sensor, last 500 readings, Excel-friendly (semicolons, comma decimals):
+**4. One sensor, last 500 readings, Excel-friendly CSV** (semicolons, decimal commas):
 
 ```
 python ATC_MiThermometer_tools.py --dump A4:C1:38:A1:B2:C3 --out kitchen --count 500 --locale hu
 ```
 
-Set the clocks (UTC), or read and write the configuration:
+**5. Clocks and settings:**
 
 ```
 python ATC_MiThermometer_tools.py --devices devices.json --set-time
@@ -56,20 +67,24 @@ python ATC_MiThermometer_tools.py --devices devices.json --get-config
 python ATC_MiThermometer_tools.py --devices devices.json --set-config
 ```
 
-`--get-config` writes `Kitchen-ATC_A1B2C3-config.json` per sensor. Edit it, then `--set-config` writes it back.
+`--get-config` saves `Kitchen-ATC_A1B2C3-config.json` per sensor. Edit it and `--set-config` writes it back.
 
-Daily and monthly files as well as the merged one:
+**6. Daily and monthly files** next to the merged one:
 
 ```
 python ATC_MiThermometer_tools.py --devices devices.json --dump --merge-levels all,daily,monthly
 ```
 
-## Good to know
+## The CSV files
 
-- **Times are UTC**, both on the sensor and in the files. The `utc_offset` column says so.
-- **Clock drift:** before downloading, the sensor's clock is read and the readings are shifted to the right time. The sensor's own time stays in the `sensor_timestamp` column. Use `--no-drift-correction` to turn this off.
-- **Merging is safe to repeat:** each reading is stored once, however often it's downloaded.
-- `--help` lists every option with more examples.
+| Column | |
+|---|---|
+| `timestamp` | When the reading was taken, in UTC, corrected for clock drift |
+| `utc_offset` | `+00:00`: the timestamp is UTC |
+| `temperature_c`, `humidity_pct`, `battery_mv` | The reading |
+| `sensor_timestamp` | The sensor's own (uncorrected) time, when it differs |
+
+Clock sets made by the tool are remembered in `clock_log.json` in the folder you run it from; they make the drift correction exact. `--no-drift-correction` turns the correction off. `--help` lists every option with more examples.
 
 ## License
 

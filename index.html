@@ -148,6 +148,19 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
     <button data-go="settings">Settings</button>
   </nav>
 
+  <div id="demoBanner" class="muted hidden" style="font-size:12px;margin:-4px 0 10px">
+    Demo with made-up sensors - nothing is saved. <a href="./">Open the app</a> to use your own.
+  </div>
+
+  <!-- Backup reminder: the history lives only in this browser on this phone -->
+  <div id="backupBanner" class="banner hidden">
+    <div id="backupText"></div>
+    <div class="row" style="margin-top:8px">
+      <button id="btnBackupNow" class="primary">Back up now…</button>
+      <button id="btnBackupLater">Later</button>
+    </div>
+  </div>
+
   <div id="noBle" class="banner hidden">
     <b>Web Bluetooth isn't available in this browser.</b><br>
     On iPhone, open this page in the <b>Bluefy</b> browser (free on the App Store). Safari doesn't support Bluetooth.
@@ -386,6 +399,17 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
     <details open>
       <summary>Settings</summary>
       <div class="row" style="margin-top:10px">
+        <label>Backup reminder
+          <select id="backupDays">
+            <option value="7">after 7 days</option>
+            <option value="14">after 14 days</option>
+            <option value="30">after 30 days</option>
+            <option value="0">off</option>
+          </select>
+        </label>
+      </div>
+      <p class="muted" id="backupInfo" style="font-size:12px;margin-top:2px"></p>
+      <div class="row">
         <label>CSV format
           <select id="csvLocale">
             <option value="en">en: comma, dot decimals</option>
@@ -440,6 +464,8 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
   </section>
 </main>
 
+<!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
+<script src="core.js?v=81"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -448,14 +474,47 @@ const uuid16 = n => `0000${n.toString(16).padStart(4, "0")}-0000-1000-8000-00805
 const SVC = uuid16(0x1f10), CHR = uuid16(0x1f1f);
 const ES_SVC = uuid16(0x181a), BATT_SVC = uuid16(0x180f);
 const NAME_PREFIXES = ["ATC_", "LYWSD", "MHO", "CGG", "MJWSD"];
-const CFG_NEW_LAYOUT_VER = 0x47;
 
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// ===== Demo mode (?demo): made-up sensors and history, nothing read from or saved to storage =====
+// For trying the app without sensors (and for the README screenshots). ?demo&tab=history opens a tab.
+const DEMO = new URLSearchParams(location.search).has("demo");
+const demoLS = new Map();
+if (DEMO) {
+  const now = Math.floor(Date.now() / 1000), cfg = { advertising_interval_ms_info: 2500, measure_interval_raw: 4, av_meas_mem_raw: 60 };
+  demoLS.set("rooms", { ATC_A1B2C3: "Kitchen", ATC_D4E5F6: "Bedroom", ATC_0F1E2D: "Living room" });
+  demoLS.set("known", Object.fromEntries([["ATC_A1B2C3", 9], ["ATC_D4E5F6", 23], ["ATC_0F1E2D", 112]].map(([n, days]) =>
+    [n, { mac: "A4:C1:38:" + n.slice(4).match(/../g).join(":"), cfg, log: { at: now - days * 86400, n: 0, P: 600 } }])));
+  demoLS.set("prefs", { timeMode: "utc", csvLocale: "en", idleTimeout: 30, range: 168, utcDefaultApplied: true, showNow: true });
+  demoLS.set("histDev", "ATC_0F1E2D");
+  demoLS.set("tab", new URLSearchParams(location.search).get("tab") || "single");
+  demoLS.set("lastBackup", { at: Date.now() - 2 * 86400000, rows: 0 });
+}
+// 45 days of readings every 10 minutes: daily temperature cycle, humidity moving the other way,
+// a slowly falling battery. Deterministic, so screenshots don't change from run to run.
+function demoHistory(seed, base, swing, hum) {
+  const now = Math.floor(Date.now() / 1000 / 600) * 600, out = [];
+  let r = seed;
+  const rnd = () => (r = (r * 16807) % 2147483647) / 2147483647 - 0.5;
+  let drift = 0;
+  for (let t = now - 45 * 86400; t <= now; t += 600) {
+    const h = new Date(t * 1000).getHours() + new Date(t * 1000).getMinutes() / 60;
+    drift += rnd() * 0.04; drift *= 0.995;
+    const day = Math.sin((h - 9) / 24 * 2 * Math.PI), weather = Math.sin(t / 86400 / 6.3 * 2 * Math.PI);
+    const temp = base + swing * day + 0.8 * weather + drift + rnd() * 0.06;
+    out.push([t, +temp.toFixed(2), +(hum - 1.6 * (temp - base) + 4 * weather + rnd() * 0.4).toFixed(2), Math.round(3010 - (now - t) / 86400 * 0.4 + rnd() * 4)]);
+  }
+  return out;
+}
+
 // ===== Small storage helpers (localStorage for prefs, IndexedDB for history) =====
-function lsGet(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } }
-function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+function lsGet(k, d) {
+  if (DEMO) return demoLS.has(k) ? JSON.parse(JSON.stringify(demoLS.get(k))) : d;
+  try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; }
+}
+function lsSet(k, v) { if (DEMO) { demoLS.set(k, v); return; } try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 
 // Sensors and their room names live only in this browser's storage (import a devices.json in Settings).
 let rooms = lsGet("rooms", {});
@@ -500,14 +559,11 @@ async function listDevices() {
   if (!idb) return [...memDB.keys()];
   return (await dbOp("readonly", st => st.getAllKeys())) || [];
 }
-// samples: array of [trueUtcSec, tempC, humPct, batteryMv]; merged & de-duplicated by instant
+// samples: array of [trueUtcSec, tempC, humPct, batteryMv, sensorUtcSec?]; one entry per reading
+// (identified by sampleKey() in core.js).
 async function mergeInto(dev, newSamples) {
-  // A reading is identified by the sensor's own timestamp (element 4; older samples have none, and
-  // their time IS the sensor's) plus its values, so re-downloads with an updated clock correction
-  // replace the earlier copy, and two readings that got the same time after a clock set are both kept.
-  const keyOf = s => `${s[4] != null ? s[4] : s[0]}|${(+s[1]).toFixed(2)}|${(+s[2]).toFixed(2)}|${s[3]}`;
-  const m = new Map((await loadHistory(dev)).map(s => [keyOf(s), s]));
-  for (const s of newSamples) m.set(keyOf(s), s);
+  const m = new Map((await loadHistory(dev)).map(s => [sampleKey(s), s]));
+  for (const s of newSamples) m.set(sampleKey(s), s);
   const merged = [...m.values()].sort((a, b) => a[0] - b[0]);
   await saveHistory(dev, merged);
   return merged.length;
@@ -516,7 +572,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 80;
+const APP_VERSION = 81;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -595,19 +651,6 @@ window.addEventListener("unhandledrejection", e => showError("Unhandled error", 
 // ===== Time conventions =====
 const localOffsetSec = () => -new Date().getTimezoneOffset() * 60;
 const deviceEpochNow = mode => Math.floor(Date.now() / 1000) + (mode === "utc" ? 0 : localOffsetSec());
-function fmtOffset(sec) {
-  const m = Math.round(sec / 60), s = m >= 0 ? "+" : "-", a = Math.abs(m);
-  return `${s}${String(Math.floor(a / 60)).padStart(2, "0")}:${String(a % 60).padStart(2, "0")}`;
-}
-function parseOffset(s) {
-  if (!s) return 0; const mm = /^([+-])?(\d{1,2}):(\d{2})$/.exec(s.trim()); if (!mm) return 0;
-  return (mm[1] === "-" ? -1 : 1) * (parseInt(mm[2]) * 60 + parseInt(mm[3])) * 60;
-}
-// Epoch shown "at face value" (calendar fields of the number, no TZ shift) - like utcfromtimestamp()
-function faceValue(epoch) {
-  const d = new Date(epoch * 1000), p = n => String(n).padStart(2, "0");
-  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
-}
 function localStr(epochUtc) {
   const d = new Date(epochUtc * 1000), p = n => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
@@ -696,7 +739,6 @@ function sensorFromBtName(btName) {
   if (/^ATC_[0-9A-F]{6}$/i.test(btName)) return "ATC_" + btName.slice(4).toUpperCase();
   return Object.keys(known).find(n => known[n].btName && known[n].btName === btName) || null;
 }
-const macStr = bytes => [...bytes].map(x => x.toString(16).padStart(2, "0").toUpperCase()).join(":");
 function knownNames() {
   // Sorted by exactly the text shown in the list ("Room · Bluetooth name").
   return [...new Set([...Object.keys(rooms), ...Object.keys(known)])].filter(n => /^ATC_/i.test(n))
@@ -878,6 +920,7 @@ function renderRooms() {
   let heard = 0, parsed = 0; for (const [, w] of liveWatch) { heard += w.d._advCount || 0; parsed += w.d._advParsed || 0; }
   const ble = navigator.bluetooth, noWatch = [...remembered.values()].some(d => typeof d.watchAdvertisements !== "function");
   $("roomsNote").textContent =
+    DEMO ? "Demo values: each sensor's latest reading." :
     !ble ? "No Bluetooth in this browser - showing values from earlier connections." :
     !ble.getDevices ? "This browser can't list sensors from earlier visits, so it can't listen live - values are from connections." :
     noWatch ? "This browser can't listen to broadcasts (no watchAdvertisements) - values are from connections." :
@@ -994,46 +1037,6 @@ function renderKnown() {
   const rm = $("readyMsg"); if (rm) rm.textContent = `${ready} available · ${ticked} ticked`;
   for (const id of ["bDump", "bDumpSyncErase", "bGetTime", "bSetTime", "bGetCfg", "bSetCfg", "btnAddSensors"]) { const b = $(id); if (b) b.disabled = busy || (id !== "btnAddSensors" && !ticked); }
 }
-// Service data of an advertisement event as [uuid, DataView] pairs. The standard is a Map of
-// DataViews; Bluefy hands over a plain object (v67 log: "{} is not iterable"), possibly with
-// ArrayBuffers, byte arrays or strings as values - accept all of those.
-function toDataView(v) {
-  if (v == null) return null;
-  if (v instanceof DataView) return v;
-  if (v instanceof ArrayBuffer) return new DataView(v);
-  if (ArrayBuffer.isView(v)) return new DataView(v.buffer, v.byteOffset, v.byteLength);
-  if (Array.isArray(v)) return new DataView(Uint8Array.from(v).buffer);
-  if (typeof v === "string") {
-    const s = v.replace(/[\s:<>-]/g, "");
-    if (/^([0-9a-f]{2})+$/i.test(s)) return new DataView(Uint8Array.from(s.match(/../g).map(x => parseInt(x, 16))).buffer);
-    try { const b = atob(v); return new DataView(Uint8Array.from(b, c => c.charCodeAt(0)).buffer); } catch {}
-  }
-  if (typeof v === "object" && v.buffer instanceof ArrayBuffer) return new DataView(v.buffer);
-  return null;
-}
-function advEntries(sd) {
-  if (!sd) return [];
-  // Bluefy (v68 log): serviceData is one bare DataView, not a Map. It may hold the raw advertising
-  // structures ([len][type][data]…, service data = type 0x16 + 16-bit UUID), the 0x181A data with its
-  // UUID in front, or just the 0x181A payload - try each; callers check the MAC inside before using it.
-  if (sd instanceof DataView || sd instanceof ArrayBuffer || ArrayBuffer.isView(sd)) {
-    const dv = toDataView(sd), u = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength), out = [];
-    // Bluefy 3.9 (v70 log): always the 3 bytes 9E E9 65 = base64-decoded "null", i.e. no data at all.
-    if (u.length === 3 && u[0] === 0x9e && u[1] === 0xe9 && u[2] === 0x65) return [];
-    for (let i = 0; i + 1 < u.length;) {
-      const len = u[i]; if (!len || i + 1 + len > u.length) break;
-      if (u[i + 1] === 0x16 && len >= 3) out.push([`0000${u[i + 3].toString(16).padStart(2, "0")}${u[i + 2].toString(16).padStart(2, "0")}-0000-1000-8000-00805f9b34fb`, new DataView(u.buffer, u.byteOffset + i + 4, len - 3)]);
-      i += 1 + len;
-    }
-    if (out.length) return out.map(([k, v]) => [k, v, v]);
-    if (u.length >= 15 && u[0] === 0x1a && u[1] === 0x18) return [["181a", new DataView(u.buffer, u.byteOffset + 2, u.length - 2), sd]];
-    return u.length ? [["181a", dv, sd]] : [];
-  }
-  let pairs = [];
-  if (typeof sd.forEach === "function" && typeof sd.get === "function") sd.forEach((v, k) => pairs.push([k, v]));
-  else if (typeof sd === "object") pairs = Object.entries(sd);
-  return pairs.map(([k, v]) => [String(k).toLowerCase(), toDataView(v), v]);
-}
 // One-line description of what a browser put into an advertisement event (for the debug log).
 function describeAdvEvent(ev) {
   const d = x => { if (x == null) return String(x);
@@ -1044,15 +1047,6 @@ function describeAdvEvent(ev) {
     return `${c}(${keys.length} keys${keys.length ? ": " + keys.slice(0, 4).join(",") : ""})${json && json !== "{}" ? " " + json : ""}`; };
   let own = []; try { for (const k in ev) if (!/^(type|target|currentTarget|srcElement|timeStamp|isTrusted|bubbles|cancelable|composed|defaultPrevented|eventPhase|returnValue|cancelBubble|NONE|CAPTURING_PHASE|AT_TARGET|BUBBLING_PHASE)$/.test(k) && typeof ev[k] !== "function") own.push(k); } catch {}
   return `fields [${own.join(",")}] serviceData ${d(ev.serviceData)} manufacturerData ${d(ev.manufacturerData)} uuids ${d(ev.uuids)}`;
-}
-// Parse sensor advertisements. pvvx "custom" format (service data 0x181A, 15+ bytes):
-// MAC[6] reversed, temp int16 x0.01, hum uint16 x0.01, batt mV uint16, batt %, counter, flags (all little-endian).
-// ATC1441 format (13 bytes): MAC[6] in order, temp int16 BE x0.1, hum %, batt %, batt mV uint16 BE, counter.
-function parseAdv(dv) {
-  const u = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
-  if (u.length >= 15) return { mac: macStr(u.slice(0, 6).reverse()), t: dv.getInt16(6, true) / 100, h: dv.getUint16(8, true) / 100, mv: dv.getUint16(10, true), b: u[12] };
-  if (u.length === 13) return { mac: macStr(u.slice(0, 6)), t: dv.getInt16(6, false) / 10, h: u[8], b: u[9], mv: dv.getUint16(10, false) };
-  return null;
 }
 const advLogged = new Map(); let advTotal = 0;
 function onAdvertisement(ev) {
@@ -1454,70 +1448,7 @@ async function dump(opts = {}) {
     return result;
   } finally { clearInterval(ui); listeners.delete(l); setTimeout(() => prog.style.display = "none", 1500); }
 }
-const le32 = t => [t & 0xff, (t >>> 8) & 0xff, (t >>> 16) & 0xff, (t >>> 24) & 0xff];
 
-// ===== Clock drift correction =====
-// A sensor's clock can gain or lose time steadily (how much, and whether at all, is still being
-// measured: Read clock and the clock line on connect show it).
-// The sensor doesn't remember when its clock was set, but every clock set shows up in the log: the
-// sample after it jumps by (interval − error). Between two sets the error grows linearly from 0, so
-// each stretch between sets is corrected linearly. For the stretch still running, the error is
-// measured by reading the clock before the download. Same algorithm as drift_correct() in
-// ATC_MiThermometer_tools.py - keep the two in step.
-// ts: sensor times in LOG order (face values); opts: { nowSensor, nowTrue, sets: [{before, at}], rate }
-// Returns { corr: corrected face values (same order), stretches: [...], note }.
-const DRIFT_TOL = 20, DRIFT_MAX_PER_DAY = 150;
-function driftCorrect(ts, opts = {}) {
-  const n = ts.length, corr = ts.slice(), res = { corr, stretches: [], note: "" };
-  if (!n) return res;
-  if (Math.min(...ts) < 1577836800) { res.note = "sensor clock was reset (dates before 2020) - not corrected"; return res; }
-  const sets = opts.sets || [];
-  const diffs = []; for (let k = 1; k < n; k++) diffs.push(ts[k] - ts[k - 1]);
-  const good = diffs.filter(d => d >= 30 && d <= 7200).sort((a, b) => a - b);
-  const P = good.length ? good[good.length >> 1] : 600;
-  // Pass 1: steps that are not one interval. A recorded clock set gives the error exactly.
-  const ev = [];
-  for (let k = 1; k < n; k++) {
-    const d = ts[k] - ts[k - 1];
-    const rec = sets.find(r => r.before >= ts[k - 1] - 5 && r.before <= ts[k - 1] + 2 * P + 300 && r.at <= ts[k] + 5 && r.at >= ts[k] - 2 * P - 300);
-    if (rec) { ev.push({ k, d, E: rec.before - rec.at, known: true }); continue; }
-    if (Math.abs(d - P) <= DRIFT_TOL) continue;
-    // Several intervals with no clock change = samples missed while connected, not a set.
-    const m = Math.max(1, Math.round(d / P));
-    if (m > 1 && Math.abs(m * P - d) <= DRIFT_TOL) continue;
-    ev.push({ k, d, E: P - d, known: false });
-  }
-  const bounds = () => { const b = []; let a = 0; for (const e of ev) { b.push([a, e.k - 1, e]); a = e.k; } b.push([a, n - 1, null]); return b; };
-  // Pass 2: a step can also hide skipped samples (step back by E plus one missed interval). Use the
-  // typical drift rate (other stretches, or this sensor's last known rate) to pick the right count.
-  const rates = bounds().filter(([a, b, e]) => e && ts[b] - ts[a] > 86400).map(([a, b, e]) => e.E / (ts[b] - ts[a]));
-  if (opts.rate != null) rates.push(opts.rate);
-  const rate = rates.length ? rates.slice().sort((x, y) => x - y)[rates.length >> 1] : null;
-  if (rate != null) for (const [a, b, e] of bounds()) {
-    if (!e || e.known) continue;
-    const m = Math.max(1, Math.round((e.d + rate * (ts[b] - ts[a])) / P));
-    e.E = m * P - e.d;
-  }
-  // Apply: error 0 at the start of each stretch, E at its end.
-  for (const [a, b, e] of bounds()) {
-    let s0 = ts[a];
-    if (a === 0) { const r = sets.filter(r => r.at <= ts[0] + 5 && r.at >= ts[0] - 2 * P - 300).pop(); if (r) s0 = r.at; }
-    let te, E;
-    if (e) { te = ts[b]; E = e.E; }
-    else if (opts.nowSensor != null && opts.nowTrue != null) { te = opts.nowSensor; E = opts.nowSensor - opts.nowTrue; }
-    else { res.stretches.push({ from: ts[a], to: ts[b], n: b - a + 1, E: null, applied: false, why: "clock not read" }); continue; }
-    const span = te - s0, perDay = span > 0 ? E / span * 86400 : 0;
-    const st = { from: ts[a], to: ts[b], n: b - a + 1, E, perDay, applied: false, startKnown: a > 0 || s0 !== ts[a] };
-    // The clock counts whole seconds and the read has ~1 s of uncertainty: ±2 s is "correct".
-    if (span <= 0 || Math.abs(E) <= 2) st.why = "no drift (within 2 s)";
-    // More error than drift can build up in that time = the clock was set to another value (or samples
-    // were missed), not drift: leave those times alone.
-    else if (Math.abs(E) > DRIFT_TOL + DRIFT_MAX_PER_DAY * span / 86400) st.why = "jump, not drift - not corrected";
-    else { for (let i = a; i <= b; i++) corr[i] = ts[i] - E * Math.max(0, ts[i] - s0) / span; st.applied = true; }
-    res.stretches.push(st);
-  }
-  return res;
-}
 // Per-sensor record of clock sets this app made, and the last measured drift rate (s per s).
 function clockLog(id) { const all = lsGet("clockLog", {}); return all[id] || { sets: [], rate: null }; }
 function saveClockLog(id, upd) {
@@ -1526,7 +1457,6 @@ function saveClockLog(id, upd) {
   if (upd.rate != null) cur.rate = upd.rate;
   all[id] = cur; lsSet("clockLog", all);
 }
-const fmtDur = s => { const a = Math.abs(Math.round(s)); return a >= 3600 ? `${Math.floor(a / 3600)} h ${Math.round(a % 3600 / 60)} min` : a >= 60 ? `${Math.floor(a / 60)} min ${a % 60} s` : `${a} s`; };
 function driftSummary(r) {
   if (r.note) return r.note;
   const ap = r.stretches.filter(s => s.applied);
@@ -1846,6 +1776,7 @@ async function getTime() {
 }
 // Where history lives: IndexedDB in this browser's storage for this website, on the phone only.
 async function updateStorageInfo() {
+  if (DEMO) { $("storageInfo").textContent = "Demo history of three made-up sensors, kept in memory only."; return; }
   let txt = `Saved only on this phone, inside Bluefy's website storage for ${location.host || "this page"} (IndexedDB${idb ? "" : " unavailable - kept in memory until the page closes"}).`;
   try {
     if (navigator.storage && navigator.storage.estimate) {
@@ -1871,19 +1802,10 @@ async function deleteLog() {
 // up to 409 if the compiler packs them to 10 bytes). The lower figure is used so the warning comes
 // early rather than late. The sensor can't report its record count, so the app tracks it: records
 // left on the sensor at the last download (0 after an erase) plus one per interval since.
-const LOG_CAPACITY = 51 * 340;
 function noteSensorLog(name, n, intervalSec) {
   const prev = (known[name] && known[name].log) || {};
   rememberSensor(name, { log: { at: Math.floor(Date.now() / 1000), n, P: intervalSec || prev.P || 600 } });
 }
-// Seconds between logged samples, from the sensor's config: advertising interval × measurements per
-// advertising interval × measurements per logged sample (av_meas_mem; 0 = logging off). These sensors:
-// 2.5 s × 4 × 60 = 600 s. null if the config isn't known.
-function logIntervalFromCfg(c) {
-  if (!c || c.av_meas_mem_raw == null || !c.advertising_interval_ms_info || !c.measure_interval_raw) return null;
-  return c.av_meas_mem_raw ? c.advertising_interval_ms_info * c.measure_interval_raw * c.av_meas_mem_raw / 1000 : 0;
-}
-const fmtDays = d => d >= 2 ? `${Math.round(d)} days` : d >= 1 ? "1 day" : `${Math.max(1, Math.round(d * 24))} h`;
 function logWarning(name) {
   const k = known[name] || {}, L = k.log;
   const cfgP = logIntervalFromCfg(k.cfg);
@@ -1902,52 +1824,6 @@ function logWarning(name) {
   return { level: "ok", text: `Log ${pct}% full (${fmtDays(est * P / 86400)} of ~${fmtDays(capDays)}) · full in ${fmtDays(daysLeft)} (~${when})` };
 }
 
-// ===== Config (0x55) =====
-function decodeCfg(b) {
-  const len = b.length - 1; if (len < 9) throw new Error("config too short");
-  const ver = b[1], flg = b[2], flg2 = b[3], to = b[4], ho = b[5];
-  const cfg = {
-    _note: "Raw device config (CMD_ID_CFG 0x55). Fields ending '_raw', and the bit fields under flg/flg2, are what --set-config writes back. Fields ending '_info' or under 'device_info' are read-only / computed for convenience and are ignored on write. Bits labelled 'hardware_specific' mean different things on different screen/model variants of this firmware - leave them alone unless you know what your specific device does with them.",
-    device_info: { protocol_version_raw: ver, protocol_version_str: `${ver >> 4}.${ver & 15}` },
-    flg: { raw: flg, bits: {
-      advertising_type: flg & 3, comfort_smiley: !!(flg & 4), hardware_specific_bit3: !!(flg & 8),
-      temperature_unit_fahrenheit: !!(flg & 16), hardware_specific_bit5: !!(flg & 32),
-      tx_measures_when_connected: !!(flg & 64), low_power_measurements: !!(flg & 128) } },
-    flg2: { raw: flg2, bits: {
-      smiley_or_screen_type: flg2 & 7, adv_crypto: !!(flg2 & 8), adv_flags: !!(flg2 & 16),
-      bt5_phy: !!(flg2 & 32), long_range: !!(flg2 & 64), screen_off: !!(flg2 & 128) } },
-    advertising_interval_raw: b[6], advertising_interval_ms_info: Math.round(b[6] * 62.5 * 10) / 10,
-    measure_interval_raw: b[7], rf_tx_power_raw: b[8],
-    connect_latency_raw: b[9], connect_latency_ms_info: (b[9] + 1) * 20,
-  };
-  if (len >= 10) { cfg.lcd_tint_raw = b[10]; cfg.lcd_tint_seconds_info = Math.round(b[10] * 5) / 100; }
-  if (len >= 11) cfg.hw_ver_raw = b[11];
-  if (len >= 12) cfg.av_meas_mem_raw = b[12];
-  if (ver < CFG_NEW_LAYOUT_VER) {
-    const st = to > 127 ? to - 256 : to, sh = ho > 127 ? ho - 256 : ho;
-    Object.assign(cfg, { temp_offset_raw: st, temp_offset_c_info: st / 10, humi_offset_raw: sh, humi_offset_pct_info: sh / 10 });
-  } else {
-    Object.assign(cfg, { temp_offset_raw: to, adv_interval_delay_raw_info: to & 15, date_display_ddmm_info: !!(to & 64),
-      day_of_week_flag_info: !!(to & 128), humi_offset_raw: ho, event_adv_cnt_info: ho });
-  }
-  return cfg;
-}
-const FLG_BITS = [["advertising_type", 3, true], ["comfort_smiley", 4], ["hardware_specific_bit3", 8], ["temperature_unit_fahrenheit", 16],
-  ["hardware_specific_bit5", 32], ["tx_measures_when_connected", 64], ["low_power_measurements", 128]];
-const FLG2_BITS = [["smiley_or_screen_type", 7, true], ["adv_crypto", 8], ["adv_flags", 16], ["bt5_phy", 32], ["long_range", 64], ["screen_off", 128]];
-function byteFromBits(obj, map) {
-  if (!obj.bits) return obj.raw & 255;
-  let v = 0; for (const [k, m, multi] of map) { if (multi) v |= (parseInt(obj.bits[k]) || 0) & m; else if (obj.bits[k]) v |= m; } return v;
-}
-function encodeCfg(c) {
-  const p = [byteFromBits(c.flg, FLG_BITS), byteFromBits(c.flg2, FLG2_BITS), c.temp_offset_raw & 255, c.humi_offset_raw & 255,
-    c.advertising_interval_raw & 255, c.measure_interval_raw & 255, c.rf_tx_power_raw & 255, c.connect_latency_raw & 255];
-  if (c.lcd_tint_raw != null) {
-    p.push(c.lcd_tint_raw & 255);
-    if (c.hw_ver_raw != null) { p.push(c.hw_ver_raw & 255); p.push((c.av_meas_mem_raw || 0) & 255); }
-  }
-  return p;
-}
 // Plain-language label and explanation per setting. Explanations may be functions of the whole config,
 // so derived values (intervals, log length) update as you edit.
 const secs = s => s >= 3600 ? `${+(s / 3600).toFixed(1)} h` : s >= 60 ? `${+(s / 60).toFixed(1)} min` : `${+s.toFixed(2)} s`;
@@ -2033,31 +1909,23 @@ async function setCfg() {
   log(r ? "Sensor confirmed the new config." : "No reply (idle timeout); re-read to check.");
 }
 
-// ===== CSV export / import =====
-const fmtNum = (v, loc) => { const s = v.toFixed(2); return loc === "hu" ? s.replace(".", ",") : s; };
-// rows: [tsStr, offStr, t, h, v, sensorTsStr]. "timestamp" is drift-corrected; "sensor_timestamp" is
-// the sensor's own (uncorrected) time, empty when unknown - same columns as the Python tool.
-function toCsv(rows, loc) {
-  const d = loc === "hu" ? ";" : ",";
-  return ["timestamp", "utc_offset", "temperature_c", "humidity_pct", "battery_mv", "sensor_timestamp"].join(d) + "\r\n" +
-    rows.map(r => [r[0], r[1], fmtNum(r[2], loc), fmtNum(r[3], loc), r[4], r[5] || ""].join(d)).join("\r\n") + "\r\n";
-}
 const safe = s => s.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "sensor";
 function shareMsg(text, cls) { const m = $("shareMsg"); m.textContent = text; m.className = cls || "muted"; }
 // Opens the iOS share sheet (Mail, Messages, AirDrop, Save to Files…) with the CSV file(s) attached.
 // iOS only allows the share sheet straight from a tap, so everything is prepared synchronously
 // from in-memory data - no awaits before navigator.share().
-function shareFiles(items, subject) {
+// onDone: called once the files were shared (or downloaded instead).
+function shareFiles(items, subject, onDone) {
   if (!items.length) { shareMsg("Nothing to share yet.", "status warn"); return; }
   const files = items.map(it => new File([it.text], it.name, { type: it.type || "text/csv" }));
   const rows = items.reduce((n, it) => n + it.rows, 0);
   const body = `${subject}\n${items.map(it => `${it.name} (${it.rows} rows)`).join("\n")}`;
-  const done = () => { dbg("Share completed"); shareMsg(`Shared ${files.length} file(s), ${rows} rows.`, "status ok"); };
+  const done = () => { dbg("Share completed"); shareMsg(`Shared ${files.length} file(s), ${rows} rows.`, "status ok"); if (onDone) onDone(); };
   const failed = e => {
     dbg(`Share result: ${errDetail(e)}`);
     if (e && e.name === "AbortError") { shareMsg("Sharing cancelled."); return; }
     shareMsg("Share sheet failed: " + describeErr(e) + " - downloading instead.", "status err");
-    downloadFiles(items);
+    downloadFiles(items); if (onDone) onDone();
   };
   let canFiles = false;
   try { canFiles = !!(navigator.canShare && navigator.canShare({ files })); } catch (e) { dbg(`canShare threw: ${describeErr(e)}`); }
@@ -2069,7 +1937,7 @@ function shareFiles(items, subject) {
     navigator.share({ title: items[0].name, text: items[0].text }).then(done, failed);
   } else {
     shareMsg("This browser has no share sheet - downloading the file(s) instead.", "status warn");
-    downloadFiles(items);
+    downloadFiles(items); if (onDone) onDone();
   }
 }
 function downloadFiles(items) {
@@ -2098,32 +1966,34 @@ function shareSelected() {
 }
 function shareAllDevices() {
   const items = [...histCache.keys()].sort().map(csvAllFor).filter(it => it.rows);
-  shareFiles(items, `Thermometer history: ${items.length} sensor(s)`);
+  // Sharing every sensor's full history counts as a backup (once the share sheet reports success).
+  shareFiles(items, `Thermometer history: ${items.length} sensor(s)`, () => noteBackup(items.reduce((n, it) => n + it.rows, 0)));
+}
+// ===== Backup reminder =====
+// The history exists only in this browser's storage on this phone, and iOS may clear it (Bluefy
+// isn't granted persistent storage). A backup = "Share all sensors" to Files / iCloud Drive / mail.
+function noteBackup(rows) { lsSet("lastBackup", { at: Date.now(), rows }); lsSet("backupSnooze", 0); updateBackupBanner(); }
+function backupState() {
+  const last = lsGet("lastBackup", null), since = last ? last.at / 1000 : 0;
+  let total = 0, notBacked = 0;
+  for (const s of histCache.values()) { total += s.length; for (let i = s.length - 1; i >= 0 && s[i][0] > since; i--) notBacked++; }
+  return { last, total, notBacked };
+}
+function updateBackupBanner() {
+  const days = prefs.backupDays == null ? 14 : +prefs.backupDays, { last, total, notBacked } = backupState();
+  const age = last ? (Date.now() - last.at) / 86400000 : Infinity;
+  const info = $("backupInfo");
+  if (info) info.textContent = last ? `Last backup ${ago(last.at)} (${last.rows.toLocaleString()} readings).` : "No backup made from this phone yet.";
+  const due = days > 0 && notBacked > 0 && age >= days && Date.now() > (lsGet("backupSnooze", 0) || 0);
+  $("backupBanner").classList.toggle("hidden", !due);
+  if (due) $("backupText").innerHTML = `<b>${last ? `Last backup ${ago(last.at)}` : "No backup yet"}</b> · ${notBacked.toLocaleString()} reading${notBacked === 1 ? "" : "s"} exist only on this phone. ` +
+    `Save a copy (e.g. to Files or iCloud Drive) in case iOS clears the browser's storage.`;
 }
 function shareRaw() {
   if (!lastRaw) return;
   shareFiles([{ name: `${fileLabel(lastRaw.dev)}-raw-${stamp()}.csv`, rows: lastRaw.rows.length,
     text: toCsv(lastRaw.rows.map(([e, t, h, v, , c]) => [faceValue(c), lastRaw.offset, t, h, v, faceValue(e)]), prefs.csvLocale) }],
     `Thermometer download: ${histLabel(lastRaw.dev)}`);
-}
-function parseCsv(text) {
-  const lines = text.split(/\r?\n/).filter(Boolean); if (!lines.length) return [];
-  const hu = lines[0].includes(";"), d = hu ? ";" : ",";
-  const hdr = lines[0].split(d).map(h => h.trim().toLowerCase());
-  const ix = (...n) => { for (const x of n) { const i = hdr.indexOf(x); if (i >= 0) return i; } return -1; };
-  const iT = Math.max(0, ix("timestamp", "utc_timestamp", "local_timestamp")), iO = ix("utc_offset");
-  const iTm = ix("temperature_c"), iH = ix("humidity_pct"), iV = ix("battery_mv"), iS = ix("sensor_timestamp");
-  const out = [];
-  const faceOf = s => { const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(s || ""); return m ? Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]) / 1000 : null; };
-  for (const ln of lines.slice(1)) {
-    const c = ln.split(d); const num = s => parseFloat(hu ? String(s).replace(",", ".") : s);
-    const face = faceOf(c[iT]); if (face == null) continue;
-    const off = parseOffset(iO >= 0 ? c[iO] : "+00:00"), t = face - off;
-    const sf = iS >= 0 ? faceOf(c[iS]) : null;
-    const tm = num(c[iTm < 0 ? 1 : iTm]), hm = num(c[iH < 0 ? 2 : iH]), v = parseInt(c[iV < 0 ? 3 : iV]);
-    if (isFinite(tm) && isFinite(hm)) out.push(sf != null && sf - off !== t ? [t, tm, hm, isFinite(v) ? v : 0, sf - off] : [t, tm, hm, isFinite(v) ? v : 0]);
-  }
-  return out;
 }
 async function importFiles(files) {
   let last = null;
@@ -2143,12 +2013,6 @@ async function importFiles(files) {
   if (last) await refreshDeviceList(last);
 }
 
-// History is stored per sensor under its fixed ID (ATC_xxxxxx). Older versions stored it as
-// "ATC_xxxxxx__Description", so a sensor whose description changed ended up in several stores.
-function histId(key) {
-  const id = String(key).split("__")[0];
-  return /^ATC_[0-9A-F]{6}$/i.test(id) ? "ATC_" + id.slice(4).toUpperCase() : key;
-}
 function histLabel(d) { return knownNames().includes(d) ? shownName(d) : d.replace("__", " · "); }
 // One-time clean-up: merge every store of the same sensor into one keyed by its ID (duplicates by
 // time are dropped by mergeInto), and pick up the description from the old key if none is set.
@@ -2186,6 +2050,8 @@ async function refreshDeviceList(select) {
   for (const d of devs.slice().sort((a, b) => byText(histLabel(a), histLabel(b)))) sel.add(new Option(histLabel(d), d));
   if (devs.includes(keep)) sel.value = keep;
   await loadChart();
+  updateBackupBanner();
+  scheduleKnownRender(0);  // tiles and log lines use the stored history
 }
 async function loadChart() {
   const dev = $("histDev").value; lsSet("histDev", dev);
@@ -2195,29 +2061,6 @@ async function loadChart() {
   drawChart();
 }
 let plotted = null;
-// Time-axis ticks at round local times. Picks the smallest step that gives at most maxTicks ticks:
-// 15/30 min, 1/2/3/6/12 h (aligned to local midnight), 1/2 days, weeks (Mondays), 1/3/6 months.
-function timeTicks(a, b, maxTicks, maxDateTicks = maxTicks) {
-  const span = b - a;
-  const steps = [[900, "subday"], [1800, "subday"], [3600, "subday"], [7200, "subday"], [10800, "subday"], [21600, "subday"],
-    [43200, "subday"], [86400, "day"], [172800, "day"], [604800, "week"], [2629800, "month"], [7889400, "month"], [15778800, "month"]];
-  // Times ("12:00") need more room than dates ("Tue 17"), hence separate limits.
-  let [step, unit] = steps.find(([s, u]) => span / s <= (u === "subday" ? maxTicks : maxDateTicks)) || [31557600, "month"];
-  const d = new Date(a * 1000); d.setHours(0, 0, 0, 0);
-  const monthsPerTick = Math.max(1, Math.round(step / 2629800));
-  if (unit === "week") d.setDate(d.getDate() - ((d.getDay() + 6) % 7));   // back to Monday
-  if (unit === "month") { d.setDate(1); d.setMonth(Math.floor(d.getMonth() / monthsPerTick) * monthsPerTick); }
-  const ticks = [];
-  for (let guard = 0; guard < 500 && d.getTime() / 1000 <= b; guard++) {
-    const t = d.getTime() / 1000;
-    if (t >= a) ticks.push(t);
-    if (unit === "subday") d.setMinutes(d.getMinutes() + step / 60);
-    else if (unit === "day") d.setDate(d.getDate() + step / 86400);
-    else if (unit === "week") d.setDate(d.getDate() + 7);
-    else d.setMonth(d.getMonth() + monthsPerTick);
-  }
-  return { ticks, unit };
-}
 // Width in px of an 11 px chart label (canvas measurement; works even while the chart is hidden).
 let measureCtx = null;
 function measureText11() {
@@ -2229,23 +2072,6 @@ function measureText11() {
     measureCtx.font = `${bold ? "600 " : ""}11px ${family}`;
     return measureCtx.measureText(s).width;
   };
-}
-// ===== Daylight-saving changes (phone's time zone) =====
-// The chart's x axis is real time, so local clock labels are uneven on change days and, in autumn, an
-// hour of local times happens twice. Changes are marked on the chart, and readout times near a
-// change say "summer time" / "winter time" so the two 02:30s can be told apart.
-const utcOffsetMin = t => -new Date(t * 1000).getTimezoneOffset();
-// Changes between a and b (UTC seconds): [{ t, delta (minutes, + = clocks forward) }].
-function dstChanges(a, b) {
-  const out = [], step = 6 * 3600;
-  for (let s = a; s < b; s += step) {
-    const e = Math.min(b, s + step), o1 = utcOffsetMin(s), o2 = utcOffsetMin(e);
-    if (o1 === o2) continue;
-    let lo = s, hi = e;
-    while (hi - lo > 60) { const m = Math.floor((lo + hi) / 2); if (utcOffsetMin(m) === o1) lo = m; else hi = m; }
-    out.push({ t: hi, delta: o2 - o1 });
-  }
-  return out;
 }
 // Local time as text; within 3 hours of a change, also which clock it is.
 function localStrZ(t) {
@@ -2886,6 +2712,11 @@ function updateStatusBar() {
   $("btnRenameReset").onclick = () => withBusy(resetBtName);
   $("btNameNew").oninput = () => delete $("btNameNew").dataset.auto;
   $("csvLocale").onchange = e => { prefs.csvLocale = e.target.value; savePrefs(); };
+  $("backupDays").value = String(prefs.backupDays == null ? 14 : prefs.backupDays);
+  $("backupDays").onchange = e => { prefs.backupDays = +e.target.value; savePrefs(); updateBackupBanner(); };
+  // Straight from the tap: iOS only opens the share sheet then.
+  $("btnBackupNow").onclick = shareAllDevices;
+  $("btnBackupLater").onclick = () => { lsSet("backupSnooze", Date.now() + 3 * 86400000); updateBackupBanner(); };
   $("idleTimeout").onchange = e => { prefs.idleTimeout = Math.max(5, parseInt(e.target.value) || 30); savePrefs(); };
   // Download options are remembered; both are on by default (set clock + erase keeps every
   // stretch of the sensor's log starting at a known clock set - see driftCorrect()).
@@ -3013,11 +2844,19 @@ function updateStatusBar() {
   $("chart").addEventListener("pointerdown", onChartPointer);
   window.addEventListener("resize", () => drawChart());
   if (window.matchMedia) matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", drawChart);
-  idb = await openDB();
-  if (!idb) log("IndexedDB unavailable - history is kept only until the page is closed.", "warn");
-  else dbg("IndexedDB opened");
-  // Ask the browser not to evict our data under storage pressure (may be ignored).
-  try { if (navigator.storage && navigator.storage.persist) dbg(`storage.persist() → ${await navigator.storage.persist()}`); } catch (e) { dbg(`storage.persist() error: ${describeErr(e)}`); }
+  if (DEMO) {
+    // History only in memory; the real stored history isn't opened at all.
+    memDB.set("ATC_A1B2C3", demoHistory(11, 22.5, 1.4, 52));
+    memDB.set("ATC_D4E5F6", demoHistory(23, 19.5, 0.9, 58));
+    memDB.set("ATC_0F1E2D", demoHistory(37, 21.5, 1.1, 49));
+    $("demoBanner").classList.remove("hidden");
+  } else {
+    idb = await openDB();
+    if (!idb) log("IndexedDB unavailable - history is kept only until the page is closed.", "warn");
+    else dbg("IndexedDB opened");
+    // Ask the browser not to evict our data under storage pressure (may be ignored).
+    try { if (navigator.storage && navigator.storage.persist) dbg(`storage.persist() → ${await navigator.storage.persist()}`); } catch (e) { dbg(`storage.persist() error: ${describeErr(e)}`); }
+  }
   updateStorageInfo();
   try { const n = await mergeDuplicateHistory(); if (n) renderKnown(); } catch (e) { log("History merge failed: " + errDetail(e), "err"); }
   await refreshDeviceList();

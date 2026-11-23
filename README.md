@@ -2,7 +2,12 @@
 
 Read and chart the history of a **Xiaomi Mi Temperature and Humidity Monitor 2** (LYWSD03MMC) on an **iPhone**: no app store, no Mac, no cloud.
 
-**Open the app:** https://adam-nemeth.github.io/atc-thermo/
+**Open the app:** https://adam-nemeth.github.io/atc-thermo/ · **Try it without a sensor:** [demo](https://adam-nemeth.github.io/atc-thermo/?demo)
+
+<p>
+  <img src="screenshots/sensor.png" width="270" alt="Sensor tab: latest values per room, sensor list with log fill level">
+  <img src="screenshots/history.png" width="270" alt="History tab: temperature and humidity chart with min/max table">
+</p>
 
 ## Tribute
 
@@ -16,11 +21,22 @@ This only works thanks to [**pvvx/ATC_MiThermometer**](https://github.com/pvvx/A
 4. **History** tab: chart (pinch to zoom, drag to move, tap for values), min/max/average, and *Share* to export CSV.
 5. **Batch** tab: the same for all your sensors in one go.
 
-Your data stays on your phone. Nothing is sent anywhere.
+Your data stays on your phone. Nothing is sent anywhere. The app reminds you to save a backup copy (to Files, iCloud Drive, mail…) now and then.
 
 ## On a computer
 
-[`python/ATC_MiThermometer_tools.py`](python/) does the same from Windows, macOS or Linux, in the same CSV format. See [its README](python/README.md) for examples.
+[`python/ATC_MiThermometer_tools.py`](python/) is a command-line tool for Windows, macOS and Linux. It does the same jobs (download, clocks, settings) for many sensors at once and keeps a growing CSV archive per room, in the same format as the app. See [its README](python/README.md).
+
+## For developers
+
+The app is a single page, [`index.html`](index.html), with its logic in [`core.js`](core.js). Tests need no installs:
+
+```
+node --test tests/
+python -m unittest discover -s tests
+```
+
+Both test the clock-drift correction against the same simulated sensor logs ([`tests/fixtures`](tests/fixtures/), made by [`tests/make_fixtures.py`](tests/make_fixtures.py)), so the app and the Python tool stay in step.
 
 ## License
 
