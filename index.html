@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f172a">
-<title>ATC Companion</title>
+<title>ATC MiThermometer Companion</title>
 <style>
 :root {
   --bg: #f4f5f7; --card: #ffffff; --text: #16181d; --muted: #6b7280; --line: #e3e5e9;
@@ -140,7 +140,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
 </head>
 <body>
 <main>
-  <h1>ATC Companion <span class="muted" id="appVersionTop" style="font-weight:500;font-size:14px"></span></h1>
+  <h1>ATC MiThermometer Companion <span class="muted" id="appVersionTop" style="font-weight:500;font-size:14px"></span></h1>
   <nav class="tabs" id="tabs">
     <button data-go="single">Sensor</button>
     <button data-go="all">Batch</button>
@@ -465,7 +465,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=84"></script>
+<script src="core.js?v=85"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -572,7 +572,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 84;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 85;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -2652,7 +2652,7 @@ function setupChartGestures() {
 }
 
 // ===== Wire up =====
-function logText() { return `ATC Companion debug log (app version ${APP_VERSION}, exported ${new Date().toString()})\n${navigator.userAgent}\n\n${logLines.join("\n")}\n`; }
+function logText() { return `ATC MiThermometer Companion debug log (app version ${APP_VERSION}, exported ${new Date().toString()})\n${navigator.userAgent}\n\n${logLines.join("\n")}\n`; }
 function sendLog() {
   const name = `atc_debug_log_${stamp()}.txt`, text = logText();
   const file = new File([text], name, { type: "text/plain" });
@@ -2662,7 +2662,7 @@ function sendLog() {
     if (e && e.name === "AbortError") { $("logMsg").textContent = "Cancelled."; return; }
     $("logMsg").textContent = "Share failed (" + describeErr(e) + "); use Copy log instead.";
   };
-  if (canFiles) navigator.share({ files: [file], title: "ATC debug log", text: "ATC Companion debug log attached." }).then(ok, fail);
+  if (canFiles) navigator.share({ files: [file], title: "ATC debug log", text: "ATC MiThermometer Companion debug log attached." }).then(ok, fail);
   else if (navigator.share) navigator.share({ title: "ATC debug log", text }).then(ok, fail);
   else downloadFiles([{ name, text }]);
 }

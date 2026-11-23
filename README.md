@@ -1,4 +1,4 @@
-# ATC Companion
+# ATC MiThermometer Companion
 
 A companion for [pvvx's ATC firmware](https://github.com/pvvx/ATC_MiThermometer): read and chart the history of a **Xiaomi Mi Temperature and Humidity Monitor 2** (LYWSD03MMC) on an **iPhone**, with no app store, no Mac and no cloud, plus a [command-line tool](python/) for the computer.
 
