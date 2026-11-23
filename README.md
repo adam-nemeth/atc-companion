@@ -18,6 +18,10 @@ This only works thanks to [**pvvx/ATC_MiThermometer**](https://github.com/pvvx/A
 
 Your data stays on your phone. Nothing is sent anywhere.
 
+## On a computer
+
+[`python/ATC_MiThermometer_tools.py`](python/) does the same from Windows, macOS or Linux, in the same CSV format. See [its README](python/README.md) for examples.
+
 ## License
 
 [MIT](LICENSE)
