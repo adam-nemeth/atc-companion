@@ -107,6 +107,98 @@ class SensorConfig(unittest.TestCase):
         self.assertEqual(T.encode_cfg(json.loads(json.dumps(cfg))), reply[2:])
 
 
+class FakeSensor:
+    """Stands in for bleak's BleakClient: answers the clock (0x23), history (0x35) and erase
+    (0x36) commands like a sensor with `n` readings, and records what was sent."""
+    def __init__(self, n=50, finish=True):
+        self.n, self.finish, self.sent, self.erased_with_files = n, finish, [], None
+        self.prefix_dir = None
+
+    def __call__(self, address):  # used as BleakClient(address)
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def start_notify(self, _uuid, handler):
+        self.handler = handler
+
+    async def stop_notify(self, _uuid):
+        pass
+
+    async def write_gatt_char(self, _uuid, data):
+        data = bytes(data)
+        self.sent.append(data[0])
+        now = int(__import__("time").time())
+        if data[0] == 0x23 and len(data) == 1:
+            self.handler(None, bytearray(b"\x23" + now.to_bytes(4, "little")))
+        elif data[0] == 0x35:
+            for i in range(self.n):
+                t = now - (self.n - i) * 600
+                self.handler(None, bytearray(b"\x35" + T.struct.pack("<HIhHH", self.n - 1 - i, t, 2150, 5000, 3000)))
+            if self.finish:
+                self.handler(None, bytearray(b"\x35"))  # short packet = end of transfer
+        elif data[0] == 0x36:
+            # Which download files existed at the moment the sensor was told to erase?
+            self.erased_with_files = sorted(p.name for p in self.prefix_dir.glob("*-raw-*.csv"))
+            self.handler(None, bytearray(b"\x36\x00"))
+
+
+class DownloadAndErase(unittest.TestCase):
+    """--dump erases the sensor's log by default - only after the whole log is saved to a file."""
+    def run_dump(self, sensor, erase=True, count=0xFFFF, timeout=5):
+        with tempfile.TemporaryDirectory() as d:
+            sensor.prefix_dir = Path(d)
+            saved = (T.BleakClient, T._warm_up, T.CLOCK_LOG, T.log)
+            async def no_warm_up(*a, **k):
+                pass
+            T.BleakClient, T._warm_up, T.CLOCK_LOG, T.log = sensor, no_warm_up, Path(d) / "clock_log.json", lambda *a: None
+            try:
+                finished = T.asyncio.run(T.dump("A4:C1:38:A1:B2:C3", str(Path(d) / "Kitchen-ATC_A1B2C3"), count,
+                                                timeout, "en", "utc", erase, True, "source", ("all",), True))
+                files = sorted(p.name for p in Path(d).glob("*.csv"))
+            finally:
+                T.BleakClient, T._warm_up, T.CLOCK_LOG, T.log = saved
+        return finished, files
+
+    def test_erases_by_default_after_the_file_is_saved(self):
+        s = FakeSensor()
+        finished, files = self.run_dump(s)
+        self.assertTrue(finished)
+        self.assertIn(0x36, s.sent)
+        self.assertEqual(len(s.erased_with_files), 1, "download file must exist before erasing")
+        self.assertIn("Kitchen-ATC_A1B2C3-all.csv", files)
+
+    def test_keep_log(self):
+        s = FakeSensor()
+        self.run_dump(s, erase=False)
+        self.assertNotIn(0x36, s.sent)
+
+    def test_partial_download_never_erases(self):
+        s = FakeSensor()
+        self.run_dump(s, count=500)
+        self.assertNotIn(0x36, s.sent)
+
+    def test_incomplete_download_never_erases(self):
+        s = FakeSensor(finish=False)
+        finished, files = self.run_dump(s, timeout=1)
+        self.assertFalse(finished)
+        self.assertNotIn(0x36, s.sent)
+        self.assertTrue(any("-raw-" in f for f in files), "what arrived is still saved")
+
+    def test_old_option_still_accepted(self):
+        import argparse
+        import io
+        import contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit):  # --help exits; parsing --delete-after-dump must not fail first
+                sys.argv = ["x", "--delete-after-dump", "--help"]
+                T.main()
+
+
 class FileNames(unittest.TestCase):
     def test_device_label(self):
         self.assertEqual(T.device_label({"name": "ATC_A1B2C3", "description": "Living room"}), "Living_room-ATC_A1B2C3")

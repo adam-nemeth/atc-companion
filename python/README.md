@@ -8,7 +8,7 @@ The pvvx firmware makes each sensor log a reading every few minutes into its own
 
 - **Downloads the history** of one sensor or of all your sensors in one run. It's made for running regularly, e.g. weekly by hand or from Task Scheduler / cron.
 - **Builds a growing archive.** Every download is kept as its own file and merged into one `-all.csv` per room. Each reading appears once, no matter how often it was downloaded or how much the downloads overlap. Readings shared from the [iPhone app](../README.md) are merged in too.
-- **Keeps the sensors healthy:** sets their clocks (in UTC), optionally erases their logs after a successful download, and reads or writes their settings (measurement and logging intervals, display options, calibration).
+- **Keeps the sensors healthy:** after each download it sets their clocks (in UTC) and erases their logs, so the next download starts fresh. It also reads and writes their settings (measurement and logging intervals, display options, calibration).
 - **Corrects clock drift.** The sensors' clocks run fast or slow. Before each download the tool reads the clock and moves the readings back to the right time.
 
 It talks to the sensors directly over Bluetooth: no app, no gateway, no cloud.
@@ -39,21 +39,23 @@ This writes `devices_<timestamp>.json`. Give each sensor a `description` (its ro
 ]
 ```
 
-**2. Download every sensor's history.** The clocks are set afterwards:
+**2. Download every sensor's history:**
 
 ```
 python ATC_MiThermometer_tools.py --devices devices.json --dump
 ```
 
-Each run writes `Kitchen-ATC_A1B2C3-raw-<timestamp>.csv` and updates `Kitchen-ATC_A1B2C3-all.csv`, which holds everything so far.
+Each run writes `Kitchen-ATC_A1B2C3-raw-<timestamp>.csv` and updates `Kitchen-ATC_A1B2C3-all.csv`, which holds everything so far. Then each sensor's clock is set and its log is erased.
 
-**3. Download, then erase the sensors' logs.** It asks first; `--yes` skips the question. A sensor is only erased if its download finished:
+The log is erased only when the whole log was downloaded and saved to the file first. An interrupted or partial (`--count`) download never erases anything.
+
+**3. Download, but keep the logs on the sensors:**
 
 ```
-python ATC_MiThermometer_tools.py --devices devices.json --dump --delete-after-dump
+python ATC_MiThermometer_tools.py --devices devices.json --dump --keep-log
 ```
 
-**4. One sensor, last 500 readings, Excel-friendly CSV** (semicolons, decimal commas):
+**4. One sensor, last 500 readings, Excel-friendly CSV** (semicolons, decimal commas). Only part of the log is downloaded, so nothing is erased:
 
 ```
 python ATC_MiThermometer_tools.py --dump A4:C1:38:A1:B2:C3 --out kitchen --count 500 --locale hu

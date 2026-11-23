@@ -13,7 +13,8 @@ ATC_MiThermometer custom firmware, over BLE, from the command line:
   --set-config         write a (possibly edited) config JSON file back to the device
   --set-time           set the device's clock (--time-mode is required)
   --delete-log         erase all recorded history from the device's flash
-  --delete-after-dump  (with --dump) erase history once the dump succeeds
+  --keep-log           (with --dump) keep the sensor's log; by default it's erased
+                       once the whole log is downloaded and saved
   --devices FILE       run any of the above against a whole list of devices at
                         once, loaded from a JSON file (see "Batch mode" below)
 
@@ -30,7 +31,7 @@ All commands go over one GATT characteristic:
 
 Command IDs used here (see src/cmd_parser.h CMD_ID_KEYS):
   0x35  CMD_ID_LOGGER  - read memory measures (--dump)
-  0x36  CMD_ID_CLRLOG  - delete memory measures (--delete-log / --delete-after-dump),
+  0x36  CMD_ID_CLRLOG  - delete memory measures (--delete-log, and --dump unless --keep-log),
                           requires the magic confirmation bytes 0x12 0x34 as a
                           safety check
   0x55  CMD_ID_CFG     - get/set device config (--get-config / --set-config)
@@ -55,7 +56,7 @@ stalls with no new data for that long.
 
 NOTE ON THE POST-DUMP CLOCK SYNC (--no-clock-sync): by default, once a
 --dump finishes successfully, this script also writes the current time to
-the device's clock, and, if --delete-after-dump is given, deletes the
+the device's clock, and (unless --keep-log is given) deletes the
 device's history - both reusing the SAME already-open connection rather
 than reconnecting, which is faster. Checked against the actual firmware
 source (src/ble.c: send_memo_blk()) - the history transfer is already
@@ -67,7 +68,8 @@ courtesy this script inherited from pvvx's own web tool (GraphMemo.html
 does the same thing) - since you're already connected anyway, it's a
 convenient moment to keep the clock from drifting. Pass --no-clock-sync
 to skip it; it's skipped automatically anyway if the dump was cut short
-by an idle timeout (and so is --delete-after-dump, for the same reason).
+by an idle timeout (and so is erasing, for the same reason). The download is
+always written to its CSV file before the sensor is erased.
 
 NOTE ON CLOCK DRIFT (--no-drift-correction): a sensor's clock can gain or
 lose time steadily (how much, and whether at all, is still being measured
@@ -1025,7 +1027,10 @@ async def dump(address: str, out_prefix: str, requested_count: int, timeout: flo
                 f"writing the {len(samples)} sample(s) received so far. (This only "
                 "fires when the sensor goes quiet, not from the transfer's total "
                 "length - raise --timeout if the sensor is just slow to respond.)")
-        else:
+        # Save the download to disk BEFORE anything else happens on the sensor, so erasing it
+        # (the default) can never lose readings that didn't make it into a file.
+        out_path, saved = _save_dump(samples, address, out_prefix, locale, time_mode, drift_corr, clk)
+        if finished:
             if sync_time:
                 # Not required to complete the transfer (see NOTE ON THE POST-DUMP
                 # CLOCK SYNC in this file's docstring) - purely a courtesy clock
@@ -1044,12 +1049,18 @@ async def dump(address: str, out_prefix: str, requested_count: int, timeout: flo
                 except Exception as e:
                     log(f"(non-fatal) failed to sync device clock after dump: {e}")
 
-            if delete_after:
+            if delete_after and cnt != 0xFFFF:
+                log(f"Not erasing the sensor: only the last {cnt} samples were downloaded "
+                    "(erasing would lose the older ones). Download all to erase.")
+            elif delete_after and saved != len(samples):
+                log("Not erasing the sensor: the download file couldn't be confirmed on disk.")
+            elif delete_after:
                 # Deliberately reuse this same still-open connection instead of
                 # calling delete_log() (which would reconnect from scratch) -
                 # we're already connected and notifying, so this is just one
                 # more write+wait on the link we already have, which is faster.
-                log("Dump finished successfully; deleting device history (--delete-after-dump)...")
+                log(f"Saved all {saved} samples to {out_path}; erasing the sensor's history "
+                    "(--keep-log to keep it)...")
                 await client.write_gatt_char(CHAR_UUID, bytes([0x36, 0x12, 0x34]))
                 activity.touch()
                 if await wait_idle(delete_done, activity, timeout):
@@ -1062,12 +1073,22 @@ async def dump(address: str, out_prefix: str, requested_count: int, timeout: flo
         await client.stop_notify(CHAR_UUID)
 
     if delete_after and not finished:
-        log("Dump did not finish cleanly (idle timeout) - skipping "
-            "--delete-after-dump for safety. Re-run --dump to confirm you "
-            "have everything before deleting.")
+        log("Dump did not finish cleanly (idle timeout) - the sensor was NOT erased. "
+            "Re-run --dump to get everything.")
 
+    prefix = out_prefix[:-4] if out_prefix.lower().endswith(".csv") else out_prefix
+    if merge_levels:
+        _merge_and_report(prefix, locale, merge_tz, merge_levels)
+    return finished
+
+
+def _save_dump(samples, address, out_prefix, locale, time_mode, drift_corr, clk):
+    """Drift-corrects the downloaded samples and writes them to '<prefix>-raw-<stamp>.csv'.
+    Returns (path, number of rows read back from the file) - the read-back is what allows
+    the sensor to be erased afterwards."""
     # Log order (needed to see clock sets, since a clock set back makes times overlap): by record
     # number, in whichever direction makes the times increase.
+    samples = list(samples)
     samples.sort(key=lambda s: s[4])
     if sum((b[0] > a[0]) - (b[0] < a[0]) for a, b in zip(samples, samples[1:])) < 0:
         samples.reverse()
@@ -1096,9 +1117,17 @@ async def dump(address: str, out_prefix: str, requested_count: int, timeout: flo
     import_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     prefix = out_prefix[:-4] if out_prefix.lower().endswith(".csv") else out_prefix
     out_path = Path(f"{prefix}-raw-{import_stamp}.csv")
-    write_csv(out_path, rows, locale)
-    log(f"Wrote {len(rows)} samples to {out_path}")
+    try:
+        write_csv(out_path, rows, locale)
+        saved = len(read_csv_file(out_path)[0])
+    except OSError as e:
+        log(f"Couldn't write {out_path}: {e}")
+        return out_path, 0
+    log(f"Wrote {saved} samples to {out_path}")
+    return out_path, saved
 
+
+def _merge_and_report(prefix, locale, merge_tz, merge_levels):
     if merge_levels:
         written, locales_seen, file_count = merge_history(prefix, locale, merge_tz, merge_levels)
         locale_note = f" (source locales seen: {', '.join(sorted(locales_seen))})" \
@@ -1118,8 +1147,6 @@ async def dump(address: str, out_prefix: str, requested_count: int, timeout: flo
             years = [p.stem.rsplit("-yearly-", 1)[1] for p, _ in written["yearly"]]
             log(f"Wrote {len(written['yearly'])} yearly file(s) ({years[0]}..{years[-1]}) "
                 f"next to {prefix}-yearly-*.csv{locale_note}")
-
-    return finished
 
 
 async def get_config(address: str, out_path: str, timeout: float = DEFAULT_TIMEOUT):
@@ -1366,61 +1393,47 @@ def strip_suffix(path: str, suffix: str) -> str:
 
 EXAMPLES = """
 examples:
-  --time-mode defaults to utc for --dump and --set-time. --scan has no batch
-  form - it's how you discover devices to build a devices.json in the
-  first place.
+  A download sets the sensor's clock (UTC) and then erases its log - but only
+  after the whole log was downloaded and saved to a file. --keep-log keeps the
+  log, --no-clock-sync leaves the clock alone. --scan has no batch form: it's
+  how you build a devices.json in the first place.
 
-  --- single-device examples ---
-    python ATC_MiThermometer_tools.py --scan
-    python ATC_MiThermometer_tools.py --scan --timeout 90
-    python ATC_MiThermometer_tools.py --scan --save-devices
-        -> writes devices_<timestamp>.json for use with --devices below
+  --- batch mode (--devices devices.json): every sensor in the list ---
+    python ATC_MiThermometer_tools.py --devices devices.json --dump
+        -> <Description>-<name>-raw-<timestamp>.csv per download, merged into
+           <Description>-<name>-all.csv; then clock set and log erased
+    python ATC_MiThermometer_tools.py --devices devices.json --dump --keep-log
+        -> same, but the sensors keep their logs
+    python ATC_MiThermometer_tools.py --devices devices.json --dump --count 500
+        -> only the last 500 readings (a partial download never erases)
+    python ATC_MiThermometer_tools.py --devices devices.json --dump --locale hu
+        -> Excel-friendly CSV: semicolons and decimal commas
+    python ATC_MiThermometer_tools.py --devices devices.json --dump --merge-levels all,daily,monthly
+        -> also <Description>-<name>-daily-<YYYYMMDD>.csv and -monthly-<YYYYMM>.csv
+    python ATC_MiThermometer_tools.py --devices devices.json --dump --merge-tz Europe/Berlin
+        -> daily/monthly files cut at that city's midnight (the times stay UTC)
+    python ATC_MiThermometer_tools.py --devices devices.json --dump --out history
+        -> same, with a prefix: history-<Description>-<name>-...
 
-    python ATC_MiThermometer_tools.py --dump AA:BB:CC:DD:EE:FF --out history --time-mode local
-    python ATC_MiThermometer_tools.py --dump AA:BB:CC:DD:EE:FF --out history --time-mode utc --locale hu
-    python ATC_MiThermometer_tools.py --dump AA:BB:CC:DD:EE:FF --out history --time-mode local --count 500
-    python ATC_MiThermometer_tools.py --dump AA:BB:CC:DD:EE:FF --out history --time-mode local --delete-after-dump
-    python ATC_MiThermometer_tools.py --dump AA:BB:CC:DD:EE:FF --out history --time-mode local --no-clock-sync
-    python ATC_MiThermometer_tools.py --dump AA:BB:CC:DD:EE:FF --out history --time-mode utc --merge-tz local
-        -> device clock kept in UTC, history-all.csv shown in this computer's local time
-    python ATC_MiThermometer_tools.py --dump AA:BB:CC:DD:EE:FF --out history --time-mode local --merge-levels all,daily,monthly
-        -> also writes history-daily-<YYYYMMDD>.csv and history-monthly-<YYYYMM>.csv
-
-    python ATC_MiThermometer_tools.py --get-config AA:BB:CC:DD:EE:FF --config-out config.json
-    python ATC_MiThermometer_tools.py --set-config AA:BB:CC:DD:EE:FF --config-in config.json
-
-    python ATC_MiThermometer_tools.py --set-time AA:BB:CC:DD:EE:FF --time-mode local
-    python ATC_MiThermometer_tools.py --set-time AA:BB:CC:DD:EE:FF --time-mode utc
-
-    python ATC_MiThermometer_tools.py --delete-log AA:BB:CC:DD:EE:FF
-    python ATC_MiThermometer_tools.py --delete-log AA:BB:CC:DD:EE:FF --yes
-
-  --- batch mode examples (--devices devices.json) ---
-    python ATC_MiThermometer_tools.py --devices devices.json --dump --time-mode utc
-        -> <Description>-<name>-raw-<timestamp>.csv and <Description>-<name>-all.csv per device
-    python ATC_MiThermometer_tools.py --devices devices.json --dump --time-mode utc --locale hu
-    python ATC_MiThermometer_tools.py --devices devices.json --dump --time-mode utc --count 500
-    python ATC_MiThermometer_tools.py --devices devices.json --dump --time-mode utc --delete-after-dump
-    python ATC_MiThermometer_tools.py --devices devices.json --dump --time-mode utc --no-clock-sync
-    python ATC_MiThermometer_tools.py --devices devices.json --dump --time-mode utc --merge-tz local
-        -> device clocks kept in UTC, -all.csv files shown in this computer's local time
-    python ATC_MiThermometer_tools.py --devices devices.json --dump --time-mode utc --merge-levels all,daily,monthly
-        -> also writes <Description>-<name>-daily-<YYYYMMDD>.csv and -monthly-<YYYYMM>.csv per device
-    python ATC_MiThermometer_tools.py --devices devices.json --dump --out history --time-mode utc
-        -> same, with a prefix: history-<Description>-<name>-…
-
+    python ATC_MiThermometer_tools.py --devices devices.json --set-time
     python ATC_MiThermometer_tools.py --devices devices.json --get-config
         -> <Description>-<name>-config.json per device
-
     python ATC_MiThermometer_tools.py --devices devices.json --set-config
         -> uses <Description>-<name>-config.json per device if present (or an older
-           config_<name>_<description>.json), otherwise the shared config.json for all of them
-
-    python ATC_MiThermometer_tools.py --devices devices.json --set-time --time-mode local
-    python ATC_MiThermometer_tools.py --devices devices.json --set-time --time-mode utc
-
+           config_<name>_<description>.json), otherwise the shared config.json
     python ATC_MiThermometer_tools.py --devices devices.json --delete-log
-    python ATC_MiThermometer_tools.py --devices devices.json --delete-log --yes
+        -> erase without downloading (asks first; --yes skips the question)
+
+  --- one sensor, by its address ---
+    python ATC_MiThermometer_tools.py --scan
+    python ATC_MiThermometer_tools.py --scan --save-devices
+        -> writes devices_<timestamp>.json for use with --devices
+    python ATC_MiThermometer_tools.py --dump A4:C1:38:A1:B2:C3 --out kitchen
+    python ATC_MiThermometer_tools.py --dump A4:C1:38:A1:B2:C3 --out kitchen --keep-log
+    python ATC_MiThermometer_tools.py --get-config A4:C1:38:A1:B2:C3 --config-out config.json
+    python ATC_MiThermometer_tools.py --set-config A4:C1:38:A1:B2:C3 --config-in config.json
+    python ATC_MiThermometer_tools.py --set-time A4:C1:38:A1:B2:C3
+    python ATC_MiThermometer_tools.py --delete-log A4:C1:38:A1:B2:C3
 """
 
 
@@ -1453,10 +1466,11 @@ def main():
     parser.add_argument("--delete-log", nargs="?", const="__ALL__", default=None, metavar="ADDRESS",
                          help="MAC address of the device to erase all recorded history on; "
                               "omit the address (with --devices) to run on all of them")
-    parser.add_argument("--delete-after-dump", action="store_true",
-                         help="(--dump) Erase the device's recorded history once the dump has "
-                              "finished successfully (skipped if the dump was cut off by an idle "
-                              "timeout). Asks for confirmation unless --yes is given.")
+    parser.add_argument("--keep-log", action="store_true",
+                         help="(--dump) Don't erase the sensor's log after downloading. By default "
+                              "it's erased once the whole log has been downloaded and saved to a "
+                              "file (never after an incomplete download, or with --count).")
+    parser.add_argument("--delete-after-dump", action="store_true", help=argparse.SUPPRESS)  # now the default; kept so old scripts still run
     parser.add_argument("--no-clock-sync", action="store_true",
                          help="(--dump) Skip updating the device's clock after a successful dump. "
                               "On by default to keep the clock from drifting, matching pvvx's own "
@@ -1471,8 +1485,7 @@ def main():
                          help="MAC address of the device to set the clock on (--time-mode, "
                               "default utc); omit the address (with --devices) to run on all of them")
     parser.add_argument("--yes", "-y", action="store_true",
-                         help="Skip the interactive confirmation prompt for --delete-log/"
-                              "--delete-after-dump")
+                         help="Skip the confirmation question of --delete-log")
 
     parser.add_argument("--out", default=None,
                          help="(--dump) Output filename prefix. Each run writes "
@@ -1573,22 +1586,14 @@ def main():
     elif args.dump is not None:
         require_time_mode()
         sync_time = not args.no_clock_sync
-        if args.delete_after_dump:
-            if want_batch(args.dump):
-                pending = require_devices()
-                names = ", ".join(device_display(d) for d in pending)
-                ok = confirm_destructive(
-                    f"--delete-after-dump will PERMANENTLY erase recorded history on "
-                    f"{len(pending)} device(s) once each dump succeeds: {names}. "
-                    f"Type YES to continue: "
-                )
-            else:
-                ok = confirm_destructive(
-                    "--delete-after-dump will PERMANENTLY erase the device's recorded "
-                    "history once the dump succeeds. Type YES to continue: "
-                )
-            if not ok:
-                sys.exit(1)
+        # Erasing after a download is the default (like the iPhone app). It only happens when the
+        # whole log was downloaded and saved to a file first; --keep-log turns it off.
+        erase = not args.keep_log
+        if erase and (args.count & 0xFFFF) != 0xFFFF:
+            log(f"--count {args.count}: only part of the log is downloaded, so the sensor won't be erased.")
+            erase = False
+        if erase:
+            log("After each complete download the sensor's log is erased (use --keep-log to keep it).")
 
         if want_batch(args.dump):
             devices = require_devices()
@@ -1597,13 +1602,13 @@ def main():
                 label = sanitize_name(device_label(dev))
                 prefix = f"{args.out}-{label}" if args.out else label
                 await dump(dev["address"], prefix, args.count, args.timeout, args.locale,
-                           args.time_mode, args.delete_after_dump, sync_time, args.merge_tz,
+                           args.time_mode, erase, sync_time, args.merge_tz,
                            merge_levels, not args.no_drift_correction)
 
             asyncio.run(run_batch(devices, "dump", _one))
         else:
             asyncio.run(dump(args.dump, args.out or "atc_history", args.count, args.timeout, args.locale,
-                              args.time_mode, args.delete_after_dump, sync_time, args.merge_tz,
+                              args.time_mode, erase, sync_time, args.merge_tz,
                               merge_levels, not args.no_drift_correction))
 
     elif args.get_config is not None:
