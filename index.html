@@ -78,7 +78,14 @@ label { display: inline-flex; gap: 6px; align-items: center; }
 .legend .scalesw .seg:last-of-type { border-radius: 0 9px 9px 0; margin-left: -1px; }
 .legend .scalesw .seg[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
 .legend { flex-wrap: wrap; align-items: center; row-gap: 6px; }
-.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; margin-top: 8px; font-size: 13px; }
+/* Stats under the chart: a table - rows Latest / Lowest / Highest / Average, a column per measurement. */
+.stats { margin-top: 8px; }
+.stats table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+.stats th, .stats td { padding: 5px 6px; border-top: 1px solid var(--line); text-align: right; vertical-align: top; }
+.stats th { font-size: 12px; font-weight: 600; border-top: none; }
+.stats td:first-child, .stats th:first-child { text-align: left; color: var(--muted); padding-left: 0; font-weight: 400; }
+.stats td b { font-weight: 600; }
+.stats .when { display: block; font-size: 11px; color: var(--muted); white-space: nowrap; }
 .cfg-grid { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center; }
 .cfg-grid .info { grid-column: 1 / -1; margin-top: -6px; }
 details summary { cursor: pointer; font-weight: 600; }
@@ -510,7 +517,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 76;
+const APP_VERSION = 77;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -2553,30 +2560,29 @@ function drawChart() {
       note.classList.remove("hidden");
     } else note.classList.add("hidden");
   }
-  if (!data.length) return;
-  if (bat) {  // battery view: stats of the voltage (data[i][2] = volts here)
-    let bmn = data[0], bmx = data[0], bs = 0;
-    for (const s of data) { if (s[2] < bmn[2]) bmn = s; if (s[2] > bmx[2]) bmx = s; bs += s[2]; }
-    const lastB = data[data.length - 1];
-    $("stats").innerHTML = [
-      ["Latest", `${lastB[2].toFixed(3)} V`],
-      ["Lowest", `${bmn[2].toFixed(3)} V <span class=muted>${localStr(bmn[0])}</span>`],
-      ["Highest", `${bmx[2].toFixed(3)} V <span class=muted>${localStr(bmx[0])}</span>`],
-      ["Average", `${(bs / data.length).toFixed(3)} V`],
-    ].map(([k, v]) => `<div><div class="muted">${k}</div>${v}</div>`).join("");
-    return;
-  }
-  // stats on raw data in range
-  let mn = data[0], mx = data[0], sum = 0, hs = 0;
-  for (const s of data) { if (s[1] < mn[1]) mn = s; if (s[1] > mx[1]) mx = s; sum += s[1]; hs += s[2]; }
-  const last = data[data.length - 1];
-  $("stats").innerHTML = [
-    ["Latest", `${last[1].toFixed(2)}° · ${last[2].toFixed(1)}%`],
-    ["Min temp", `${mn[1].toFixed(2)}° <span class=muted>${localStr(mn[0])}</span>`],
-    ["Max temp", `${mx[1].toFixed(2)}° <span class=muted>${localStr(mx[0])}</span>`],
-    ["Average", `${(sum / data.length).toFixed(2)}° · ${(hs / data.length).toFixed(1)}%`],
-    ["Battery", `${(last[3] / 1000).toFixed(2)} V`],
-  ].map(([k, v]) => `<div><div class="muted">${k}</div>${v}</div>`).join("");
+  // Stats table for the visible window, from the raw readings (same in every chart view).
+  const raw = histData.slice(i0, i1);
+  if (!raw.length) return;
+  const when = t => { const d = new Date(t * 1000);
+    return `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+  // One column: [latest, lowest, highest, average], each [value text, when text].
+  const column = (get, dec, skipZero) => {
+    const rows = skipZero ? raw.filter(s => get(s) > 0) : raw;
+    if (!rows.length) return null;
+    let lo = rows[0], hi = rows[0], sum = 0;
+    for (const s of rows) { if (get(s) < get(lo)) lo = s; if (get(s) > get(hi)) hi = s; sum += get(s); }
+    const last = rows[rows.length - 1];
+    return [[get(last).toFixed(dec), when(last[0])], [get(lo).toFixed(dec), when(lo[0])], [get(hi).toFixed(dec), when(hi[0])], [(sum / rows.length).toFixed(dec), ""]];
+  };
+  const cols = [["°C", column(s => s[1], 2)], ["%", column(s => s[2], 1)], ["V", column(s => s[3] / 1000, 3, true)]].filter(c => c[1]);
+  const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+  const head = `<tr><th></th>${cols.map(([u]) => `<th>${u}</th>`).join("")}</tr>`;
+  // The latest reading's time is the same for every column, so it's shown once, under "Latest".
+  const latestWhen = when(raw[raw.length - 1][0]);
+  const body = ["Latest", "Lowest", "Highest", "Average"].map((label, r) =>
+    `<tr><td>${label}${r === 0 ? `<span class="when">${esc(latestWhen)}</span>` : ""}</td>${cols.map(([, c]) =>
+      `<td><b>${esc(c[r][0])}</b>${r > 0 && c[r][1] ? `<span class="when">${esc(c[r][1])}</span>` : ""}</td>`).join("")}</tr>`).join("");
+  $("stats").innerHTML = `<table>${head}${body}</table>`;
 }
 // Time marker + reading under the chart, at the point nearest to a screen x position.
 function showReadoutAt(clientX) {
