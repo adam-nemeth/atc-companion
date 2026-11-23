@@ -516,7 +516,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 78;
+const APP_VERSION = 79;
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -2230,6 +2230,30 @@ function measureText11() {
     return measureCtx.measureText(s).width;
   };
 }
+// ===== Daylight-saving changes (phone's time zone) =====
+// The chart's x axis is real time, so local clock labels are uneven on change days and, in autumn, an
+// hour of local times happens twice. Changes are marked on the chart, and readout times near a
+// change say "summer time" / "winter time" so the two 02:30s can be told apart.
+const utcOffsetMin = t => -new Date(t * 1000).getTimezoneOffset();
+// Changes between a and b (UTC seconds): [{ t, delta (minutes, + = clocks forward) }].
+function dstChanges(a, b) {
+  const out = [], step = 6 * 3600;
+  for (let s = a; s < b; s += step) {
+    const e = Math.min(b, s + step), o1 = utcOffsetMin(s), o2 = utcOffsetMin(e);
+    if (o1 === o2) continue;
+    let lo = s, hi = e;
+    while (hi - lo > 60) { const m = Math.floor((lo + hi) / 2); if (utcOffsetMin(m) === o1) lo = m; else hi = m; }
+    out.push({ t: hi, delta: o2 - o1 });
+  }
+  return out;
+}
+// Local time as text; within 3 hours of a change, also which clock it is.
+function localStrZ(t) {
+  const s = localStr(t), before = utcOffsetMin(t - 3 * 3600), after = utcOffsetMin(t + 3 * 3600);
+  if (before === after) return s;
+  const o = utcOffsetMin(t), std = Math.min(utcOffsetMin(Date.UTC(new Date(t * 1000).getFullYear(), 0, 1) / 1000), utcOffsetMin(Date.UTC(new Date(t * 1000).getFullYear(), 6, 1) / 1000));
+  return `${s} (${o > std ? "summer time" : "winter time"})`;
+}
 // Night hours for the chart shading (Settings), as [hours, minutes]; default 23:00 → 07:00.
 function nightHours() {
   const parse = (s, d) => { const m = /^(\d{1,2}):(\d{2})$/.exec(s || ""); return m ? [Math.min(23, +m[1]), Math.min(59, +m[2])] : d; };
@@ -2494,6 +2518,14 @@ function drawChart() {
       prevKey = k2;
     }
   }
+  // Daylight-saving changes in view: a dotted line, labelled while the view is short enough to have room.
+  for (const c of dstChanges(t0, t1)) {
+    const xx = x(c.t), h = Math.abs(c.delta) / 60, nearRight = xx > L + pw - 100;
+    el("line", { x1: xx, x2: xx, y1: T, y2: T + ph, stroke: col("--warn"), "stroke-width": 1.2, "stroke-dasharray": "2 3" });
+    if (span <= 60 * 86400)
+      el("text", { x: xx + (nearRight ? -4 : 4), y: T + 11, "text-anchor": nearRight ? "end" : "start", "font-size": 10, "font-weight": 600, fill: col("--warn") },
+        `clocks ${c.delta < 0 ? "back" : "forward"} ${h} h`);
+  }
   // break lines on gaps > 6x median spacing
   const gaps = []; for (let i = 1; i < pts.length; i++) gaps.push(pts[i][0] - pts[i - 1][0]);
   const med = gaps.slice().sort((a, b) => a - b)[gaps.length >> 1] || 1;
@@ -2563,7 +2595,8 @@ function drawChart() {
   const raw = histData.slice(i0, i1);
   if (!raw.length) return;
   const when = t => { const d = new Date(t * 1000);
-    return `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+    const z = localStrZ(t).match(/\((summer|winter) time\)$/);
+    return `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}${z ? ` (${z[1]})` : ""}`; };
   // One column: [latest, lowest, highest, average], each [value text, when text].
   const column = (get, dec, skipZero) => {
     const rows = skipZero ? raw.filter(s => get(s) > 0) : raw;
@@ -2597,7 +2630,7 @@ function showReadoutAt(clientX) {
     cursor.setAttribute("x1", cx); cursor.setAttribute("x2", cx); cursor.setAttribute("visibility", "visible");
     const f = (v, d) => v.toFixed(d);
     const dh = plotted.decH, u = plotted.unitH;
-    $("readout").textContent = `${localStr(c.start)} – ${localStr(c.end)}` +
+    $("readout").textContent = `${localStrZ(c.start)} – ${localStrZ(c.end)}` +
       (plotted.showT ? `  ·  °C open ${f(c.t[0], 1)} high ${f(c.t[1], 1)} low ${f(c.t[2], 1)} close ${f(c.t[3], 1)}` : "") +
       (plotted.showH ? `  ·  ${u} open ${f(c.h[0], dh)} high ${f(c.h[1], dh)} low ${f(c.h[2], dh)} close ${f(c.h[3], dh)}` : "") + `  ·  ${c.n} readings`;
     drawMarkerLabels(cx, c.t[3], c.h[3]);
@@ -2609,9 +2642,9 @@ function showReadoutAt(clientX) {
   const u = plotted.unitH, dh = plotted.decH, dh1 = plotted.decH1;
   $("readout").textContent = n > 1
     // Averaged point: say so, with its time span, the range of readings behind it, and how many.
-    ? `${localStr(tA)} – ${localStr(tB)}` + (plotted.showT ? `  ·  avg ${tm.toFixed(1)} °C (${tLo.toFixed(1)}–${tHi.toFixed(1)})` : "") +
+    ? `${localStrZ(tA)} – ${localStrZ(tB)}` + (plotted.showT ? `  ·  avg ${tm.toFixed(1)} °C (${tLo.toFixed(1)}–${tHi.toFixed(1)})` : "") +
       (plotted.showH ? `  ·  avg ${hm.toFixed(dh)} ${u} (${hLo.toFixed(dh)}–${hHi.toFixed(dh)})` : "") + `  ·  ${n} readings`
-    : `${localStr(t)}` + (plotted.showT ? `  ·  ${tm.toFixed(2)} °C` : "") + (plotted.showH ? `  ·  ${hm.toFixed(dh1)} ${u}` : "");
+    : `${localStrZ(t)}` + (plotted.showT ? `  ·  ${tm.toFixed(2)} °C` : "") + (plotted.showH ? `  ·  ${hm.toFixed(dh1)} ${u}` : "");
   drawMarkerLabels(x(best[0]), tm, hm);
 }
 // Small value tags with a dot right on each line where the marker crosses it ("21.3°", "56%").
