@@ -27,10 +27,10 @@ python ATC_MiThermometer_tools.py --help
 **1. Find your sensors** and save them to a list:
 
 ```
-python ATC_MiThermometer_tools.py --scan --save-devices
+python ATC_MiThermometer_tools.py --scan --save-sensors
 ```
 
-This writes `devices_<timestamp>.json`. Give each sensor a `description` (e.g. where it is) and rename the file to `devices.json`:
+This writes `sensors_<timestamp>.json`. Give each sensor a `description` (e.g. where it is) and rename the file to `sensors.json`:
 
 ```json
 [
@@ -42,7 +42,7 @@ This writes `devices_<timestamp>.json`. Give each sensor a `description` (e.g. w
 **2. Download every sensor's history:**
 
 ```
-python ATC_MiThermometer_tools.py --devices devices.json --dump
+python ATC_MiThermometer_tools.py --sensors sensors.json --dump
 ```
 
 Each run writes `Kitchen-ATC_A1B2C3-raw-<timestamp>.csv` and updates `Kitchen-ATC_A1B2C3-all.csv`, which holds everything so far. Then each sensor's clock is set and its log is erased.
@@ -52,7 +52,7 @@ The log is erased only when the whole log was downloaded and saved to the file f
 **3. Download, but keep the logs on the sensors:**
 
 ```
-python ATC_MiThermometer_tools.py --devices devices.json --dump --keep-log
+python ATC_MiThermometer_tools.py --sensors sensors.json --dump --keep-log
 ```
 
 **4. One sensor, last 500 readings, Excel-friendly CSV** (semicolons, decimal commas). Only part of the log is downloaded, so nothing is erased:
@@ -64,9 +64,9 @@ python ATC_MiThermometer_tools.py --dump A4:C1:38:A1:B2:C3 --out kitchen --count
 **5. Clocks and settings:**
 
 ```
-python ATC_MiThermometer_tools.py --devices devices.json --set-time
-python ATC_MiThermometer_tools.py --devices devices.json --get-config
-python ATC_MiThermometer_tools.py --devices devices.json --set-config
+python ATC_MiThermometer_tools.py --sensors sensors.json --set-time
+python ATC_MiThermometer_tools.py --sensors sensors.json --get-config
+python ATC_MiThermometer_tools.py --sensors sensors.json --set-config
 ```
 
 `--get-config` saves `Kitchen-ATC_A1B2C3-config.json` per sensor. Edit it and `--set-config` writes it back.
@@ -74,7 +74,7 @@ python ATC_MiThermometer_tools.py --devices devices.json --set-config
 **6. Daily and monthly files** next to the merged one:
 
 ```
-python ATC_MiThermometer_tools.py --devices devices.json --dump --merge-levels all,daily,monthly
+python ATC_MiThermometer_tools.py --sensors sensors.json --dump --merge-levels all,daily,monthly
 ```
 
 ## The CSV files

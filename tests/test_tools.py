@@ -190,6 +190,19 @@ class DownloadAndErase(unittest.TestCase):
         self.assertTrue(any("-raw-" in f for f in files), "what arrived is still saved")
 
 
+class SensorList(unittest.TestCase):
+    def test_reads_list_and_both_wrapped_forms(self):
+        entry = {"name": "ATC_A1B2C3", "description": "Kitchen", "address": "A4:C1:38:A1:B2:C3"}
+        with tempfile.TemporaryDirectory() as d:
+            for content in ([entry], {"sensors": [entry]}, {"devices": [entry]}):  # last: older files
+                p = Path(d) / "sensors.json"
+                p.write_text(json.dumps(content))
+                self.assertEqual(T.load_sensors(str(p)), [entry])
+            p.write_text(json.dumps({"something": []}))
+            with self.assertRaises(ValueError):
+                T.load_sensors(str(p))
+
+
 class FileNames(unittest.TestCase):
     def test_device_label(self):
         self.assertEqual(T.device_label({"name": "ATC_A1B2C3", "description": "Living room"}), "Living_room-ATC_A1B2C3")

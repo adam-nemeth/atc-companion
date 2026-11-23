@@ -5,7 +5,7 @@ Tools for a Xiaomi LYWSD03MMC / MHO-C401 / similar sensor running pvvx's
 ATC_MiThermometer custom firmware, over BLE, from the command line:
 
   --scan              find nearby ATC-firmware sensors, live as they're found
-                       (optionally --save-devices; press Enter to stop early)
+                       (optionally --save-sensors; press Enter to stop early)
   --dump               download recorded temperature/humidity history to CSV
                        (raw per-import files, plus regenerated aggregate
                        file(s) - see --merge-levels)
@@ -15,7 +15,7 @@ ATC_MiThermometer custom firmware, over BLE, from the command line:
   --delete-log         erase all recorded history from the sensor's flash
   --keep-log           (with --dump) keep the sensor's log; by default it's erased
                        once the whole log is downloaded and saved
-  --devices FILE       run any of the above against a whole list of sensors at
+  --sensors FILE       run any of the above against a whole list of sensors at
                         once, loaded from a JSON file (see "Batch mode" below)
 
 Run with --help for a full list of examples covering every action, both
@@ -147,7 +147,7 @@ Requirements:
     pip install bleak
 
 Batch mode (multiple sensors):
-  Put your sensors in a JSON file (--scan --save-devices writes exactly
+  Put your sensors in a JSON file (--scan --save-sensors writes exactly
   this format, with "description" left blank for you to fill in, e.g. where
   the sensor is):
 
@@ -160,7 +160,7 @@ Batch mode (multiple sensors):
   "name" is optional (falls back to the address if missing). "description"
   is optional too; when set, it comes first in every output filename,
   joined to "name" with a hyphen - when it's empty, just "name" is used on
-  its own (see device_label() below). {"devices": [...]} with the same list
+  its own (see device_label() below). {"sensors": [...]} with the same list
   also works.
 
 File names (batch mode), description first so files sort by description:
@@ -172,7 +172,7 @@ File names (batch mode), description first so files sort by description:
   merging, and per-sensor config_<name>_<description>.json files are still
   found by --set-config; rename_to_new_names.py converts old files.
 
-  Then pass --devices and use any action WITHOUT an address to run it
+  Then pass --sensors and use any action WITHOUT an address to run it
   against every sensor in the file, one at a time, continuing past any
   single sensor's failure and printing a summary at the end. See --help
   for a full worked example of every action in both single-sensor and
@@ -958,7 +958,7 @@ async def scan(timeout: float, save: bool = False):
 
     log(f"Found {len(found_list)} sensor(s) total.")
     if save:
-        save_path = f"devices_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        save_path = f"sensors_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         with open(save_path, "w") as f:
             json.dump(found_list, f, indent=2)
         log(f"Wrote {len(found_list)} sensor(s) to {save_path} - fill in each "
@@ -1297,32 +1297,32 @@ async def delete_log(address: str, timeout: float = DEFAULT_TIMEOUT):
 # Batch (multiple sensors from a JSON file)
 # ==========================================================================
 
-def load_devices(path: str):
-    """The sensor list (devices.json) is either a JSON list of
+def load_sensors(path: str):
+    """The sensor list (sensors.json) is either a JSON list of
     {"name": ..., "description": ..., "address": ...} objects, or
-    {"devices": [...]} with the same shape. 'name' is optional (falls back
+    {"sensors": [...]} with the same shape. 'name' is optional (falls back
     to the address with ':' stripped). 'description' is optional - e.g.
     where the sensor is - and gets folded into output filenames
     alongside 'name' (see device_label())."""
     with open(path, "r") as f:
         data = json.load(f)
-    if isinstance(data, dict) and "devices" in data:
-        data = data["devices"]
+    if isinstance(data, dict):  # {"sensors": [...]} (or {"devices": [...]} from older versions)
+        data = data.get("sensors", data.get("devices"))
     if not isinstance(data, list):
         raise ValueError(
             "The sensor list must be a JSON list of {\"name\": ..., \"description\": ..., "
-            "\"address\": ...} objects, or {\"devices\": [...]} with the same shape."
+            "\"address\": ...} objects, or {\"sensors\": [...]} with the same shape."
         )
-    devices = []
+    sensors = []
     for i, d in enumerate(data):
         if "address" not in d:
             raise ValueError(f"Sensor #{i + 1} in {path} is missing 'address'")
         name = d.get("name") or d["address"].replace(":", "")
         description = d.get("description") or ""
-        devices.append({"name": name, "description": description, "address": d["address"]})
-    if not devices:
+        sensors.append({"name": name, "description": description, "address": d["address"]})
+    if not sensors:
         raise ValueError(f"No sensors found in {path}")
-    return devices
+    return sensors
 
 
 def device_label(dev: dict) -> str:
@@ -1361,13 +1361,13 @@ def sanitize_name(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_") or "sensor"
 
 
-async def run_batch(devices, label, coro_fn):
+async def run_batch(sensors, label, coro_fn):
     """Run coro_fn(device_dict) for every sensor, sequentially (BLE adapters
     generally only handle one connection at a time), continuing past
     per-sensor failures, then print a summary."""
     results = []
-    for i, dev in enumerate(devices, 1):
-        log(f"=== [{i}/{len(devices)}] {device_display(dev)} - {label} ===")
+    for i, dev in enumerate(sensors, 1):
+        log(f"=== [{i}/{len(sensors)}] {device_display(dev)} - {label} ===")
         try:
             await coro_fn(dev)
             results.append((device_display(dev), "OK"))
@@ -1396,38 +1396,38 @@ examples:
   A download sets the sensor's clock (UTC) and then erases its log - but only
   after the whole log was downloaded and saved to a file. --keep-log keeps the
   log, --no-clock-sync leaves the clock alone. --scan has no batch form: it's
-  how you build a devices.json in the first place.
+  how you build a sensors.json in the first place.
 
-  --- batch mode (--devices devices.json): every sensor in the list ---
-    python ATC_MiThermometer_tools.py --devices devices.json --dump
+  --- batch mode (--sensors sensors.json): every sensor in the list ---
+    python ATC_MiThermometer_tools.py --sensors sensors.json --dump
         -> <Description>-<name>-raw-<timestamp>.csv per download, merged into
            <Description>-<name>-all.csv; then clock set and log erased
-    python ATC_MiThermometer_tools.py --devices devices.json --dump --keep-log
+    python ATC_MiThermometer_tools.py --sensors sensors.json --dump --keep-log
         -> same, but the sensors keep their logs
-    python ATC_MiThermometer_tools.py --devices devices.json --dump --count 500
+    python ATC_MiThermometer_tools.py --sensors sensors.json --dump --count 500
         -> only the last 500 readings (a partial download never erases)
-    python ATC_MiThermometer_tools.py --devices devices.json --dump --locale hu
+    python ATC_MiThermometer_tools.py --sensors sensors.json --dump --locale hu
         -> Excel-friendly CSV: semicolons and decimal commas
-    python ATC_MiThermometer_tools.py --devices devices.json --dump --merge-levels all,daily,monthly
+    python ATC_MiThermometer_tools.py --sensors sensors.json --dump --merge-levels all,daily,monthly
         -> also <Description>-<name>-daily-<YYYYMMDD>.csv and -monthly-<YYYYMM>.csv
-    python ATC_MiThermometer_tools.py --devices devices.json --dump --merge-tz Europe/Berlin
+    python ATC_MiThermometer_tools.py --sensors sensors.json --dump --merge-tz Europe/Berlin
         -> daily/monthly files cut at that city's midnight (the times stay UTC)
-    python ATC_MiThermometer_tools.py --devices devices.json --dump --out history
+    python ATC_MiThermometer_tools.py --sensors sensors.json --dump --out history
         -> same, with a prefix: history-<Description>-<name>-...
 
-    python ATC_MiThermometer_tools.py --devices devices.json --set-time
-    python ATC_MiThermometer_tools.py --devices devices.json --get-config
+    python ATC_MiThermometer_tools.py --sensors sensors.json --set-time
+    python ATC_MiThermometer_tools.py --sensors sensors.json --get-config
         -> <Description>-<name>-config.json per sensor
-    python ATC_MiThermometer_tools.py --devices devices.json --set-config
+    python ATC_MiThermometer_tools.py --sensors sensors.json --set-config
         -> uses <Description>-<name>-config.json per sensor if present (or an older
            config_<name>_<description>.json), otherwise the shared config.json
-    python ATC_MiThermometer_tools.py --devices devices.json --delete-log
+    python ATC_MiThermometer_tools.py --sensors sensors.json --delete-log
         -> erase without downloading (asks first; --yes skips the question)
 
   --- one sensor, by its address ---
     python ATC_MiThermometer_tools.py --scan
-    python ATC_MiThermometer_tools.py --scan --save-devices
-        -> writes devices_<timestamp>.json for use with --devices
+    python ATC_MiThermometer_tools.py --scan --save-sensors
+        -> writes sensors_<timestamp>.json for use with --sensors
     python ATC_MiThermometer_tools.py --dump A4:C1:38:A1:B2:C3 --out kitchen
     python ATC_MiThermometer_tools.py --dump A4:C1:38:A1:B2:C3 --out kitchen --keep-log
     python ATC_MiThermometer_tools.py --get-config A4:C1:38:A1:B2:C3 --config-out config.json
@@ -1446,26 +1446,26 @@ def main():
     parser.add_argument("--scan", action="store_true",
                          help="Scan for nearby ATC-firmware sensors, logging each one as it's "
                               "found; press Enter at any time to stop early")
-    parser.add_argument("--save-devices", action="store_true",
+    parser.add_argument("--save-sensors", action="store_true",
                          help="(--scan) Save the found sensors to a timestamped "
-                              "devices_<timestamp>.json, in the JSON format --devices expects")
-    parser.add_argument("--devices", metavar="FILE",
+                              "sensors_<timestamp>.json, in the JSON format --sensors expects")
+    parser.add_argument("--sensors", metavar="FILE",
                          help="JSON file listing multiple sensors ([{\"name\":..,\"description\":.."
-                              ",\"address\":..}, ...] or {\"devices\": [...]}). When given, use "
+                              ",\"address\":..}, ...] or {\"sensors\": [...]}). When given, use "
                               "--dump/--get-config/--set-config/--set-time/--delete-log WITHOUT an "
                               "address to run that action against every sensor in the file.")
     parser.add_argument("--dump", nargs="?", const="__ALL__", default=None, metavar="ADDRESS",
                          help="MAC address of the sensor to read history from "
-                              "(omit the address, and use with --devices, to run on all of them)")
+                              "(omit the address, and use with --sensors, to run on all of them)")
     parser.add_argument("--get-config", nargs="?", const="__ALL__", default=None, metavar="ADDRESS",
                          help="MAC address of the sensor to read config from (use with --config-out); "
-                              "omit the address (with --devices) to run on all of them")
+                              "omit the address (with --sensors) to run on all of them")
     parser.add_argument("--set-config", nargs="?", const="__ALL__", default=None, metavar="ADDRESS",
                          help="MAC address of the sensor to write config to (use with --config-in); "
-                              "omit the address (with --devices) to run on all of them")
+                              "omit the address (with --sensors) to run on all of them")
     parser.add_argument("--delete-log", nargs="?", const="__ALL__", default=None, metavar="ADDRESS",
                          help="MAC address of the sensor to erase all recorded history on; "
-                              "omit the address (with --devices) to run on all of them")
+                              "omit the address (with --sensors) to run on all of them")
     parser.add_argument("--keep-log", action="store_true",
                          help="(--dump) Don't erase the sensor's log after downloading. By default "
                               "it's erased once the whole log has been downloaded and saved to a "
@@ -1482,7 +1482,7 @@ def main():
                               "times stay in the 'sensor_timestamp' column.")
     parser.add_argument("--set-time", nargs="?", const="__ALL__", default=None, metavar="ADDRESS",
                          help="MAC address of the sensor to set the clock on (--time-mode, "
-                              "default utc); omit the address (with --devices) to run on all of them")
+                              "default utc); omit the address (with --sensors) to run on all of them")
     parser.add_argument("--yes", "-y", action="store_true",
                          help="Skip the confirmation question of --delete-log")
 
@@ -1491,15 +1491,15 @@ def main():
                               "'<prefix>-raw-<import-timestamp>.csv' so raw files are never "
                               "overwritten, and (re)generates aggregate file(s) from every raw file "
                               "on disk - see --merge-levels. Single sensor: default 'atc_history'. "
-                              "Batch mode (--devices): files are named '<Description>-<name>-…' by "
+                              "Batch mode (--sensors): files are named '<Description>-<name>-…' by "
                               "default; a given --out is put in front ('<out>-<Description>-<name>-…').")
     parser.add_argument("--config-out", default="config.json",
                          help="(--get-config) Path to write the config JSON to (default: config.json). "
-                              "In batch mode (--devices), each sensor gets '<Description>-<name>-config.json' "
+                              "In batch mode (--sensors), each sensor gets '<Description>-<name>-config.json' "
                               "(or '<stem>-<Description>-<name>.json' if you pass another --config-out).")
     parser.add_argument("--config-in", default="config.json",
                          help="(--set-config) Path to read the config JSON from (default: config.json). "
-                              "In batch mode (--devices), a per-sensor '<Description>-<name>-config.json' "
+                              "In batch mode (--sensors), a per-sensor '<Description>-<name>-config.json' "
                               "(or an older config_<name>_<description>.json) is used automatically if it "
                               "exists; otherwise this shared file is used for every sensor.")
 
@@ -1560,11 +1560,11 @@ def main():
     def want_batch(value):
         return value == "__ALL__"
 
-    def require_devices():
-        if not args.devices:
-            log("--devices FILE is required when using this action without an address.")
+    def require_sensors():
+        if not args.sensors:
+            log("--sensors FILE is required when using this action without an address.")
             sys.exit(1)
-        return load_devices(args.devices)
+        return load_sensors(args.sensors)
 
     def confirm_destructive(prompt: str) -> bool:
         if args.yes:
@@ -1576,7 +1576,7 @@ def main():
         return True
 
     if args.scan:
-        asyncio.run(scan(args.timeout, args.save_devices))
+        asyncio.run(scan(args.timeout, args.save_sensors))
 
     elif args.dump is not None:
         sync_time = not args.no_clock_sync
@@ -1590,7 +1590,7 @@ def main():
             log("After each complete download the sensor's log is erased (use --keep-log to keep it).")
 
         if want_batch(args.dump):
-            devices = require_devices()
+            sensors = require_sensors()
 
             async def _one(dev):
                 label = sanitize_name(device_label(dev))
@@ -1599,7 +1599,7 @@ def main():
                            args.time_mode, erase, sync_time, args.merge_tz,
                            merge_levels, not args.no_drift_correction)
 
-            asyncio.run(run_batch(devices, "dump", _one))
+            asyncio.run(run_batch(sensors, "dump", _one))
         else:
             asyncio.run(dump(args.dump, args.out or "atc_history", args.count, args.timeout, args.locale,
                               args.time_mode, erase, sync_time, args.merge_tz,
@@ -1607,7 +1607,7 @@ def main():
 
     elif args.get_config is not None:
         if want_batch(args.get_config):
-            devices = require_devices()
+            sensors = require_sensors()
             stem = strip_suffix(args.config_out, ".json")
 
             async def _one(dev):
@@ -1615,13 +1615,13 @@ def main():
                 out_path = f"{label}-config.json" if args.config_out == "config.json" else f"{stem}-{label}.json"
                 await get_config(dev["address"], out_path, args.timeout)
 
-            asyncio.run(run_batch(devices, "get-config", _one))
+            asyncio.run(run_batch(sensors, "get-config", _one))
         else:
             asyncio.run(get_config(args.get_config, args.config_out, args.timeout))
 
     elif args.set_config is not None:
         if want_batch(args.set_config):
-            devices = require_devices()
+            sensors = require_sensors()
             stem = strip_suffix(args.config_in, ".json")
 
             async def _one(dev):
@@ -1634,27 +1634,27 @@ def main():
                 log(f"Using config file: {path}")
                 await set_config(dev["address"], path, args.timeout)
 
-            asyncio.run(run_batch(devices, "set-config", _one))
+            asyncio.run(run_batch(sensors, "set-config", _one))
         else:
             asyncio.run(set_config(args.set_config, args.config_in, args.timeout))
 
     elif args.set_time is not None:
         if want_batch(args.set_time):
-            devices = require_devices()
+            sensors = require_sensors()
 
             async def _one(dev):
                 await set_time(dev["address"], args.timeout, args.time_mode)
 
-            asyncio.run(run_batch(devices, "set-time", _one))
+            asyncio.run(run_batch(sensors, "set-time", _one))
         else:
             asyncio.run(set_time(args.set_time, args.timeout, args.time_mode))
 
     elif args.delete_log is not None:
         if want_batch(args.delete_log):
-            devices = require_devices()
-            names = ", ".join(device_display(d) for d in devices)
+            sensors = require_sensors()
+            names = ", ".join(device_display(d) for d in sensors)
             if not confirm_destructive(
-                f"This will PERMANENTLY erase all recorded history on {len(devices)} "
+                f"This will PERMANENTLY erase all recorded history on {len(sensors)} "
                 f"sensor(s): {names}. Type YES to continue: "
             ):
                 sys.exit(1)
@@ -1662,7 +1662,7 @@ def main():
             async def _one(dev):
                 await delete_log(dev["address"], args.timeout)
 
-            asyncio.run(run_batch(devices, "delete-log", _one))
+            asyncio.run(run_batch(sensors, "delete-log", _one))
         else:
             if not confirm_destructive(
                 "This will PERMANENTLY erase all recorded history on the sensor. "

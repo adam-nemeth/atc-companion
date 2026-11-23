@@ -384,7 +384,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
   <!-- Sensor list storage -->
   <section class="card" data-tab="settings">
     <h2>Sensor list</h2>
-    <p class="muted">Your sensors and their descriptions are saved only in this browser on this phone - not in the web page. Load them from a <code>devices.json</code> (name, description, address), or let them be added as you connect.</p>
+    <p class="muted">Your sensors and their descriptions are saved only in this browser on this phone - not in the web page. Load them from a <code>sensors.json</code> (name, description, address), or let them be added as you connect.</p>
     <div class="row">
       <button id="btnSensorsImport" class="primary">Import sensors from JSON…</button>
       <button id="btnSensorsExport">Export sensors to JSON…</button>
@@ -465,7 +465,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=83"></script>
+<script src="core.js?v=84"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -516,7 +516,7 @@ function lsGet(k, d) {
 }
 function lsSet(k, v) { if (DEMO) { demoLS.set(k, v); return; } try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 
-// Sensors and their descriptions live only in this browser's storage (import a devices.json in Settings).
+// Sensors and their descriptions live only in this browser's storage (import a sensors.json in Settings).
 let rooms = lsGet("rooms", {});
 const prefs = Object.assign({ timeMode: "utc", csvLocale: "en", idleTimeout: 30, range: 168 }, lsGet("prefs", {}));
 // v10: UTC became the default (matching the Windows scripts' --time-mode utc). Older versions saved
@@ -572,7 +572,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 83;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 84;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -934,13 +934,13 @@ function renderRooms() {
 
 const batchSel = new Set(lsGet("batchSel", null) || knownNames());
 const saveSel = () => lsSet("batchSel", [...batchSel]);
-// ===== Sensor list import / export (devices.json, the same format as the Python tool) =====
+// ===== Sensor list import / export (sensors.json, the same format as the Python tool) =====
 function sensorsMsg(t) { $("sensorsMsg").textContent = t; }
 function sensorsCountText() { const n = knownNames().length; return `${n} sensor${n === 1 ? "" : "s"} saved in this browser.`; }
 async function importSensors(file) {
   let data;
   try { data = JSON.parse(await file.text()); } catch (e) { sensorsMsg(`${file.name} isn't valid JSON: ${describeErr(e)}`); return; }
-  const list = Array.isArray(data) ? data : data && Array.isArray(data.devices) ? data.devices : null;
+  const list = Array.isArray(data) ? data : data && Array.isArray(data.sensors) ? data.sensors : data && Array.isArray(data.devices) ? data.devices : null;  // "devices": older files
   if (!list) { sensorsMsg(`${file.name}: expected a list of {"name", "description", "address"} entries.`); return; }
   let added = 0, updated = 0, skipped = 0;
   for (const d of list) {
@@ -964,10 +964,10 @@ async function importSensors(file) {
 function exportSensors() {
   const list = knownNames().map(n => ({ name: n, description: rooms[n] || "", address: (known[n] && known[n].mac) || macFromName(n) || "" }));
   if (!list.length) { sensorsMsg("No sensors to save yet."); return; }
-  shareFiles([{ name: "devices.json", rows: list.length, text: JSON.stringify(list, null, 2) + "\n", type: "application/json" }], `Thermometer sensor list (${list.length})`);
+  shareFiles([{ name: "sensors.json", rows: list.length, text: JSON.stringify(list, null, 2) + "\n", type: "application/json" }], `Thermometer sensor list (${list.length})`);
 }
 function clearSensors() {
-  if (!confirm("Remove all sensors and their descriptions from this browser? Downloaded history stays. You can load them again from a devices.json.")) return;
+  if (!confirm("Remove all sensors and their descriptions from this browser? Downloaded history stays. You can load them again from a sensors.json.")) return;
   rooms = {}; known = {}; batchSel.clear();
   lsSet("rooms", rooms); saveKnown(); saveSel();
   log("Sensor list cleared");
@@ -977,7 +977,7 @@ function clearSensors() {
 function renderKnown() {
   const box = $("knownList"); box.innerHTML = "";
   if (!knownNames().length) {
-    box.innerHTML = `<p class="muted">No sensors yet. Connect to one with “Connect…”, or load your <code>devices.json</code> in the Settings tab.</p>`;
+    box.innerHTML = `<p class="muted">No sensors yet. Connect to one with “Connect…”, or load your <code>sensors.json</code> in the Settings tab.</p>`;
   }
   let ready = 0, ticked = 0;
   for (const name of knownNames()) {
