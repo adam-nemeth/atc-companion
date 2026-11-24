@@ -472,7 +472,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=88"></script>
+<script src="core.js?v=89"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -579,7 +579,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 88;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 89;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -2575,13 +2575,12 @@ function onChartPointer(ev) {
 const MIN_SPAN = 1800; // 30 minutes
 function svgX(clientX) { const svg = $("chart"), r = svg.getBoundingClientRect(); return (clientX - r.left) * (svg.viewBox.baseVal.width / r.width); }
 function fullBounds() { return { first: histData[0][0], last: histData[histData.length - 1][0] }; }
-function clampSpan(span) { const { first, last } = fullBounds(); return Math.min(Math.max(span, MIN_SPAN), Math.max(MIN_SPAN, (last - first) * 1.05)); }
-// Keep the window's width, slide it back inside the data (with a little slack at the ends).
+function clampSpan(span) { const { first, last } = fullBounds(); return Math.min(Math.max(span, MIN_SPAN), Math.max(MIN_SPAN, last - first)); }
+// Keep the window's width, slide it back inside the data. A window that already reaches past the data
+// (Today runs to the current time) keeps that edge, so a drag from there doesn't start with a jump.
 function clampShift(a, span) {
-  const { first, last } = fullBounds(), pad = span * 0.03;
-  if (a + span > last + pad) a = last + pad - span;
-  if (a < first - pad) a = first - pad;
-  return { a, b: a + span };
+  const { first, last } = fullBounds();
+  return clampWindow(a, span, view ? Math.min(first, view.a) : first, view ? Math.max(last, view.b) : last);
 }
 function updateZoomUi() {
   const zr = $("btnZoomReset"), zi = $("zoomInfo"); if (!zr) return;

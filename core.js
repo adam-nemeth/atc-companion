@@ -294,6 +294,14 @@ function downloadLabel({ count, sync, erase }) {
   return parts.join(", ") + last + (doErase ? "…" : "");
 }
 
+// Slide a window of `span` seconds starting at `a` back inside [lo, hi]. A window as wide as the data
+// (the "All" range) can't move at all.
+function clampWindow(a, span, lo, hi) {
+  if (a + span > hi) a = hi - span;
+  if (a < lo) a = lo;
+  return { a, b: a + span };
+}
+
 // ===== Chart averaging =====
 // Long ranges are averaged into slices of time. Slices are fixed to the clock (multiples of their
 // width), not to the chart's left edge: otherwise every bit of dragging would regroup the readings
@@ -335,5 +343,5 @@ if (typeof module !== "undefined") module.exports = {
   DRIFT_TOL, DRIFT_MAX_PER_DAY, driftCorrect, fmtDur, LOG_CAPACITY, logIntervalFromCfg, fmtDays,
   decodeCfg, FLG_BITS, FLG2_BITS, byteFromBits, encodeCfg, fmtNum, toCsv, parseCsv, histId,
   timeTicks, utcOffsetMin, dstChanges, sampleKey, withAtcPrefix, downloadLabel,
-  sliceWidth, averageSlices,
+  sliceWidth, averageSlices, clampWindow,
 };

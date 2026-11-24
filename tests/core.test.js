@@ -161,6 +161,15 @@ test("chart averaging: widths and contents", () => {
     [[1500, 21, 52, 2, 20, 22, 50, 54, 1200, 1800], [2400, 30, 60, 1, 30, 30, 60, 60, 2400, 2400]]);
 });
 
+test("dragging the chart stops at the ends of the data", () => {
+  assert.deepEqual(core.clampWindow(100, 900, 100, 1000), { a: 100, b: 1000 });   // All: can't move
+  assert.deepEqual(core.clampWindow(50, 900, 100, 1000), { a: 100, b: 1000 });
+  assert.deepEqual(core.clampWindow(400, 900, 100, 1000), { a: 100, b: 1000 });
+  assert.deepEqual(core.clampWindow(500, 200, 100, 1000), { a: 500, b: 700 });
+  assert.deepEqual(core.clampWindow(950, 200, 100, 1000), { a: 800, b: 1000 });
+  assert.deepEqual(core.clampWindow(-50, 200, 100, 1000), { a: 100, b: 300 });
+});
+
 test("small helpers", () => {
   assert.equal(core.fmtOffset(3600), "+01:00");
   assert.equal(core.fmtOffset(-16200), "-04:30");
