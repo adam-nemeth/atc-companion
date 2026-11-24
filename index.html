@@ -18,8 +18,8 @@
 <meta name="twitter:card" content="summary">
 <style>
 :root {
-  --bg: #f4f5f7; --card: #ffffff; --text: #16181d; --muted: #6b7280; --line: #e3e5e9;
-  --accent: #2563eb; --accent-text: #ffffff; --temp: #e4572e; --hum: #2a7fd4; --batt: #2f8a3e;
+  --bg: #f4f5f7; --card: #ffffff; --text: #16181d; --muted: #646b79; --line: #e3e5e9;
+  --accent: #2563eb; --accent-text: #ffffff; --temp: #cb421d; --hum: #1f6fc0; --batt: #27793a;
   --ok: #15803d; --warn: #b45309; --err: #b91c1c; --input: #f9fafb;
 }
 @media (prefers-color-scheme: dark) {
@@ -44,11 +44,13 @@ h2 { font-size: 16px; margin: 0 0 10px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .row + .row { margin-top: 8px; }
 button { font: inherit; border: 1px solid var(--line); background: var(--input); color: var(--text);
-  border-radius: 9px; padding: 9px 14px; cursor: pointer; }
+  border-radius: 9px; padding: 9px 14px; min-height: 42px; cursor: pointer; }
 button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
 button.danger { color: var(--err); border-color: var(--err); background: transparent; }
 button:disabled { opacity: .45; cursor: default; }
-button.seg { padding: 6px 11px; }
+/* Small buttons (34 px), with a tap area of 44 px */
+button.seg, button.nav, button.lg, button.go { position: relative; min-height: 34px; padding: 0 11px; font-size: 14px; }
+button.seg::after, button.nav::after, button.lg::after, button.go::after { content: ""; position: absolute; inset: -6px 0; }
 button.seg.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 input, select { font: inherit; color: var(--text); background: var(--input); border: 1px solid var(--line);
   border-radius: 8px; padding: 7px 9px; }
@@ -56,9 +58,12 @@ input[type=number] { width: 90px; }
 input[type=checkbox] { width: 18px; height: 18px; vertical-align: middle; }
 label { display: inline-flex; gap: 6px; align-items: center; }
 /* Label with a menu: the menu moves below its label if both don't fit on one line */
+label:has(> input[type=checkbox]) { position: relative; }
+.row > label:has(> input[type=checkbox])::after, .drift > label::after { content: ""; position: absolute; inset: -4px 0; }
 label.fld { flex-wrap: wrap; max-width: 100%; }
 label.fld select { max-width: 100%; }
-a { color: var(--accent); }
+a { position: relative; color: var(--accent); }
+a::after { content: ""; position: absolute; inset: -12px -6px; }
 .muted { color: var(--muted); font-size: 13px; }
 .status { font-weight: 600; }
 .status.ok { color: var(--ok); } .status.err { color: var(--err); } .status.warn { color: var(--warn); }
@@ -79,7 +84,7 @@ a { color: var(--accent); }
 .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 13px; color: var(--muted); }
 /* Legend entries are toggle buttons: tap to hide/show that line. All three stay on one line (iPhone mini). */
 .legend .lgs { display: flex; flex: 0 1 auto; gap: 6px; white-space: nowrap; }
-.legend button.lg { font-size: 13px; padding: 5px 9px; border-radius: 999px; background: transparent; }
+.legend button.lg { font-size: 13px; padding: 0 9px; border-radius: 999px; background: transparent; }
 .legend button.lg::before { content: ""; display: inline-block; width: 9px; height: 3px; margin-right: 5px; vertical-align: middle; background: currentColor; }
 .legend .t { color: var(--temp); border-color: var(--temp); } .legend .h { color: var(--hum); border-color: var(--hum); }
 .legend .b { color: var(--batt); border-color: var(--batt); }
@@ -94,20 +99,20 @@ a { color: var(--accent); }
 .selshow::after { content: ""; flex: none; width: 7px; height: 7px; border: solid var(--muted); border-width: 0 2px 2px 0; transform: translateY(-2px) rotate(45deg); }
 .selwrap:focus-within .selshow { outline: 2px solid var(--accent); outline-offset: 1px; }
 #stepBtns { margin-top: 6px; }
-#stepBtns .nav { padding: 6px 14px; font-size: 14px; }
-#stepBtns #resSel { margin-left: auto; padding: 6px 8px; font-size: 14px; max-width: 100%; }
+#stepBtns .nav { padding: 0 14px; }
+#stepBtns #resSel { margin-left: auto; height: 34px; padding: 0 8px; font-size: 14px; max-width: 100%; }
 .legend .scalesw + .scalesw { margin-left: 8px; }
 .legend .scalesw { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
-.legend .scalesw .seg { padding: 4px 10px; font-size: 13px; }
+.legend .scalesw .seg { padding: 0 10px; font-size: 13px; }
 .legend .scalesw .seg:first-of-type { border-radius: 9px 0 0 9px; }
-.legend .scalesw .seg:last-of-type { border-radius: 0 9px 9px 0; margin-left: -1px; }
+.legend .scalesw .seg:last-of-type { border-radius: 0 9px 9px 0; margin-left: -7px; }  /* joined: undoes the 6 px gap */
 .legend .scalesw .seg[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
 /* The Scale switch and Fit scale stay together */
 .legend .scalegrp { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 @media (max-width: 480px) { .legend .scalesw { margin-left: 0; } }
-#scFit { padding: 4px 10px; font-size: 13px; }
+#scFit { padding: 0 10px; font-size: 13px; }
 #scFit[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
-.legend { flex-wrap: wrap; align-items: center; row-gap: 6px; }
+.legend { flex-wrap: wrap; align-items: center; row-gap: 10px; margin-top: 8px; }
 /* Stats under the chart: a table - rows Latest / Lowest / Highest / Average, a column per measurement. */
 .stats { margin-top: 8px; }
 .stats table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
@@ -118,12 +123,16 @@ a { color: var(--accent); }
 .stats .when { display: block; font-size: 11px; color: var(--muted); white-space: nowrap; }
 .cfg-grid { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center; }
 .cfg-grid .info { grid-column: 1 / -1; margin-top: -6px; }
-details summary { cursor: pointer; font-weight: 600; }
+details summary { cursor: pointer; font-weight: 600; padding: 10px 0; margin: -10px 0; }
 #log { font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; max-height: 260px; overflow: auto;
   background: var(--input); border-radius: 8px; padding: 8px; margin-top: 8px; }
 .hidden { display: none !important; }
-button.linkbtn { border: 0; background: none; padding: 0; color: var(--err); font-size: 12px; text-decoration: underline; cursor: pointer; }
+/* Text links: red for removing, .info in the accent colour; the tap area is bigger than the text */
+button.linkbtn.info { color: var(--accent); font-size: 13px; }
+button.linkbtn.info::after { content: ""; position: absolute; inset: -12px -8px; }
+button.linkbtn { position: relative; min-height: 0; border: 0; background: none; padding: 0; color: var(--err); font-size: 12px; text-decoration: underline; cursor: pointer; }
 /* Big line at the top of the Sensor section: which sensor, and whether it's connecting/connected */
+.drift { display: inline-flex; align-items: center; gap: 10px; }
 .devstate { font-size: 16px; font-weight: 700; margin: -2px 0 10px; padding: 6px 10px; border-radius: 9px;
   background: var(--input); border: 1px solid var(--line); overflow-wrap: anywhere; }
 .devstate:not(.ok):not(.warn):not(.err) { color: var(--muted); font-weight: 600; }
@@ -134,7 +143,7 @@ h1.titlebar > span:first-child { white-space: nowrap; }
 h3.sub { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 6px; }
 .tabs { position: sticky; top: 0; z-index: 5; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
   background: var(--bg); padding: 6px 0 10px; }
-.tabs button { padding: 8px 4px; font-size: 14px; border-radius: 9px; }
+.tabs button { min-height: 38px; padding: 8px 4px; font-size: 14px; border-radius: 9px; }
 .tabs button.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
 body[data-tab] section[data-tab] { display: none; }
 body[data-tab="single"] section[data-tab~="single"], body[data-tab="all"] section[data-tab~="all"],
@@ -151,11 +160,12 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
 /* Batch tab: no per-sensor Connect buttons (batch operations connect by themselves) */
 body[data-tab="all"] #knownList .ks > .go { display: none; }
 /* Compact sensor list: name line, status line, details on tap */
-#knownList .kc { grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; padding: 5px 0; }
+#knownList .kc { grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; padding: 8px 0 5px; }
 #knownList .kl { display: contents; }
 #knownList .kc .nm { grid-area: 1 / 1; min-width: 0; }
 #knownList .kc .go { grid-area: 1 / 2; }
-#knownList .kc .sub { grid-area: 2 / 1 / auto / -1; justify-self: start; }  /* full width, so nothing is cut off */
+#knownList .kc .sub { grid-area: 2 / 1 / auto / -1; position: relative; min-height: 0; }  /* full width, so nothing is cut off */
+#knownList .kc .sub::after { content: ""; position: absolute; inset: -2px 0 -6px; }
 #knownList .kc .nm { display: flex; align-items: center; gap: 8px; min-height: 26px; cursor: pointer; }
 #knownList .kc .nm span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #knownList .kc .nm input { flex: none; margin: 0; }
@@ -167,7 +177,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 #knownList .kc .sub .lg2.soon { color: var(--warn); font-weight: 600; }
 #knownList .kc .sub .lg2.full { color: var(--err); font-weight: 700; }
 #knownList .kc .chev { flex: none; padding-left: 8px; }
-#knownList .kc .go { padding: 4px 12px; font-size: 14px; }
+#knownList .kc .go { margin: -1px 0; padding: 0 12px; }
 #knownList .kc .more { grid-column: 1 / -1; font-size: 13px; color: var(--muted); padding: 2px 0 6px; line-height: 1.5; overflow-wrap: anywhere; }
 #knownList .kc .more .loglvl { font-size: 13px; font-weight: 400; grid-column: auto; white-space: pre-line; }
 /* Every line is 20 px with 4 px between rows; the Edit link and the text field don't add height. */
@@ -200,7 +210,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 </head>
 <body>
 <main>
-  <h1>ATC MiThermometer Companion <span class="muted" id="appVersionTop" style="font-weight:500;font-size:14px"></span></h1>
+  <h1>ATC MiThermometer Companion <span class="muted" id="appVersionTop" style="display:block;font-weight:500;font-size:13px;line-height:18px"></span></h1>
   <nav class="tabs" id="tabs">
     <button data-go="single">Sensor</button>
     <button data-go="all">Batch</button>
@@ -248,8 +258,8 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
     <div class="only-all">
       <div class="row">
         <button id="btnAddSensors">Add sensors…</button>
-        <button id="btnSelAll" class="seg">Tick all</button>
-        <button id="btnSelNone" class="seg">Untick all</button>
+        <button id="btnSelAll">Tick all</button>
+        <button id="btnSelNone">Untick all</button>
         <span id="readyMsg" class="muted"></span>
       </div>
     </div>
@@ -265,9 +275,6 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
       <button id="btnDisconnect" class="hidden" disabled>Disconnect</button>
     </div>
     <div class="row"><span id="connMsg" class="muted"></span></div>
-    <div class="row">
-      <label>Description <input id="roomName" placeholder="e.g. Kitchen" size="14" disabled></label>
-    </div>
     <div class="live" id="liveTiles">
       <div class="tile"><div class="k">Temperature</div><div class="v" id="liveT">–</div></div>
       <div class="tile"><div class="k">Humidity</div><div class="v" id="liveH">–</div></div>
@@ -291,19 +298,21 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
       </label>
       <label><input type="checkbox" id="optSync" checked> <span id="optSyncLabel">Set clock afterwards (UTC)</span></label>
       <label><input type="checkbox" id="optDelete" checked> Erase on sensor afterwards</label>
-      <label><input type="checkbox" id="driftCorr"> Correct clock drift</label>
+      <span class="drift"><label><input type="checkbox" id="driftCorr"> Correct clock drift</label>
+        <button class="linkbtn info" id="driftWhy" aria-expanded="false" aria-controls="driftHelp">Why?</button></span>
     </div>
-    <div class="row only-single">
+    <p class="muted hidden" id="driftHelp">A sensor's clock can run fast or slow. The clock is read before downloading and, if it's off, the readings since the last clock set are shifted to the right time; the sensor's own times stay in the sensor_timestamp column. <b>Keep “Set clock” and “Erase” ticked</b>: the sensor's log then always starts right after a clock set, so the correction doesn't have to work out when the clock was last set.</p>
+    <p class="muted hidden" id="driftHint">Keep “Set clock” and “Erase” ticked, so the drift correction works well.</p>
+    <div class="row only-single" style="margin-top:8px">
       <button id="btnDump" class="primary" disabled>Download</button>
       <button id="btnDeleteLog" class="danger" disabled>Erase sensor log…</button>
     </div>
-    <div class="row only-all">
+    <div class="row only-all" style="margin-top:8px">
       <button id="bDump" class="primary">Download</button>
       <button id="bShareAll">Share all sensors…</button>
     </div>
     <div class="row"><span id="dumpStatus" class="muted"></span></div>
     <div class="progress" id="dumpProg"><div></div></div>
-    <p class="muted" style="font-size:12px;margin:8px 0 0">Clock drift: a sensor's clock can run fast or slow. The clock is read before downloading and, if it's off, the readings since the last clock set are shifted to the right time; the sensor's own times stay in the sensor_timestamp column. <b>Keep “Set clock” and “Erase” ticked</b>: the sensor's log then always starts right after a clock set, so the correction doesn't have to work out when the clock was last set.</p>
   </section>
 
   <!-- Batch operations -->
@@ -322,7 +331,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
     </div>
     <div class="row">
       <button id="bLoadCfg">Load config JSON…</button>
-      <button id="bClearCfg" class="seg hidden">Forget loaded</button>
+      <button id="bClearCfg" class="hidden">Forget loaded</button>
       <button id="bSetCfg">Write config…</button>
       <input type="file" id="fileBatchCfg" accept=".json,application/json" multiple class="hidden">
     </div>
@@ -334,21 +343,14 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
   </section>
 
   <!-- Clock -->
-  <section class="card" data-tab="single all">
+  <section class="card" data-tab="single">
     <h2>Sensor clock</h2>
-    <p class="muted only-all">The time zone here is also used by “Read clocks”, “Set clocks” and by setting the clock after a download.</p>
     <div class="row">
-      <label class="fld">Time zone
-        <select id="timeMode">
-          <option value="utc">UTC (default)</option>
-          <option value="local">Local</option>
-        </select>
-      </label>
-      <button id="btnGetTime" class="only-single" disabled>Read clock</button>
-      <button id="btnTime" class="only-single" disabled>Set clock now</button>
+      <button id="btnGetTime" disabled>Read clock</button>
+      <button id="btnTime" disabled>Set clock now</button>
     </div>
-    <div class="row only-single"><span id="clockMsg" class="muted"></span></div>
-    <p class="muted" id="tzHelp"></p>
+    <div class="row"><span id="clockMsg" class="muted"></span></div>
+    <p class="muted" style="margin:8px 0 0"><span id="tzShort"></span> <button class="linkbtn info" onclick="showTab('settings'); $('timeMode').closest('details').open = true; $('timeMode').scrollIntoView({ block: 'center' })">Change in Settings</button></p>
   </section>
 
   <!-- History -->
@@ -474,6 +476,15 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
       </div>
       <p class="muted" id="backupInfo" style="font-size:12px;margin-top:2px"></p>
       <div class="row">
+        <label class="fld">Time zone of the sensors' clocks
+          <select id="timeMode">
+            <option value="utc">UTC (default)</option>
+            <option value="local">Local</option>
+          </select>
+        </label>
+      </div>
+      <p class="muted" id="tzHelp" style="font-size:12px;margin-top:2px"></p>
+      <div class="row">
         <label class="fld">CSV format
           <select id="csvLocale">
             <option value="en">en: comma, dot decimals</option>
@@ -528,7 +539,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=108"></script>
+<script src="core.js?v=109"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -636,7 +647,8 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 108;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 109;  // also bump core.js?v= in the <script> tag above
+const APP_DATE = "2026-11-25";  // release date of this version
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1048,7 +1060,6 @@ function setDescription(name, text) {
   for (const o of $("histDev").options) if (o.value) o.textContent = histLabel(o.value);
   showHistDev();
   if (sensorName === name) {
-    $("roomName").value = text;
     if (chr && !connecting) setStatus(`● Connected to ${shownName(name)}`, "ok");
     if ($("btNameNew").dataset.auto) $("btNameNew").value = suggestBtName();
   }
@@ -1368,18 +1379,17 @@ async function connectDeviceNow(dev, expectedName, opts) {
     if (!currentCfg) { step = "reading config"; await request([0x55], b => b[0] === 0x55 && b.length - 1 >= 9, 4000); dbg(`Config ${currentCfg ? "received on second request" : "still not received"}`); }
     step = "identifying the sensor";
     sensorName = (await identifySensor()) || expectedName || device.name || "unknown";
+    if (!opts.batch && !known[sensorName] && !rooms[sensorName]) openKnown.add(sensorName);  // new: its details show where to add a description
     unremoveSensor(sensorName);  // connecting on purpose brings a removed sensor back
     rememberSensor(sensorName, Object.assign({ id: device.id, mac: macFromName(sensorName) || undefined },
       currentCfg ? { cfg: currentCfg, cfgRead: Date.now() } : {}));  // config read before the sensor was identified
     if (!opts.batch) await readBtName();
     reachable.set(sensorName, device);
-    const room = rooms[sensorName];
     // Details under the big status line: the fixed ID (if the shown name differs) and the MAC.
     const shown = shownName(sensorName);
     const bt = (known[sensorName] && known[sensorName].btName) || sensorName;
     showInfo([bt === shown ? "" : `Bluetooth name ${bt}`, bt === sensorName ? "" : `ID ${sensorName}`, macFromName(sensorName) ? `MAC ${macFromName(sensorName)}` : ""].filter(Boolean).join(" · "));
     setStatus(`● Connected to ${shownName(sensorName)}`, "ok"); log(`Connected to ${sensorName} (total ${since(sAll)}).`);
-    $("roomName").value = room || ""; $("roomName").disabled = false;
     setButtons(true); renderKnown();
     // Show the connected sensor's stored history in the (shared) chart.
     if (!opts.batch && histCache.has(histId(sensorName)) && $("histDev").value !== histId(sensorName)) {
@@ -1502,6 +1512,7 @@ function downloadPlan() {
 function updateDownloadButtons() {
   const label = downloadLabel(downloadPlan());
   $("btnDump").textContent = label; $("bDump").textContent = label;
+  $("driftHint").classList.toggle("hidden", prefs.driftCorr === false || ($("optSync").checked && $("optDelete").checked));
 }
 // Returns { n, total, finished, deleted } (or null if cancelled). opts.skipConfirm: batch already asked.
 async function dump(opts = {}) {
@@ -1881,9 +1892,10 @@ const modeLabel = m => m === "utc" ? "UTC" : `${tzName()} (UTC${fmtOffset(localO
 function updateTzLabels() {
   $("timeMode").options[1].textContent = `Local - ${modeLabel("local")}`;
   $("optSyncLabel").textContent = `Set clock afterwards (${prefs.timeMode === "utc" ? "UTC" : modeLabel("local")})`;
-  $("tzHelp").textContent = prefs.timeMode === "utc"
-    ? "Read clock, Set clock and “Set clock afterwards” all use UTC. Charts still show your local time."
-    : `Read clock, Set clock and “Set clock afterwards” use the phone's local time, ${modeLabel("local")}. It shifts at daylight-saving changes, so set the clocks again then.`;
+  $("tzShort").textContent = `Set to ${modeLabel(prefs.timeMode)}.`;
+  $("tzHelp").textContent = "Used for reading and setting the clocks, also after a download. " + (prefs.timeMode === "utc"
+    ? "Charts always show your local time."
+    : "Local time shifts at daylight-saving changes, so set the clocks again then.");
 }
 async function setTime() {
   // Read the clock first, so this set is recorded with the error it corrected (used by drift correction).
@@ -2869,7 +2881,7 @@ function updateStatusBar() {
   document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => showTab(b.dataset.go));
   showTab(lsGet("tab", "single"));
   setInterval(updateStatusBar, 1000);
-  $("appVersionTop").textContent = `v${APP_VERSION}`;
+  $("appVersionTop").textContent = `v${APP_VERSION} · ${new Date(APP_DATE + "T12:00").toLocaleDateString(LOCALE, { day: "numeric", month: "short", year: "numeric" })}`;
   logEnvironment(); flushLog();
   $("btnLogSend").onclick = sendLog;
   $("btnLogCopy").onclick = copyLog;
@@ -2900,7 +2912,8 @@ function updateStatusBar() {
   $("showNow").checked = !!prefs.showNow;   // off by default
   $("showNow").onchange = e => { prefs.showNow = e.target.checked; savePrefs(); if (prefs.showNow) startLive(); else stopLive(); renderKnown(); };
   $("driftCorr").checked = prefs.driftCorr !== false;
-  $("driftCorr").onchange = e => { prefs.driftCorr = e.target.checked; savePrefs(); };
+  $("driftCorr").onchange = e => { prefs.driftCorr = e.target.checked; savePrefs(); updateDownloadButtons(); };
+  $("driftWhy").onclick = () => { const open = !$("driftHelp").classList.toggle("hidden"); $("driftWhy").setAttribute("aria-expanded", String(open)); $("driftWhy").textContent = open ? "Hide" : "Why?"; };
   document.querySelectorAll("#rangeBtns .seg").forEach(b => {
     b.classList.toggle("on", +b.dataset.h === prefs.range);
     b.onclick = () => { prefs.range = +b.dataset.h; savePrefs(); view = null; drawChart(); updateZoomUi(); };
@@ -2927,7 +2940,6 @@ function updateStatusBar() {
     catch (err) { log("Invalid config JSON: " + err.message); }
     e.target.value = "";
   };
-  $("roomName").onchange = e => { if (sensorName) setDescription(sensorName, e.target.value); };
   $("btnAddSensors").onclick = () => withBusy(addSensor);
   if (navigator.bluetooth && typeof navigator.bluetooth.requestLEScan === "function") {
     $("scanRow").classList.remove("hidden");
