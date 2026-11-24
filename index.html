@@ -472,7 +472,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=87"></script>
+<script src="core.js?v=88"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -579,7 +579,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 87;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 88;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -2205,32 +2205,30 @@ function drawChart() {
   const bat = prefs.showB === true;
   const asBat = arr => arr.filter(s => s[3] > 0).map(s => [s[0], s[1], s[3] / 1000, s[3]]);
   const data = bat ? asBat(histData.slice(i0, i1)) : histData.slice(i0, i1);
-  const lineData = bat ? asBat(histData.slice(Math.max(0, i0 - 1), Math.min(histData.length, i1 + 1)))
-    : histData.slice(Math.max(0, i0 - 1), Math.min(histData.length, i1 + 1));
+  // Averaging slices (0 = single readings): fixed to the clock, see sliceWidth() in core.js.
+  const buckets = Math.max(50, Math.floor(W / 2));
+  const steps = [], stride = Math.max(1, Math.floor((i1 - i0) / 500));  // a sample is enough for the usual interval
+  for (let i = i0 + 1; i < i1; i += stride) steps.push(histData[i][0] - histData[i - 1][0]);
+  const interval = steps.length ? steps.sort((a, b) => a - b)[steps.length >> 1] : 600;
+  const slice = dom ? sliceWidth(dom.b - dom.a, buckets, interval) : 0;
+  // Readings to draw: the window plus one neighbour on each side - for averages, plus the rest of the
+  // slices at both edges, so an edge point is the same average however the chart is dragged.
+  const from = slice ? lowerIdx(Math.floor(dom.a / slice) * slice) : i0, to = slice ? lowerIdx(Math.ceil(dom.b / slice) * slice) : i1;
+  let j0 = Math.max(0, from - 1), j1 = Math.min(histData.length, to + 1);
+  if (slice) {
+    if (from > 0) j0 = lowerIdx(Math.floor(histData[j0][0] / slice) * slice);
+    if (to < histData.length) j1 = lowerIdx((Math.floor(histData[j1 - 1][0] / slice) + 1) * slice);
+  }
+  const lineData = bat ? asBat(histData.slice(j0, j1)) : histData.slice(j0, j1);
   if (!dom || lineData.length < 2 || dom.b - dom.a <= 0) {
     svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" fill="${col("--muted")}" font-size="14">No data in this range</text>`;
     plotted = null; return;
   }
-  // Downsample to ~1 point per 2px. Each point: [time, temp avg, hum avg, n readings, temp min, temp max,
-  // hum min, hum max, first time, last time] - the min/max feed the shaded band and the readout.
-  const buckets = Math.max(50, Math.floor(W / 2));
+  // Points to draw: [time, temp avg, hum avg, n readings, temp min, temp max, hum min, hum max, first
+  // time, last time] - single readings, or averages per slice on long ranges (~1 point per 2-3 px).
   const t0 = dom.a, t1 = dom.b, span = Math.max(1, t1 - t0);
-  let pts = lineData.map(s => [s[0], s[1], s[2], 1, s[1], s[1], s[2], s[2], s[0], s[0]]);
-  let averaged = false;
-  if (lineData.length > buckets) {
-    const acc = new Map();
-    for (const s of lineData) {
-      const k = Math.floor((s[0] - t0) / span * (buckets - 1));
-      let a = acc.get(k);
-      if (!a) acc.set(k, a = [0, 0, 0, 0, Infinity, -Infinity, Infinity, -Infinity, s[0], s[0]]);
-      a[0] += s[0]; a[1] += s[1]; a[2] += s[2]; a[3]++;
-      a[4] = Math.min(a[4], s[1]); a[5] = Math.max(a[5], s[1]); a[6] = Math.min(a[6], s[2]); a[7] = Math.max(a[7], s[2]);
-      a[8] = Math.min(a[8], s[0]); a[9] = Math.max(a[9], s[0]);
-    }
-    pts = [...acc.entries()].sort((p, q) => p[0] - q[0])
-      .map(([, a]) => [a[0] / a[3], a[1] / a[3], a[2] / a[3], a[3], a[4], a[5], a[6], a[7], a[8], a[9]]);
-    averaged = pts.some(p => p[3] > 1);
-  }
+  const pts = slice ? averageSlices(lineData, slice) : lineData.map(s => [s[0], s[1], s[2], 1, s[1], s[1], s[2], s[2], s[0], s[0]]);
+  const averaged = !!slice && pts.some(p => p[3] > 1);
   const showT = !bat && prefs.showT !== false, showH = bat || prefs.showH !== false;
   const colH = col(bat ? "--batt" : "--hum"), unitH = bat ? "V" : "%";
   // Left axis = temperature (humidity when temperature is hidden); right axis only when both are shown.
@@ -2446,7 +2444,7 @@ function drawChart() {
       note.classList.remove("hidden");
     } else if (averaged) {
       const ns = pts.map(p => p[3]).sort((a, b) => a - b), nMed = ns[ns.length >> 1];
-      note.textContent = `Each point is an average of ~${fmtDuration(span / buckets)} (~${nMed} readings); the thin lines and shading around it show the highest and lowest reading. Zoom in for single readings.`;
+      note.textContent = `Each point is an average of ${fmtDuration(slice)} (~${nMed} readings); the thin lines and shading around it show the highest and lowest reading. Zoom in for single readings.`;
       note.classList.remove("hidden");
     } else note.classList.add("hidden");
   }

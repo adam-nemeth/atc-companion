@@ -135,6 +135,32 @@ test("download buttons say what they do", () => {
   assert.equal(label(100, false, false), "Download last 100");
 });
 
+test("chart averages don't change when the chart is dragged", () => {
+  const readings = [];
+  for (let i = 0; i < 4000; i++) readings.push([1790000100 + i * 600 + i % 3, 20 + (i * 7919 % 50) / 10, 50 + (i * 104729 % 80) / 10, 3000]);
+  const span = 7 * 86400, w = core.sliceWidth(span, 156, 600);
+  assert.equal(w % 60, 0);
+  assert.equal(core.sliceWidth(span + 1e-7, 156, 600), w);   // rounding in the span must not matter
+  const slicesFor = a => {                                    // whole slices around the window, as the chart does
+    const lo = Math.floor(a / w) * w, hi = Math.ceil((a + span) / w) * w;
+    return new Map(core.averageSlices(readings.filter(s => s[0] >= lo && s[0] < hi), w).map(p => [Math.floor(p[0] / w), p]));
+  };
+  const base = slicesFor(1790300000);
+  for (const shift of [1, 37, 1000, 5003, 40000]) {
+    let shared = 0;
+    for (const [k, p] of slicesFor(1790300000 + shift)) if (base.has(k)) { assert.deepEqual(p, base.get(k)); shared++; }
+    assert.ok(shared > 100, `only ${shared} slices in common`);
+  }
+});
+
+test("chart averaging: widths and contents", () => {
+  assert.equal(core.sliceWidth(86400, 156, 600), 0);          // 24 h of 10-minute readings: no averaging
+  assert.equal(core.sliceWidth(7 * 86400, 156, 600), 4800);   // 80 min
+  assert.ok(core.sliceWidth(2000 * 86400, 100, 600) >= 2000 * 86400 / 100);
+  assert.deepEqual(core.averageSlices([[1200, 20, 50], [1800, 22, 54], [2400, 30, 60]], 1200),
+    [[1500, 21, 52, 2, 20, 22, 50, 54, 1200, 1800], [2400, 30, 60, 1, 30, 30, 60, 60, 2400, 2400]]);
+});
+
 test("small helpers", () => {
   assert.equal(core.fmtOffset(3600), "+01:00");
   assert.equal(core.fmtOffset(-16200), "-04:30");

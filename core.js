@@ -294,6 +294,36 @@ function downloadLabel({ count, sync, erase }) {
   return parts.join(", ") + last + (doErase ? "…" : "");
 }
 
+// ===== Chart averaging =====
+// Long ranges are averaged into slices of time. Slices are fixed to the clock (multiples of their
+// width), not to the chart's left edge: otherwise every bit of dragging would regroup the readings
+// and the average line would jump. Widths come from a fixed list (in minutes), so they don't change
+// with tiny differences in the span either.
+const SLICE_MINUTES = [1, 2, 3, 5, 10, 20, 30, 40, 60, 80, 100, 120, 180, 240, 300, 360, 480, 720, 1440, 2880, 4320, 7200, 10080];
+// Slice width in seconds for a span shown with at most maxPoints points, or 0 = no averaging needed
+// (the readings, one per `interval` seconds, fit as they are).
+function sliceWidth(span, maxPoints, interval) {
+  const raw = span / maxPoints;
+  if (raw <= interval * (1 + 1e-6)) return 0;
+  const min = SLICE_MINUTES.find(m => m * 60 >= raw * (1 - 1e-6) && m * 60 >= interval * 2 * (1 - 0.01));
+  return (min || Math.ceil(raw / 86400) * 1440) * 60;
+}
+// Averages [t, v1, v2, …] readings per slice, in order:
+// [time avg, v1 avg, v2 avg, n, v1 min, v1 max, v2 min, v2 max, first time, last time].
+function averageSlices(samples, width) {
+  const acc = new Map();
+  for (const s of samples) {
+    const k = Math.floor(s[0] / width);
+    let a = acc.get(k);
+    if (!a) acc.set(k, a = [0, 0, 0, 0, Infinity, -Infinity, Infinity, -Infinity, s[0], s[0]]);
+    a[0] += s[0]; a[1] += s[1]; a[2] += s[2]; a[3]++;
+    a[4] = Math.min(a[4], s[1]); a[5] = Math.max(a[5], s[1]); a[6] = Math.min(a[6], s[2]); a[7] = Math.max(a[7], s[2]);
+    a[8] = Math.min(a[8], s[0]); a[9] = Math.max(a[9], s[0]);
+  }
+  return [...acc.entries()].sort((p, q) => p[0] - q[0])
+    .map(([, a]) => [a[0] / a[3], a[1] / a[3], a[2] / a[3], a[3], ...a.slice(4)]);
+}
+
 // How a stored reading is identified when merging: the sensor's own timestamp (element 4; older
 // samples have none, and their time IS the sensor's) plus its values. Re-downloads with an updated
 // clock correction then replace the earlier copy, and two readings that got the same time after a
@@ -305,4 +335,5 @@ if (typeof module !== "undefined") module.exports = {
   DRIFT_TOL, DRIFT_MAX_PER_DAY, driftCorrect, fmtDur, LOG_CAPACITY, logIntervalFromCfg, fmtDays,
   decodeCfg, FLG_BITS, FLG2_BITS, byteFromBits, encodeCfg, fmtNum, toCsv, parseCsv, histId,
   timeTicks, utcOffsetMin, dstChanges, sampleKey, withAtcPrefix, downloadLabel,
+  sliceWidth, averageSlices,
 };
