@@ -125,7 +125,25 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
 .ks .nm { font-weight: 600; }
 #knownList .nm { font-size: 17px; }
 /* Batch tab: no per-sensor Connect buttons (batch operations connect by themselves) */
-body[data-tab="all"] #knownList .ks > button { display: none; }
+body[data-tab="all"] #knownList .ks > .go { display: none; }
+/* Compact sensor list: name line, status line, details on tap */
+#knownList .kc { grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; padding: 5px 0; }
+#knownList .kl { min-width: 0; }
+#knownList .kc .nm { display: flex; align-items: center; gap: 8px; min-height: 26px; cursor: pointer; }
+#knownList .kc .nm span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#knownList .kc .nm small { font-size: 12.5px; font-weight: 400; opacity: .8; }
+#knownList .kc .nm input { flex: none; margin: 0; }
+#knownList .kc .sub { display: flex; max-width: 100%; align-items: center; border: 0; background: none; border-radius: 0; padding: 3px 0 5px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: pre; }
+body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
+#knownList .kc .sub .lg2 { overflow: hidden; text-overflow: ellipsis; }
+#knownList .kc .sub .st.ok { color: var(--ok); }
+#knownList .kc .sub .lg2.soon { color: var(--warn); font-weight: 600; }
+#knownList .kc .sub .lg2.full { color: var(--err); font-weight: 700; }
+#knownList .kc .chev { flex: none; padding-left: 8px; }
+#knownList .kc .go { padding: 7px 12px; font-size: 14px; }
+#knownList .kc .more { grid-column: 1 / -1; font-size: 13px; color: var(--muted); padding: 2px 0 6px; line-height: 1.5; overflow-wrap: anywhere; }
+#knownList .kc .more .loglvl { font-size: 13px; }
+#knownList .kc .more .linkbtn { font-size: 13px; padding: 4px 0; }
 #batchStatus { scroll-margin-top: 70px; } /* stay clear of the sticky tab bar when scrolled to */
 #knownList .nm input[type=checkbox] { width: 20px; height: 20px; }
 .ks .vals { font-variant-numeric: tabular-nums; }
@@ -472,7 +490,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=89"></script>
+<script src="core.js?v=90"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -579,7 +597,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 89;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 90;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -981,6 +999,7 @@ function clearSensors() {
   sensorsMsg("Sensor list cleared."); renderKnown();
 }
 
+const openKnown = new Set();  // sensors whose details are open in the list
 function renderKnown() {
   const box = $("knownList"); box.innerHTML = "";
   if (!knownNames().length) {
@@ -988,25 +1007,40 @@ function renderKnown() {
   }
   let ready = 0, ticked = 0;
   for (const name of knownNames()) {
-    const k = known[name] || {}, room = rooms[name] || "";
+    const k = known[name] || {};
     const isCur = !!chr && sensorName === name;
     const dev = reachable.get(name);
     if (dev) ready++; if (batchSel.has(name)) ticked++;
-    const row = document.createElement("div"); row.className = "ks" + (isCur ? " current" : "");
-    const left = document.createElement("div");
-    left.innerHTML = `<label class="nm"><input type="checkbox"> <span></span></label><div class="vals"></div>`;
+    // Two lines: name, then availability and log - everything else opens on tap (details).
+    const open = openKnown.has(name);
+    const row = document.createElement("div"); row.className = "ks kc" + (isCur ? " current" : "") + (open ? " open" : "");
+    const toggle = () => { openKnown.has(name) ? openKnown.delete(name) : openKnown.add(name); renderKnown(); };
+    const left = document.createElement("div"); left.className = "kl";
+    left.innerHTML = `<label class="nm"><input type="checkbox"> <span></span></label><button class="sub" type="button"><span class="st"></span><span class="lg2"></span><span class="chev" aria-hidden="true"></span></button>`;
     const cb = left.querySelector("input"); cb.checked = batchSel.has(name);
     cb.onchange = () => { cb.checked ? batchSel.add(name) : batchSel.delete(name); saveSel(); renderKnown(); };
+    // The name ticks the sensor on the Batch tab; on the Sensor tab (no tick box) it opens the details.
+    left.querySelector("label").onclick = ev => { if (document.body.dataset.tab !== "all") { ev.preventDefault(); toggle(); } };
     const nameEl = left.querySelector(".nm span");
-    // Main line shows the Bluetooth name (what the picker shows); the fixed ATC_xxxxxx ID moves to the details.
+    // Description and Bluetooth name (what the picker shows); the fixed ATC_xxxxxx ID is in the details.
     const btName = k.btName || name;
-    nameEl.textContent = shownName(name);
+    nameEl.textContent = rooms[name] || btName; nameEl.title = shownName(name);
+    if (rooms[name]) { const bt = document.createElement("small"); bt.textContent = ` · ${btName}`; nameEl.append(bt); }
     // Green = available, bold = the connected one.
     nameEl.style.color = dev ? "var(--ok)" : "";
     nameEl.style.fontWeight = isCur ? "700" : "400";
-    left.querySelector(".vals").textContent = k.t != null
-      ? `${k.t.toFixed(2)} °C · ${k.h.toFixed(1)} %${k.b != null ? ` · 🔋${k.b}%` : ""}${k.seen ? ` · ${ago(k.seen)}` : ""}` : "";
-    const btn = document.createElement("button");
+    const rem = remembered.get(name), lw = logWarning(name);
+    const fresh = k.t != null && k.seen && Date.now() - k.seen < 600000;
+    const st = left.querySelector(".st");
+    st.textContent = fresh ? `${dev ? "✓ " : ""}${k.t.toFixed(1)}° ${k.h.toFixed(0)}%` : dev ? "✓ Available" : rem && rem._waking ? "Looking…" : "Not available";
+    if (dev) st.classList.add("ok");
+    const lg2 = left.querySelector(".lg2");
+    lg2.className = "lg2 " + lw.level; lg2.textContent = lw.short ? " · " + lw.short : "";
+    const subBtn = left.querySelector(".sub");
+    left.querySelector(".chev").textContent = open ? "▾" : "▸";
+    subBtn.setAttribute("aria-expanded", String(open)); subBtn.setAttribute("aria-label", `${st.textContent}${lg2.textContent} - ${open ? "hide" : "show"} details of ${shownName(name)}`);
+    subBtn.onclick = toggle;
+    const btn = document.createElement("button"); btn.className = "go";
     btn.textContent = isCur ? "Connected" : chr ? "Switch" : "Connect";
     if (isCur) btn.classList.add("is-current");
     btn.disabled = !dev || isCur || busy;
@@ -1020,24 +1054,20 @@ function renderKnown() {
         }
       });
     };
-    const meta = document.createElement("div"); meta.className = "meta";
-    const rem = remembered.get(name);
-    const avail = document.createElement("span");
-    avail.textContent = dev ? "✓ Available" : rem && rem._waking ? "Looking for sensor…" : "Not available - tap Add sensors…";
-    avail.style.color = dev ? "var(--ok)" : "";
-    avail.style.fontWeight = dev ? "600" : "";
-    meta.append(avail);
-    meta.append(
-      (btName !== name ? ` · ID ${name}` : "") + ` · MAC ${k.mac || macFromName(name) || "?"}`);
-    const rm = document.createElement("button");
-    rm.className = "linkbtn"; rm.textContent = "Remove"; rm.title = "Remove from the list";
-    rm.onclick = () => removeSensor(name);
-    meta.append(" · ", rm);
-    row.append(left, btn, meta);
-    const lw = logWarning(name);
-    const logEl = document.createElement("div"); logEl.className = "loglvl " + (lw ? lw.level : "none");
-    logEl.textContent = lw.text;
-    row.append(logEl);
+    row.append(left, btn);
+    if (open) {
+      const more = document.createElement("div"); more.className = "more";
+      const line = (text, cls) => { const d = document.createElement("div"); d.textContent = text; if (cls) d.className = cls; more.append(d); };
+      if (!dev) line(rem && rem._waking ? "Looking for the sensor…" : "Not available: tap “Connect…” on the Sensor tab or “Add sensors…” on the Batch tab.");
+      if (k.t != null) line(`Last heard: ${k.t.toFixed(2)} °C · ${k.h.toFixed(1)} %${k.b != null ? ` · 🔋${k.b}%` : ""}${k.seen ? ` · ${ago(k.seen)}` : ""}`);
+      line(lw.text, "loglvl " + lw.level);
+      line((btName !== name ? `ID ${name} · ` : "") + `MAC ${k.mac || macFromName(name) || "?"}`);
+      const rm = document.createElement("button");
+      rm.className = "linkbtn"; rm.textContent = "Remove from the list";
+      rm.onclick = () => removeSensor(name);
+      more.append(rm);
+      row.append(more);
+    }
     box.appendChild(row);
   }
   renderRooms();
@@ -1821,19 +1851,19 @@ function noteSensorLog(name, n, intervalSec) {
 function logWarning(name) {
   const k = known[name] || {}, L = k.log;
   const cfgP = logIntervalFromCfg(k.cfg);
-  if (cfgP === 0) return { level: "ok", text: "Logging is off in this sensor's config" };
+  if (cfgP === 0) return { level: "ok", short: "logging off", text: "Logging is off in this sensor's config" };
   const P = cfgP || (L && L.P) || 600;
   const capDays = LOG_CAPACITY * P / 86400;
   const every = P % 60 ? `${P} s` : `${P / 60} min`;
-  if (!L) return { level: "none", text: `Log holds ~${fmtDays(capDays)} at one sample every ${every} - fill level known after the next full download` };
+  if (!L) return { level: "none", short: "", text: `Log holds ~${fmtDays(capDays)} at one sample every ${every} - fill level known after the next full download` };
   const now = Date.now() / 1000;
   const est = Math.min(LOG_CAPACITY, L.n + Math.max(0, now - L.at) / P);
   const fullAt = L.at + Math.max(0, LOG_CAPACITY - L.n) * P, daysLeft = (fullAt - now) / 86400;
   const pct = Math.round(est / LOG_CAPACITY * 100);
   const when = new Date(fullAt * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" });
-  if (daysLeft <= 0) return { level: "full", text: `Log full since ~${when}: the oldest readings are being overwritten - download now` };
-  if (daysLeft <= 7) return { level: "soon", text: `Log ${pct}% full: full in ${fmtDays(daysLeft)} (~${when}), then the oldest readings are overwritten - download soon` };
-  return { level: "ok", text: `Log ${pct}% full (${fmtDays(est * P / 86400)} of ~${fmtDays(capDays)}) · full in ${fmtDays(daysLeft)} (~${when})` };
+  if (daysLeft <= 0) return { level: "full", short: "⚠ log full", text: `Log full since ~${when}: the oldest readings are being overwritten - download now` };
+  if (daysLeft <= 7) return { level: "soon", short: `⚠ log full in ${fmtDays(daysLeft)}`, text: `Log ${pct}% full: full in ${fmtDays(daysLeft)} (~${when}), then the oldest readings are overwritten - download soon` };
+  return { level: "ok", short: `log ${pct}%, ${fmtDays(daysLeft)} left`, text: `Log ${pct}% full (${fmtDays(est * P / 86400)} of ~${fmtDays(capDays)}) · full in ${fmtDays(daysLeft)} (~${when})` };
 }
 
 // Plain-language label and explanation per setting. Explanations may be functions of the whole config,
