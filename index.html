@@ -153,7 +153,9 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 #knownList .kc .more { grid-column: 1 / -1; font-size: 13px; color: var(--muted); padding: 2px 0 6px; line-height: 1.5; overflow-wrap: anywhere; }
 #knownList .kc .more .loglvl { font-size: 13px; grid-column: auto; white-space: pre-line; }
 #knownList .kc .more dl { display: grid; grid-template-columns: auto 1fr; gap: 0 12px; margin: 0 0 4px; }
-#knownList .kc .more dd { margin: 0; color: var(--text); }
+#knownList .kc .more dd { margin: 0; color: var(--text); min-width: 0; }
+#knownList .kc .more dt { align-self: center; }
+#knownList .kc .descEdit { width: 100%; max-width: 260px; font-size: 16px; padding: 4px 8px; }
 #knownList .kc .more dd.soon { color: var(--warn); }
 #knownList .kc .more dd.full { color: var(--err); }
 #knownList .kc .more .linkbtn { font-size: 13px; padding: 4px 0; }
@@ -506,7 +508,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=100"></script>
+<script src="core.js?v=101"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -613,7 +615,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 100;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 101;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1016,7 +1018,23 @@ function clearSensors() {
 }
 
 const openKnown = new Set();  // sensors whose details are open in the list
+function setDescription(name, text) {
+  text = text.trim();
+  if ((rooms[name] || "") === text) return;
+  rooms[name] = text; lsSet("rooms", rooms);
+  log(`Description of ${name}: "${text}"`);
+  for (const o of $("histDev").options) if (o.value) o.textContent = histLabel(o.value);
+  showHistDev();
+  if (sensorName === name) {
+    $("roomName").value = text;
+    if (chr && !connecting) setStatus(`● Connected to ${shownName(name)}`, "ok");
+    if ($("btNameNew").dataset.auto) $("btNameNew").value = suggestBtName();
+  }
+  renderKnown(); scheduleKnownRender();
+}
 function renderKnown() {
+  // Don't rebuild the list under a description being typed; leaving the field renders it.
+  if (document.activeElement && document.activeElement.classList.contains("descEdit")) return;
   const box = $("knownList"); box.innerHTML = "";
   if (!knownNames().length) {
     box.innerHTML = `<p class="muted">No sensors yet. <span class="only-single">Connect to one with “Connect…”</span><span class="only-all">Add them with “Add sensors…”</span>, or load your <code>sensors.json</code> in the Settings tab.</p>`;
@@ -1077,7 +1095,15 @@ function renderKnown() {
         const dt = document.createElement("dt"), dd = document.createElement("dd");
         dt.textContent = label; dd.textContent = value; if (cls) dd.className = cls; dl.append(dt, dd);
       };
-      add("Description", (rooms[name] || "").trim() || "no description");
+      add("Description", "");
+      // Editable here, whether the sensor is available or not (it's only saved on this phone).
+      const inp = document.createElement("input");
+      inp.className = "descEdit"; inp.value = rooms[name] || ""; inp.placeholder = "no description"; inp.maxLength = 40;
+      inp.autocomplete = "off"; inp.setAttribute("aria-label", `Description of ${shownName(name)}`);
+      inp.onchange = () => setDescription(name, inp.value);
+      inp.onkeydown = ev => { if (ev.key === "Enter") inp.blur(); };
+      inp.onblur = () => scheduleKnownRender();  // a little later, so a tap that ends the editing still lands
+      dl.lastChild.append(inp);
       add("Name", k.btName || "no name known yet (connect to read it)");
       add("ID", name);
       add("MAC", k.mac || macFromName(name) || "?");
@@ -2866,11 +2892,7 @@ function updateStatusBar() {
     catch (err) { log("Invalid config JSON: " + err.message); }
     e.target.value = "";
   };
-  $("roomName").onchange = e => {
-    if (!sensorName) return; rooms[sensorName] = e.target.value.trim(); lsSet("rooms", rooms); renderKnown();
-    if (chr && !connecting) setStatus(`● Connected to ${shownName(sensorName)}`, "ok");
-    if ($("btNameNew").dataset.auto) $("btNameNew").value = suggestBtName();
-  };
+  $("roomName").onchange = e => { if (sensorName) setDescription(sensorName, e.target.value); };
   $("btnAddSensors").onclick = () => withBusy(addSensor);
   if (navigator.bluetooth && typeof navigator.bluetooth.requestLEScan === "function") {
     $("scanRow").classList.remove("hidden");
