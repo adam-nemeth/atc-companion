@@ -6,7 +6,7 @@ A command-line tool for **Xiaomi LYWSD03MMC** thermometers running [pvvx's ATC_M
 
 The pvvx firmware makes each sensor log a reading every few minutes into its own memory, typically a few months' worth. This tool collects those logs onto your computer and keeps them:
 
-- **Downloads the history** of one sensor or of all your sensors in one run. It's made for running regularly, e.g. weekly by hand or from Task Scheduler / cron.
+- **Downloads the readings** of one sensor or of all your sensors in one run. It's made for running regularly, e.g. weekly by hand or from Task Scheduler / cron.
 - **Builds a growing archive.** Every download is kept as its own file and merged into one `-all.csv` per sensor. Each reading appears once, no matter how often it was downloaded or how much the downloads overlap. Readings shared from the [iPhone app](../README.md) are merged in too.
 - **Keeps the sensors healthy:** after each download it sets their clocks (in UTC) and erases their logs, so the next download starts fresh. It also reads and writes their settings (measurement and logging intervals, display options, calibration).
 - **Corrects clock drift.** The sensors' clocks run fast or slow. Before each download the tool reads the clock and moves the readings back to the right time.
@@ -39,7 +39,7 @@ This writes `sensors_<timestamp>.json`. Give each sensor a `description` (e.g. w
 ]
 ```
 
-**2. Download every sensor's history:**
+**2. Download every sensor's readings:**
 
 ```
 python ATC_MiThermometer_tools.py --sensors sensors.json --dump

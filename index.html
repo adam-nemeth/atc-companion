@@ -172,7 +172,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
   <nav class="tabs" id="tabs">
     <button data-go="single">Sensor</button>
     <button data-go="all">Batch</button>
-    <button data-go="history">History</button>
+    <button data-go="history">Readings</button>
     <button data-go="settings">Settings</button>
   </nav>
 
@@ -192,7 +192,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
   <div id="noBle" class="banner hidden">
     <b>Web Bluetooth isn't available in this browser.</b><br>
     On iPhone, open this page in the <b>Bluefy</b> browser (free on the App Store). Safari doesn't support Bluetooth.
-    You can still view stored history and import CSV files here.
+    You can still view stored readings and import CSV files here.
   </div>
 
   <!-- Live overview (from broadcasts, no connection) -->
@@ -249,7 +249,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
   <section class="card" data-tab="single all">
     <h2>Download from <span class="only-single">sensor</span><span class="only-all">ticked sensors</span></h2>
     <div class="row">
-      <label>Samples
+      <label>Readings
         <select id="dumpCount">
           <option value="65535">All stored</option>
           <option value="100">Last 100</option>
@@ -263,7 +263,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
     </div>
     <div class="row only-single">
       <button id="btnDump" class="primary" disabled>Download</button>
-      <button id="btnDeleteLog" class="danger" disabled>Erase history on sensor…</button>
+      <button id="btnDeleteLog" class="danger" disabled>Erase sensor log…</button>
     </div>
     <div class="row only-all">
       <button id="bDump" class="primary">Download</button>
@@ -321,7 +321,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 
   <!-- History -->
   <section class="card" data-tab="single history">
-    <h2>Stored history</h2>
+    <h2>Stored readings</h2>
     <p class="muted hist-extra" id="storageInfo"></p>
     <div class="row">
       <select id="histDev"><option value="">(no data yet)</option></select>
@@ -497,7 +497,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=97"></script>
+<script src="core.js?v=98"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -604,7 +604,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 97;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 98;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -790,7 +790,7 @@ function rememberSensor(name, data) {
 }
 function removeSensor(name) {
   if (chr && sensorName === name) { alert("Disconnect from this sensor before removing it."); return; }
-  if (!confirm(`Remove ${shownName(name)} from the sensor list?\n\nIts downloaded history stays on this phone. It comes back if you ${document.body.dataset.tab === "all" ? "add it with “Add sensors…”" : "connect to it"} or import it again.`)) return;
+  if (!confirm(`Remove ${shownName(name)} from the sensor list?\n\nIts downloaded readings stay on this phone. It comes back if you ${document.body.dataset.tab === "all" ? "add it with “Add sensors…”" : "connect to it"} or import it again.`)) return;
   delete known[name]; delete rooms[name];
   reachable.delete(name); remembered.delete(name); batchSel.delete(name);
   removedSensors.add(name);
@@ -996,7 +996,7 @@ function exportSensors() {
   shareFiles([{ name: "sensors.json", rows: list.length, text: JSON.stringify(list, null, 2) + "\n", type: "application/json" }], `Thermometer sensor list (${list.length})`);
 }
 function clearSensors() {
-  if (!confirm("Remove all sensors and their descriptions from this browser? Downloaded history stays. You can load them again from a sensors.json.")) return;
+  if (!confirm("Remove all sensors and their descriptions from this browser? Downloaded readings stay. You can load them again from a sensors.json.")) return;
   rooms = {}; known = {}; batchSel.clear();
   lsSet("rooms", rooms); saveKnown(); saveSel();
   log("Sensor list cleared");
@@ -1387,7 +1387,7 @@ async function readLive(server) {
   if (out.t != null) $("liveT").textContent = out.t.toFixed(2) + "°";
   if (out.h != null) $("liveH").textContent = out.h.toFixed(1) + "%";
   if (out.b != null) $("liveB").textContent = out.b + "%";
-  $("liveNote").textContent = out.t == null ? "Live values not exposed; showing the latest downloaded sample once you download history." : "";
+  $("liveNote").textContent = out.t == null ? "Live values not exposed; showing the latest downloaded reading once you've downloaded some." : "";
 }
 // On connect: read the sensor clock and show how far off it is (under the live values).
 async function showClockState() {
@@ -1435,7 +1435,7 @@ function updateDownloadButtons() {
 // Returns { n, total, finished, deleted } (or null if cancelled). opts.skipConfirm: batch already asked.
 async function dump(opts = {}) {
   const { count: cnt, sync, erase: del } = downloadPlan();
-  if (del && !opts.skipConfirm && !confirm("After a successful download, PERMANENTLY erase the history stored on the sensor?")) return null;
+  if (del && !opts.skipConfirm && !confirm("After a successful download, PERMANENTLY erase the sensor's log?")) return null;
   const result = { n: 0, total: 0, finished: false, deleted: false };
   const raw = []; let done = false;
   const prog = $("dumpProg"), bar = prog.firstElementChild; prog.style.display = "block"; bar.style.width = "0";
@@ -1447,7 +1447,7 @@ async function dump(opts = {}) {
     } else done = true;
   };
   const ui = setInterval(() => {
-    $("dumpStatus").textContent = `${raw.length} samples…`;
+    $("dumpStatus").textContent = `${raw.length} readings…`;
     if (cnt !== 0xffff) bar.style.width = Math.min(100, raw.length / cnt * 100) + "%";
     else bar.style.width = (raw.length ? 50 + 45 * (1 - Math.exp(-raw.length / 3000)) : 5) + "%";
   }, 250);
@@ -1457,17 +1457,17 @@ async function dump(opts = {}) {
     // Read the clock first: its error now is the end point of the drift correction.
     const clk = prefs.driftCorr !== false ? await readSensorClock() : null;
     if (clk) dbg(`Clock before download: sensor ${faceValue(clk.sensor)}, phone ${faceValue(Math.round(clk.phone))} (${Math.round(clk.sensor - clk.phone)} s)`);
-    else if (prefs.driftCorr !== false) log("Couldn't read the clock - the newest samples won't be drift-corrected.", "warn");
-    log(`Requesting ${cnt === 0xffff ? "all stored" : cnt} samples (sensor ${devKey()}, clock mode ${prefs.timeMode}, sync ${sync}, delete ${del})…`);
+    else if (prefs.driftCorr !== false) log("Couldn't read the clock - the newest readings won't be drift-corrected.", "warn");
+    log(`Requesting ${cnt === 0xffff ? "all stored" : cnt} readings (sensor ${devKey()}, clock mode ${prefs.timeMode}, sync ${sync}, delete ${del})…`);
     await write([0x35, cnt & 0xff, cnt >> 8, 0, 0]);
     const finished = await waitIdle(() => done);
     listeners.delete(l);
     const secs = (performance.now() - sDump) / 1000;
-    dbg(`Transfer stats: ${raw.length} samples in ${secs.toFixed(1)} s (${(raw.length / Math.max(secs, 0.001)).toFixed(0)}/s)` +
+    dbg(`Transfer stats: ${raw.length} readings in ${secs.toFixed(1)} s (${(raw.length / Math.max(secs, 0.001)).toFixed(0)}/s)` +
       (raw.length ? `; sensor times ${faceValue(Math.min(...raw.map(r => r[0])))} … ${faceValue(Math.max(...raw.map(r => r[0])))}` : ""));
-    if (!finished) log(`Idle timeout; keeping the ${raw.length} sample(s) received so far.`, "warn");
+    if (!finished) log(`Idle timeout; keeping the ${raw.length} reading(s) received so far.`, "warn");
     else {
-      log(`Transfer complete: ${raw.length} samples.`);
+      log(`Transfer complete: ${raw.length} readings.`);
       if (sync) {
         const t = deviceEpochNow(prefs.timeMode);
         try {
@@ -1503,13 +1503,13 @@ async function dump(opts = {}) {
     // Stored: [corrected time, t, h, mV, sensor's own time] - the sensor time identifies the reading,
     // so a later download (with a slightly different correction) replaces it instead of duplicating it.
     const total = await mergeInto(key, raw.map(([e, t, h, v, , c]) => [c - offSec, t, h, v, e - offSec]));
-    log(`Stored ${raw.length} new samples for ${key} (${total} total).`);
+    log(`Stored ${raw.length} new readings for ${key} (${total} total).`);
     // Erase only now: every downloaded reading is in this phone's storage (checked by reading it back).
     if (del && finished) {
       if (!idb || (await loadHistory(key)).length < total) log("Not erasing the sensor: the readings couldn't be saved permanently on this phone.", "err");
       else try {
         const r = await request([0x36, 0x12, 0x34], b => b[0] === 0x36);
-        log(r ? "Sensor confirmed: history deleted." : "No reply to delete; check with another download.");
+        log(r ? "Sensor confirmed: log erased." : "No reply to delete; check with another download.");
         result.deleted = !!r;
       } catch (e) { log("Erasing failed (the readings are saved): " + describeErr(e), "err"); }
     }
@@ -1520,7 +1520,7 @@ async function dump(opts = {}) {
       d.sort((a, b) => a - b);
       noteSensorLog(sensorName, result.deleted ? 0 : raw.length, d.length ? d[d.length >> 1] : null);
     }
-    $("dumpStatus").textContent = `${raw.length} samples downloaded · ${total} stored` + (drift && drift.stretches.some(s => s.applied) ? ` · ${driftSummary(drift)}` : "");
+    $("dumpStatus").textContent = `${raw.length} readings downloaded · ${total} stored` + (drift && drift.stretches.some(s => s.applied) ? ` · ${driftSummary(drift)}` : "");
     result.drift = drift ? driftSummary(drift) : "";
     showLatestSample(raw[raw.length - 1] && [0, ...raw[raw.length - 1].slice(1)]);
     bar.style.width = "100%";
@@ -1547,7 +1547,7 @@ function driftSummary(r) {
   const span = (last.E / last.perDay) * 86400;
   const rate = span >= 86400 ? `${Math.abs(last.perDay).toFixed(0)} s/day since ` : "since ";
   return `clock was ${fmtDur(last.E)} ${last.E > 0 ? "fast" : "slow"} (${rate}${localStr(last.from - (prefs.timeMode === "utc" ? 0 : localOffsetSec()))})` +
-    (ap.length > 1 ? `; ${ap.length} stretches between clock sets corrected` : "") + ` - ${ap.reduce((n, s) => n + s.n, 0)} samples corrected`;
+    (ap.length > 1 ? `; ${ap.length} stretches between clock sets corrected` : "") + ` - ${ap.reduce((n, s) => n + s.n, 0)} readings corrected`;
 }
 // Read the sensor clock: { sensor, phone } as face values in the selected time zone (phone time is
 // taken half-way through the request, to cancel the Bluetooth delay), or null.
@@ -1747,12 +1747,12 @@ const BATCH = {
   // Does what the download options say (the button shows it).
   async dump() {
     const plan = downloadPlan();
-    if (plan.erase && !confirm(`For ${batchTargets().length} sensor(s): download all stored history${plan.sync ? `, set the clock (${prefs.timeMode === "utc" ? "UTC" : "local time"})` : ""}, then PERMANENTLY erase the history on the sensor.\n\nA sensor is only erased if its download finished completely and is saved on this phone.`)) return;
+    if (plan.erase && !confirm(`For ${batchTargets().length} sensor(s): download the whole log${plan.sync ? `, set the clock (${prefs.timeMode === "utc" ? "UTC" : "local time"})` : ""}, then PERMANENTLY erase the log on the sensor.\n\nA sensor is only erased if its download finished completely and is saved on this phone.`)) return;
     await runBatch(downloadLabel(plan).replace("…", ""), async () => {
       const r = await dump({ skipConfirm: true });
       if (!r) return null;
       const ok = r.finished && (!plan.sync || r.synced) && (!plan.erase || r.deleted);
-      return { ok, text: `${r.n} samples downloaded · ${r.total} stored` + (plan.sync ? ` · ${r.synced ? "clock set" : "clock NOT set"}` : "") +
+      return { ok, text: `${r.n} readings downloaded · ${r.total} stored` + (plan.sync ? ` · ${r.synced ? "clock set" : "clock NOT set"}` : "") +
         (plan.erase ? ` · ${r.deleted ? "erased on sensor" : "NOT erased"}` : "") + (r.finished ? "" : " · INCOMPLETE (idle timeout)") + (r.drift ? " · " + r.drift : "") };
     });
   },
@@ -1852,7 +1852,7 @@ async function getTime() {
 }
 // Where history lives: IndexedDB in this browser's storage for this website, on the phone only.
 async function updateStorageInfo() {
-  if (DEMO) { $("storageInfo").textContent = "Demo history of three made-up sensors, kept in memory only."; return; }
+  if (DEMO) { $("storageInfo").textContent = "Demo readings of three made-up sensors, kept in memory only."; return; }
   let txt = `Saved only on this phone, inside Bluefy's website storage for ${location.host || "this page"} (IndexedDB${idb ? "" : " unavailable - kept in memory until the page closes"}).`;
   try {
     if (navigator.storage && navigator.storage.estimate) {
@@ -1867,9 +1867,9 @@ async function updateStorageInfo() {
   $("storageInfo").textContent = txt;
 }
 async function deleteLog() {
-  if (!confirm(`PERMANENTLY erase all recorded history on the sensor ${shownName(sensorName)}? This cannot be undone. (Data already downloaded to this phone is kept.)`)) return;
+  if (!confirm(`PERMANENTLY erase the whole log of the sensor ${shownName(sensorName)}? This cannot be undone. (Readings already downloaded to this phone are kept.)`)) return;
   const r = await request([0x36, 0x12, 0x34], b => b[0] === 0x36);
-  log(r ? "Sensor confirmed: history deleted." : "No reply (idle timeout); it may still have deleted.");
+  log(r ? "Sensor confirmed: log erased." : "No reply (idle timeout); it may still have deleted.");
   if (r && sensorName) noteSensorLog(sensorName, 0);
 }
 // ===== Sensor log fill level =====
@@ -1889,7 +1889,7 @@ function logWarning(name) {
   const P = cfgP || (L && L.P) || 600;
   const capDays = LOG_CAPACITY * P / 86400;
   const every = P % 60 ? `${P} s` : `${P / 60} min`;
-  if (!L) return { level: "none", short: "", text: `Log holds ~${fmtDays(capDays)} at one sample every ${every} - fill level known after the next full download` };
+  if (!L) return { level: "none", short: "", text: `Log holds ~${fmtDays(capDays)} at one reading every ${every} - fill level known after the next full download` };
   const now = Date.now() / 1000;
   const est = Math.min(LOG_CAPACITY, L.n + Math.max(0, now - L.at) / P);
   const fullAt = L.at + Math.max(0, LOG_CAPACITY - L.n) * P, daysLeft = (fullAt - now) / 86400;
@@ -1925,7 +1925,7 @@ const CFG_TEXT = {
   hw_ver_raw: ["Hardware version", "Identifies the sensor model for the firmware - don't change."],
   av_meas_mem_raw: ["Log every N measurements", c => {
     const p = logIntervalFromCfg(c);
-    return p ? `= one logged sample every ${secs(p)}, so the log holds ~${fmtDays(LOG_CAPACITY * p / 86400)} before the oldest readings are overwritten. 0 = logging off.`
+    return p ? `= one logged reading every ${secs(p)}, so the log holds ~${fmtDays(LOG_CAPACITY * p / 86400)} before the oldest readings are overwritten. 0 = logging off.`
       : "0 = logging off: nothing is recorded for download.";
   }],
 };
@@ -2038,12 +2038,12 @@ function csvAllFor(dev) {
 }
 function shareSelected() {
   const dev = $("histDev").value; if (!dev) { shareMsg("No stored data yet.", "status warn"); return; }
-  shareFiles([csvAllFor(dev)], `Thermometer history: ${histLabel(dev)}`);
+  shareFiles([csvAllFor(dev)], `Thermometer readings: ${histLabel(dev)}`);
 }
 function shareAllDevices() {
   const items = [...histCache.keys()].sort().map(csvAllFor).filter(it => it.rows);
   // Sharing every sensor's full history counts as a backup (once the share sheet reports success).
-  shareFiles(items, `Thermometer history: ${items.length} sensor(s)`, () => noteBackup(items.reduce((n, it) => n + it.rows, 0)));
+  shareFiles(items, `Thermometer readings: ${items.length} sensor(s)`, () => noteBackup(items.reduce((n, it) => n + it.rows, 0)));
 }
 // ===== Backup reminder =====
 // The history exists only in this browser's storage on this phone, and iOS may clear it (Bluefy
@@ -2106,7 +2106,7 @@ async function mergeDuplicateHistory() {
     }
     for (const k of ks) if (k !== id) await deleteHistory(k);
     const total = await mergeInto(id, all);
-    log(`History merged for ${id}: ${ks.join(", ")} → ${total} samples`);
+    log(`Readings merged for ${id}: ${ks.join(", ")} → ${total} readings`);
     merged++;
   }
   return merged;
@@ -2133,7 +2133,7 @@ async function loadChart() {
   const dev = $("histDev").value; lsSet("histDev", dev);
   histData = dev ? (histCache.get(dev) || await loadHistory(dev)) : [];
   view = null; updateZoomUi();
-  $("histCount").textContent = histData.length ? `${histData.length} samples · ${localStr(histData[0][0])} → ${localStr(histData[histData.length - 1][0])}` : "";
+  $("histCount").textContent = histData.length ? `${histData.length} readings · ${localStr(histData[0][0])} → ${localStr(histData[histData.length - 1][0])}` : "";
   drawChart();
 }
 let plotted = null;
@@ -2858,7 +2858,7 @@ function updateStatusBar() {
   $("btnSelAll").onclick = () => { knownNames().forEach(n => batchSel.add(n)); saveSel(); renderKnown(); };
   $("btnSelNone").onclick = () => { batchSel.clear(); saveSel(); renderKnown(); };
   $("bDump").onclick = () => withBusy(BATCH.dump);
-  // Straight from the tap (iOS only opens the share sheet then); same files as History → Share all sensors.
+  // Straight from the tap (iOS only opens the share sheet then); same files as Readings → Share all sensors.
   $("bShareAll").onclick = () => { shareAllDevices(); $("batchOut").textContent = $("shareMsg").textContent; };
   $("bGetTime").onclick = () => withBusy(BATCH.getTime);
   $("bSetTime").onclick = () => withBusy(BATCH.setTime);
@@ -2905,7 +2905,7 @@ function updateStatusBar() {
   $("fileImport").onchange = async e => { await importFiles([...e.target.files]); e.target.value = ""; };
   $("btnForget").onclick = async () => {
     const d = $("histDev").value; if (!d) return;
-    if (confirm(`Delete all stored history for ${histLabel(d)} from this phone? (The sensor itself is not affected.)`)) { await deleteHistory(d); await refreshDeviceList(); }
+    if (confirm(`Delete all stored readings of ${histLabel(d)} from this phone? (The sensor itself is not affected.)`)) { await deleteHistory(d); await refreshDeviceList(); }
   };
   $("chart").addEventListener("pointermove", onChartPointer);
   setupChartGestures();
@@ -2943,13 +2943,13 @@ function updateStatusBar() {
     $("demoBanner").classList.remove("hidden");
   } else {
     idb = await openDB();
-    if (!idb) log("IndexedDB unavailable - history is kept only until the page is closed.", "warn");
+    if (!idb) log("IndexedDB unavailable - readings are kept only until the page is closed.", "warn");
     else dbg("IndexedDB opened");
     // Ask the browser not to evict our data under storage pressure (may be ignored).
     try { if (navigator.storage && navigator.storage.persist) dbg(`storage.persist() → ${await navigator.storage.persist()}`); } catch (e) { dbg(`storage.persist() error: ${describeErr(e)}`); }
   }
   updateStorageInfo();
-  try { const n = await mergeDuplicateHistory(); if (n) renderKnown(); } catch (e) { log("History merge failed: " + errDetail(e), "err"); }
+  try { const n = await mergeDuplicateHistory(); if (n) renderKnown(); } catch (e) { log("Merging readings failed: " + errDetail(e), "err"); }
   await refreshDeviceList();
   setButtons(false);
 })();

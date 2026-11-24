@@ -6,13 +6,13 @@ ATC_MiThermometer custom firmware, over BLE, from the command line:
 
   --scan              find nearby ATC-firmware sensors, live as they're found
                        (optionally --save-sensors; press Enter to stop early)
-  --dump               download recorded temperature/humidity history to CSV
+  --dump               download the recorded temperature/humidity readings to CSV
                        (raw per-import files, plus regenerated aggregate
                        file(s) - see --merge-levels)
   --get-config         read the sensor's live config into a JSON file
   --set-config         write a (possibly edited) config JSON file back to the sensor
   --set-time           set the sensor's clock (UTC unless --time-mode local)
-  --delete-log         erase all recorded history from the sensor's flash
+  --delete-log         erase the sensor's log (all its recorded readings)
   --keep-log           (with --dump) keep the sensor's log; by default it's erased
                        once the whole log is downloaded and saved
   --sensors FILE       run any of the above against a whole list of sensors at
@@ -57,9 +57,9 @@ stalls with no new data for that long.
 NOTE ON THE POST-DUMP CLOCK SYNC (--no-clock-sync): by default, once a
 --dump finishes successfully, this script also writes the current time to
 the sensor's clock, and (unless --keep-log is given) deletes the
-sensor's history - both reusing the SAME already-open connection rather
+sensor's log - both reusing the SAME already-open connection rather
 than reconnecting, which is faster. Checked against the actual firmware
-source (src/ble.c: send_memo_blk()) - the history transfer is already
+source (src/ble.c: send_memo_blk()) - the log transfer is already
 fully complete and the sensor has already cleaned up its read state
 (reset rd_memo.cnt, restored normal connection latency) the moment it
 sends the short trailing 0x35 packet. Nothing about finishing the
@@ -87,7 +87,7 @@ sensor's own time. Merging identifies a reading by sensor time + values, so
 a later download with an updated correction replaces the earlier copy. The
 iPhone app (webapp/index.html, driftCorrect()) does exactly the same.
 
---- History transfer (0x35) ---
+--- Log transfer (0x35) ---
   Write 0x35 <cnt_lo> <cnt_hi> 0x00 0x00 -> sensor streams back samples as
   notifications (0xFFFF = "give me all of them").
   Each sample notification (13 bytes):
@@ -138,7 +138,7 @@ iPhone app (webapp/index.html, driftCorrect()) does exactly the same.
   struct (src/cmd_parser.c), so the write is a straight byte-for-byte
   round trip of what a get returns (minus the read-only version byte).
 
---- Delete history (0x36) ---
+--- Erase log (0x36) ---
   Write 0x36 0x12 0x34   (the 0x12 0x34 is a hard-coded confirmation
   value the firmware checks for - see src/cmd_parser.c - so a bare 0x36
   by itself does nothing).
@@ -374,7 +374,7 @@ def find_raw_files(directory: Path, base: str):
     contains the sensor's ATC_xxxxxx name - any raw file in the directory for
     that same sensor under another description or the old
     'history_<name>__<description>_raw_*' naming, so renaming a description
-    never splits a sensor's history."""
+    never splits a sensor's readings."""
     files = {Path(p) for p in glob.glob(str(directory / f"{glob.escape(base)}-raw-*.csv"))}
     files |= {Path(p) for p in glob.glob(str(directory / f"{glob.escape(base)}_raw_*.csv"))}
     m = SENSOR_ID_RE.search(base)
@@ -678,7 +678,7 @@ def drift_summary(stretches, note: str) -> str:
            f"({rate}since {since})")
     if len(applied) > 1:
         txt += f"; {len(applied)} stretches between clock sets corrected"
-    return txt + f" - {sum(s['n'] for s in applied)} samples corrected"
+    return txt + f" - {sum(s['n'] for s in applied)} readings corrected"
 
 
 async def read_device_clock(client, clock_reply: dict, clock_event: asyncio.Event, activity=None):
@@ -1012,10 +1012,10 @@ async def dump(address: str, out_prefix: str, requested_count: int, timeout: flo
                     f"{fmt_dur(clk[0] - clk[1])} {'fast' if clk[0] >= clk[1] else 'slow'} "
                     f"[{time_mode_label(time_mode)}]")
             else:
-                log("Couldn't read the sensor clock - the newest samples won't be drift-corrected.")
+                log("Couldn't read the sensor clock - the newest readings won't be drift-corrected.")
 
         cnt = requested_count & 0xFFFF
-        log(f"Requesting {'all stored' if cnt == 0xFFFF else cnt} samples...")
+        log(f"Requesting {'all stored' if cnt == 0xFFFF else cnt} readings...")
         await client.write_gatt_char(
             CHAR_UUID, bytes([0x35, cnt & 0xFF, (cnt >> 8) & 0xFF, 0, 0])
         )
@@ -1024,7 +1024,7 @@ async def dump(address: str, out_prefix: str, requested_count: int, timeout: flo
         finished = await wait_idle(done, activity, timeout)
         if not finished:
             log(f"No response from the sensor for {timeout:.0f}s (idle timeout); "
-                f"writing the {len(samples)} sample(s) received so far. (This only "
+                f"writing the {len(samples)} reading(s) received so far. (This only "
                 "fires when the sensor goes quiet, not from the transfer's total "
                 "length - raise --timeout if the sensor is just slow to respond.)")
         # Save the download to disk BEFORE anything else happens on the sensor, so erasing it
@@ -1050,7 +1050,7 @@ async def dump(address: str, out_prefix: str, requested_count: int, timeout: flo
                     log(f"(non-fatal) failed to sync sensor clock after dump: {e}")
 
             if delete_after and cnt != 0xFFFF:
-                log(f"Not erasing the sensor: only the last {cnt} samples were downloaded "
+                log(f"Not erasing the sensor: only the last {cnt} readings were downloaded "
                     "(erasing would lose the older ones). Download all to erase.")
             elif delete_after and saved != len(samples):
                 log("Not erasing the sensor: the download file couldn't be confirmed on disk.")
@@ -1059,16 +1059,16 @@ async def dump(address: str, out_prefix: str, requested_count: int, timeout: flo
                 # calling delete_log() (which would reconnect from scratch) -
                 # we're already connected and notifying, so this is just one
                 # more write+wait on the link we already have, which is faster.
-                log(f"Saved all {saved} samples to {out_path}; erasing the sensor's history "
+                log(f"Saved all {saved} readings to {out_path}; erasing the sensor's log "
                     "(--keep-log to keep it)...")
                 await client.write_gatt_char(CHAR_UUID, bytes([0x36, 0x12, 0x34]))
                 activity.touch()
                 if await wait_idle(delete_done, activity, timeout):
-                    log("Sensor confirmed: recorded history deleted.")
+                    log("Sensor confirmed: log erased.")
                 else:
                     log(f"No response from the sensor for {timeout:.0f}s (idle timeout); "
                         "it may still have processed the deletion. Consider trying "
-                        "--dump again to check whether the history is actually empty.")
+                        "--dump again to check whether the log is actually empty.")
 
         await client.stop_notify(CHAR_UUID)
 
@@ -1105,7 +1105,7 @@ def _save_dump(samples, address, out_prefix, locale, time_mode, drift_corr, clk)
             save_clock_log(address, rate=long_ones[-1]["per_day"] / 86400)
         for s in stretches:
             log(f"  drift stretch {device_epoch_as_datetime(s['from']).isoformat(sep=' ')} .. "
-                f"{device_epoch_as_datetime(s['to']).isoformat(sep=' ')} ({s['n']} samples): "
+                f"{device_epoch_as_datetime(s['to']).isoformat(sep=' ')} ({s['n']} readings): "
                 + ("-" if s["E"] is None else f"{s['E']:+.0f} s, {s['per_day']:+.1f} s/day, ")
                 + ("corrected" if s["applied"] else s.get("why", "")))
         log(f"Clock drift: {drift_summary(stretches, note)}")
@@ -1123,7 +1123,7 @@ def _save_dump(samples, address, out_prefix, locale, time_mode, drift_corr, clk)
     except OSError as e:
         log(f"Couldn't write {out_path}: {e}")
         return out_path, 0
-    log(f"Wrote {saved} samples to {out_path}")
+    log(f"Wrote {saved} readings to {out_path}")
     return out_path, saved
 
 
@@ -1134,7 +1134,7 @@ def _merge_and_report(prefix, locale, merge_tz, merge_levels):
             if len(locales_seen) > 1 else ""
         if written["all"]:
             path, count = written["all"]
-            log(f"Merged {file_count} raw file(s) into {path}: {count} samples{locale_note}")
+            log(f"Merged {file_count} raw file(s) into {path}: {count} readings{locale_note}")
         if written["daily"]:
             days = [p.stem.rsplit("-daily-", 1)[1] for p, _ in written["daily"]]
             log(f"Wrote {len(written['daily'])} daily file(s) ({days[0]}..{days[-1]}) "
@@ -1281,15 +1281,15 @@ async def delete_log(address: str, timeout: float = DEFAULT_TIMEOUT):
         await client.start_notify(CHAR_UUID, handle_notify)
         await _warm_up(client, activity)
         armed["on"] = True
-        log("Sending delete-history command...")
+        log("Sending erase-log command...")
         await client.write_gatt_char(CHAR_UUID, bytes([0x36, 0x12, 0x34]))
         activity.touch()
         if await wait_idle(done, activity, timeout):
-            log("Sensor confirmed: recorded history deleted.")
+            log("Sensor confirmed: log erased.")
         else:
             log(f"No response from the sensor for {timeout:.0f}s (idle timeout); it may "
                 "still have processed the deletion. Consider trying --dump to check "
-                "whether the history is actually empty.")
+                "whether the log is actually empty.")
         await client.stop_notify(CHAR_UUID)
 
 
@@ -1412,8 +1412,8 @@ examples:
         -> also <Description>-<name>-daily-<YYYYMMDD>.csv and -monthly-<YYYYMM>.csv
     python ATC_MiThermometer_tools.py --sensors sensors.json --dump --merge-tz Europe/Berlin
         -> daily/monthly files cut at that city's midnight (the times stay UTC)
-    python ATC_MiThermometer_tools.py --sensors sensors.json --dump --out history
-        -> same, with a prefix: history-<Description>-<name>-...
+    python ATC_MiThermometer_tools.py --sensors sensors.json --dump --out home
+        -> same, with a prefix: home-<Description>-<name>-...
 
     python ATC_MiThermometer_tools.py --sensors sensors.json --set-time
     python ATC_MiThermometer_tools.py --sensors sensors.json --get-config
@@ -1455,7 +1455,7 @@ def main():
                               "--dump/--get-config/--set-config/--set-time/--delete-log WITHOUT an "
                               "address to run that action against every sensor in the file.")
     parser.add_argument("--dump", nargs="?", const="__ALL__", default=None, metavar="ADDRESS",
-                         help="MAC address of the sensor to read history from "
+                         help="MAC address of the sensor to download readings from "
                               "(omit the address, and use with --sensors, to run on all of them)")
     parser.add_argument("--get-config", nargs="?", const="__ALL__", default=None, metavar="ADDRESS",
                          help="MAC address of the sensor to read config from (use with --config-out); "
@@ -1464,7 +1464,7 @@ def main():
                          help="MAC address of the sensor to write config to (use with --config-in); "
                               "omit the address (with --sensors) to run on all of them")
     parser.add_argument("--delete-log", nargs="?", const="__ALL__", default=None, metavar="ADDRESS",
-                         help="MAC address of the sensor to erase all recorded history on; "
+                         help="MAC address of the sensor whose log to erase; "
                               "omit the address (with --sensors) to run on all of them")
     parser.add_argument("--keep-log", action="store_true",
                          help="(--dump) Don't erase the sensor's log after downloading. By default "
@@ -1477,7 +1477,7 @@ def main():
                               "file's docstring for why); pass this flag to skip it.")
     parser.add_argument("--no-drift-correction", action="store_true",
                          help="(--dump) Don't correct the sensor clock's drift. By default the clock "
-                              "is read before downloading and the samples since each clock set are "
+                              "is read before downloading and the readings since each clock set are "
                               "shifted to the right time (see NOTE ON CLOCK DRIFT); the sensor's own "
                               "times stay in the 'sensor_timestamp' column.")
     parser.add_argument("--set-time", nargs="?", const="__ALL__", default=None, metavar="ADDRESS",
@@ -1504,7 +1504,7 @@ def main():
                               "exists; otherwise this shared file is used for every sensor.")
 
     parser.add_argument("--count", type=lambda x: int(x, 0), default=0xFFFF,
-                         help="(--dump) Number of most recent samples to request (default: all, 0xFFFF)")
+                         help="(--dump) Number of most recent readings to request (default: all, 0xFFFF)")
     parser.add_argument("--timeout", type=float, default=None,
                          help="Idle timeout in seconds - only counts from the last message sent or "
                               "received, not the whole operation. Used for --scan too (how long to "
@@ -1654,7 +1654,7 @@ def main():
             sensors = require_sensors()
             names = ", ".join(device_display(d) for d in sensors)
             if not confirm_destructive(
-                f"This will PERMANENTLY erase all recorded history on {len(sensors)} "
+                f"This will PERMANENTLY erase the log of {len(sensors)} "
                 f"sensor(s): {names}. Type YES to continue: "
             ):
                 sys.exit(1)
@@ -1665,7 +1665,7 @@ def main():
             asyncio.run(run_batch(sensors, "delete-log", _one))
         else:
             if not confirm_destructive(
-                "This will PERMANENTLY erase all recorded history on the sensor. "
+                "This will PERMANENTLY erase the sensor's log. "
                 "Type YES to continue: "
             ):
                 sys.exit(1)
