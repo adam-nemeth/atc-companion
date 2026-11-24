@@ -511,7 +511,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=104"></script>
+<script src="core.js?v=105"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -618,7 +618,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 104;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 105;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -2286,12 +2286,13 @@ function setupChartSettings() {
   $("scFit").onclick = fitFixedScale;
   syncScaleToggle();
 }
-// The Resolution list: options this view can't show are greyed out.
-function syncResolution(span, maxCount, minCount) {
+// The Resolution list: shows the one in use; options this view can't show are greyed out.
+function syncResolution(span, maxCount, minCount, shown) {
   for (const o of $("resSel").options) {
     const p = +o.value, off = !!p && !!span && !!periodProblem(p, span, maxCount, minCount);
     if (o.disabled !== off) o.disabled = off;
   }
+  if ($("resSel").value !== String(shown)) $("resSel").value = String(shown);
 }
 function syncStyleToggle() {
   const c = prefs.chartStyle === "candle";
@@ -2349,12 +2350,13 @@ function drawChart() {
   for (let i = i0 + 1; i < i1; i += stride) steps.push(histData[i][0] - histData[i - 1][0]);
   const interval = steps.length ? steps.sort((a, b) => a - b)[steps.length >> 1] : 600;
   const viewSpan = dom ? dom.b - dom.a : 0;
-  // Resolution: the calendar period chosen by the user if this view can show it, else automatic
-  // (candles: ~7 px each; lines: slices of a fitting width, or single readings).
+  // Resolution: the calendar period chosen by the user, or the closest one this view can show (the
+  // choice itself is kept, so it's back as soon as it fits again). Otherwise automatic (candles: ~7 px
+  // each; lines: slices of a fitting width, or single readings).
   const maxPeriods = candleMode ? Math.floor(pw / 3) : pw * 4, minPeriods = candleMode ? 0.9 : 2;
-  const wanted = prefs.resolution || 0, problem = wanted ? periodProblem(wanted, viewSpan, maxPeriods, minPeriods) : "";
-  const period = !dom ? 0 : wanted && !problem ? wanted : candleMode ? choosePeriod(viewSpan, Math.max(8, Math.floor(pw / 7))) : 0;
-  syncResolution(viewSpan, maxPeriods, minPeriods);
+  const wanted = prefs.resolution || 0, shown = wanted && dom ? closestPeriod(wanted, viewSpan, maxPeriods, minPeriods) : 0;
+  const period = !dom ? 0 : shown ? shown : candleMode ? choosePeriod(viewSpan, Math.max(8, Math.floor(pw / 7))) : 0;
+  syncResolution(viewSpan, maxPeriods, minPeriods, dom ? shown : wanted);
   const slice = dom && !period ? sliceWidth(viewSpan, buckets, interval) : 0;
   const pStart = t => period ? periodStart(t, period) : Math.floor(t / slice) * slice, pEnd = s => period ? periodEnd(s, period) : s + slice;
   const grouped = !!(period || slice);
@@ -2588,7 +2590,7 @@ function drawChart() {
     unitH, decH: bat ? 3 : 0, decH1: bat ? 3 : 1, dataRange: { t: range(1), h: range(2) } };
   // Note under the chart while points are averages (or candles are shown).
   const note = $("avgNote");
-  const tooMuch = problem ? `${periodLabel(wanted)} is too ${problem} for this range, so it's chosen automatically. ` : "";
+  const tooMuch = wanted && shown !== wanted ? `${periodLabel(wanted)} doesn't fit this range, so ${shown ? `it's ${periodLabel(shown)} here` : "the resolution is automatic here"}. ` : "";
   if (note) {
     if (candleMode) {
       note.textContent = tooMuch + `Each candle is ${periodLabel(period)}: first, highest, lowest and last reading. Hollow = rose, filled = fell.`;

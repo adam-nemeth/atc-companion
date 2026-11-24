@@ -367,6 +367,13 @@ function periodKey(period) {
 const choosePeriod = (span, maxCount) => (PERIODS.find(([p]) => span / p <= maxCount) || PERIODS[PERIODS.length - 1])[0];
 // Can this period be shown over this span? "" = yes, else why not.
 const periodProblem = (period, span, maxCount, minCount = 0.9) => span / period > maxCount ? "fine" : span / period < minCount ? "coarse" : "";
+// The period closest to the wanted one that this span can show (the wanted one if it can), 0 = none.
+function closestPeriod(wanted, span, maxCount, minCount) {
+  let best = 0;
+  const dist = p => Math.abs(Math.log(p / wanted));
+  for (const [p] of PERIODS) if (!periodProblem(p, span, maxCount, minCount) && (!best || dist(p) < dist(best))) best = p;
+  return best;
+}
 // Candles: [{ start, end, n, t: [open, high, low, close], h: [...] }] per period, from ordered readings.
 function buildCandles(samples, period) {
   const list = [], key = periodKey(period); let cur = null;
@@ -392,5 +399,5 @@ if (typeof module !== "undefined") module.exports = {
   decodeCfg, FLG_BITS, FLG2_BITS, byteFromBits, encodeCfg, fmtNum, toCsv, parseCsv, histId,
   timeTicks, utcOffsetMin, dstChanges, sampleKey, withAtcPrefix, labelFor, downloadLabel,
   sliceWidth, averageSlices, clampWindow,
-  PERIODS, WEEK, MONTH, periodLabel, periodStart, periodEnd, periodKey, choosePeriod, periodProblem, buildCandles,
+  PERIODS, WEEK, MONTH, periodLabel, periodStart, periodEnd, periodKey, choosePeriod, periodProblem, closestPeriod, buildCandles,
 };

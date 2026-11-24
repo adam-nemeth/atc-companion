@@ -209,6 +209,15 @@ test("sensor label: description, else Bluetooth name, else ID", () => {
   assert.equal(core.labelFor(undefined, "", "ATC_A1B2C3"), "ATC_A1B2C3");
 });
 
+test("chart resolution: closest one that fits the range", () => {
+  const D = 86400, H = 3600;
+  assert.equal(core.closestPeriod(D, 7 * D, 80, 0.9), D);             // fits: unchanged
+  assert.equal(core.closestPeriod(H, 30 * D, 80, 0.9), 12 * H);       // too fine: the finest that fits
+  assert.equal(core.closestPeriod(core.WEEK, D, 80, 0.9), D);         // too coarse: the coarsest that fits
+  assert.equal(core.closestPeriod(core.MONTH, 7 * D, 1000, 2), D);
+  assert.equal(core.closestPeriod(H, 120, 80, 0.9), 0);               // nothing fits a 2-minute view
+});
+
 test("small helpers", () => {
   assert.equal(core.fmtOffset(3600), "+01:00");
   assert.equal(core.fmtOffset(-16200), "-04:30");
