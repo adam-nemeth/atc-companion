@@ -490,7 +490,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=90"></script>
+<script src="core.js?v=91"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -597,7 +597,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 90;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 91;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1041,7 +1041,7 @@ function renderKnown() {
     subBtn.setAttribute("aria-expanded", String(open)); subBtn.setAttribute("aria-label", `${st.textContent}${lg2.textContent} - ${open ? "hide" : "show"} details of ${shownName(name)}`);
     subBtn.onclick = toggle;
     const btn = document.createElement("button"); btn.className = "go";
-    btn.textContent = isCur ? "Connected" : chr ? "Switch" : "Connect";
+    btn.textContent = connecting && connecting.dev === dev && dev ? "Connecting…" : isCur ? "Connected" : chr ? "Switch" : "Connect";
     if (isCur) btn.classList.add("is-current");
     btn.disabled = !dev || isCur || busy;
     btn.onclick = () => {
@@ -1195,8 +1195,21 @@ async function connect(showAll) {
   await connectDevice(device);
 }
 // Returns true when connected. opts.batch skips the extras (name read, live values) to save time.
+let connecting = null;  // { dev, label } from the tap until the connection succeeded or failed
 async function connectDevice(dev, expectedName, opts = {}) {
-  if (chr && device && device !== dev) { log(`Switching from ${sensorName} to ${expectedName || dev.name || dev.id}`); await disconnectAndWait(); }
+  // Say so straight away: disconnecting another sensor and waiting for a broadcast come first and
+  // can take several seconds.
+  connecting = { dev, name: expectedName, label: guessLabel(dev, expectedName) };
+  setStatus(`Connecting to ${connecting.label}…`, "warn"); showInfo(""); renderKnown();
+  try { return await connectDeviceNow(dev, expectedName, opts); }
+  finally { connecting = null; renderKnown(); }
+}
+async function connectDeviceNow(dev, expectedName, opts) {
+  if (chr && device && device !== dev) {
+    log(`Switching from ${sensorName} to ${expectedName || dev.name || dev.id}`);
+    showInfo(`Disconnecting from ${sensorName ? shownName(sensorName) : "the other sensor"} first…`);
+    await disconnectAndWait();
+  }
   device = dev; sensorName = null; $("clockState").textContent = "";
   showInfo("");
   // Diagnostics: is this a fresh handle from the picker/scan, or one reused from an earlier connection?
@@ -1209,7 +1222,7 @@ async function connectDevice(dev, expectedName, opts = {}) {
   }
   if (!device._atcListener) { device.addEventListener("gattserverdisconnected", onDisconnected); device._atcListener = true; }
   const connectingTo = guessLabel(device, expectedName);
-  setStatus(`Connecting to ${connectingTo}…`, "warn"); log(`Connecting to ${expectedName || device.name || device.id} (id ${device.id})…`);
+  showInfo(""); log(`Connecting to ${expectedName || device.name || device.id} (id ${device.id})…`);
   let step = "connecting";
   const sAll = t0();
   try {
@@ -1317,7 +1330,10 @@ function onDisconnected(ev) {
   if (ev && ev.target && ev.target !== device) { dbg(`Disconnect event from previous sensor ${ev.target.name || ev.target.id} (ignored)`); return; }
   log(`Disconnected (gattserverdisconnected); busy=${busy}, ${rxCount} notifications this session, last BLE traffic ${Math.round((Date.now() - lastActivity) / 1000)} s ago, page ${document.hidden ? "hidden" : "visible"}`, "warn");
   const was = sensorName ? shownName(sensorName) : guessLabel(device);
-  chr = null; listeners.clear(); setStatus(`Disconnected from ${was}`); setButtons(false); renderKnown();
+  chr = null; listeners.clear(); setButtons(false);
+  // While connecting, disconnects are part of it (switching, retries): keep showing "Connecting to …".
+  if (!connecting) setStatus(`Disconnected from ${was}`);
+  renderKnown();
 }
 function disconnect() { dbg("Disconnect requested by user"); if (device && device.gatt.connected) device.gatt.disconnect(); }
 function setButtons(on) {
@@ -1327,7 +1343,8 @@ function setButtons(on) {
   $("btnConnect").disabled = $("btnConnectAll").disabled = on || busy || !navigator.bluetooth;
 }
 async function withBusy(fn) {
-  if (busy) return; busy = true; setButtons(!!chr);
+  if (busy) { dbg("Tap ignored - another operation is still running"); return; }
+  busy = true; setButtons(!!chr); renderKnown();  // so the list buttons show they're off meanwhile
   try { await fn(); } catch (e) { showError("Error", e); } finally { busy = false; setButtons(!!chr); renderKnown(); }
 }
 
