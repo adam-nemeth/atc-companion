@@ -497,7 +497,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=96"></script>
+<script src="core.js?v=97"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -604,7 +604,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 96;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 97;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -790,7 +790,7 @@ function rememberSensor(name, data) {
 }
 function removeSensor(name) {
   if (chr && sensorName === name) { alert("Disconnect from this sensor before removing it."); return; }
-  if (!confirm(`Remove ${shownName(name)} from the sensor list?\n\nIts downloaded history stays on this phone. It comes back if you connect to it, add it with “Add sensors…”, or import it again.`)) return;
+  if (!confirm(`Remove ${shownName(name)} from the sensor list?\n\nIts downloaded history stays on this phone. It comes back if you ${document.body.dataset.tab === "all" ? "add it with “Add sensors…”" : "connect to it"} or import it again.`)) return;
   delete known[name]; delete rooms[name];
   reachable.delete(name); remembered.delete(name); batchSel.delete(name);
   removedSensors.add(name);
@@ -1007,7 +1007,7 @@ const openKnown = new Set();  // sensors whose details are open in the list
 function renderKnown() {
   const box = $("knownList"); box.innerHTML = "";
   if (!knownNames().length) {
-    box.innerHTML = `<p class="muted">No sensors yet. Connect to one with “Connect…”, or load your <code>sensors.json</code> in the Settings tab.</p>`;
+    box.innerHTML = `<p class="muted">No sensors yet. <span class="only-single">Connect to one with “Connect…”</span><span class="only-all">Add them with “Add sensors…”</span>, or load your <code>sensors.json</code> in the Settings tab.</p>`;
   }
   let ready = 0, ticked = 0;
   for (const name of knownNames()) {
@@ -1075,7 +1075,7 @@ function renderKnown() {
       // What to do about it ("Looking…" is already in the status line above).
       if (!dev && !(rem && rem._waking)) {
         const hint = document.createElement("div");
-        hint.textContent = "Not available: tap “Connect…” on the Sensor tab or “Add sensors…” on the Batch tab.";
+        hint.innerHTML = `Not available: tap <span class="only-single">“Connect…”</span><span class="only-all">“Add sensors…”</span> below.`;
         more.append(hint);
       }
       const rm = document.createElement("button");
@@ -1148,7 +1148,7 @@ async function toggleScan() {
     // scanning but can't do it, so hide the button for this visit instead of showing "User canceled".
     if (ms < 300) {
       $("btnScan").classList.add("hidden");
-      $("scanMsg").textContent = "Scanning isn't supported in this browser - use “Connect…” or “Add sensors…” to reach your sensors.";
+      $("scanMsg").innerHTML = `Scanning isn't supported in this browser - use <span class="only-single">“Connect…”</span><span class="only-all">“Add sensors…”</span> to reach your sensors.`;
     } else $("scanMsg").textContent = "Scan failed: " + describeErr(e);
     return;
   } finally { scanPending = false; $("btnScan").disabled = false; }
@@ -1258,7 +1258,7 @@ async function connectDeviceNow(dev, expectedName, opts) {
             for (const [k, v] of reachable) if (v === dev) reachable.delete(k);
             if (dev._remembered) { log(`Remembered sensor still not connectable after waking (advertisement ${dev._advSeen ? "was" : "was NOT"} heard)`, "warn"); for (const [k, v] of remembered) if (v === dev) remembered.delete(k); }
             renderKnown();
-            throw new Error("this sensor needs to be picked again - tap “Connect…” (or “Add sensors…”) and choose it");
+            throw new Error("this sensor needs to be picked again - tap “Connect…” and choose it");
           }
           throw e;
         }
