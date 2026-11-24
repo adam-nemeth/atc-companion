@@ -514,7 +514,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=106"></script>
+<script src="core.js?v=107"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -621,7 +621,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 106;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 107;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1141,7 +1141,7 @@ function renderKnown() {
     box.appendChild(row);
   }
   renderRooms();
-  const rm = $("readyMsg"); if (rm) rm.textContent = `${ready} available · ${ticked} ticked`;
+  const rm = $("readyMsg"); if (rm) { const n = knownNames().length; rm.textContent = n ? `${n} sensor${n === 1 ? "" : "s"} · ${ready} available · ${ticked} ticked` : ""; }
   for (const id of ["bDump", "bGetTime", "bSetTime", "bGetCfg", "bSetCfg", "btnAddSensors"]) { const b = $(id); if (b) b.disabled = busy || (id !== "btnAddSensors" && !ticked); }
 }
 // One-line description of what a browser put into an advertisement event (for the debug log).
