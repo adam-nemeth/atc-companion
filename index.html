@@ -72,6 +72,7 @@ label { display: inline-flex; gap: 6px; align-items: center; }
 /* Scale switch: "Scale  [Auto|Fixed]" with the active option filled in */
 #stepBtns { margin-top: 6px; }
 #stepBtns .nav { padding: 6px 14px; font-size: 14px; }
+#stepBtns #resSel { margin-left: auto; padding: 6px 8px; font-size: 14px; max-width: 100%; }
 .legend .scalesw + .scalesw { margin-left: 8px; }
 .legend .scalesw { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .legend .scalesw .seg { padding: 4px 10px; font-size: 13px; }
@@ -131,7 +132,6 @@ body[data-tab="all"] #knownList .ks > .go { display: none; }
 #knownList .kl { min-width: 0; }
 #knownList .kc .nm { display: flex; align-items: center; gap: 8px; min-height: 26px; cursor: pointer; }
 #knownList .kc .nm span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#knownList .kc .nm small { font-size: 12.5px; font-weight: 400; opacity: .8; }
 #knownList .kc .nm input { flex: none; margin: 0; }
 #knownList .kc .sub { display: flex; max-width: 100%; align-items: center; border: 0; background: none; border-radius: 0; padding: 3px 0 5px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: pre; }
 body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
@@ -334,6 +334,9 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
       <button class="nav" id="btnPrev" title="Back one period">◀</button>
       <button class="nav" id="btnToday">Today</button>
       <button class="nav" id="btnNext" title="Forward one period">▶</button>
+      <select id="resSel" aria-label="Chart resolution" title="How much time one candle, or one point of an averaged line, covers">
+        <option value="0">Resolution: auto</option>
+      </select>
     </div>
     <div id="chartWrap">
       <svg id="chart" role="img" aria-label="Temperature and humidity chart"></svg>
@@ -490,7 +493,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=91"></script>
+<script src="core.js?v=92"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -597,7 +600,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 91;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 92;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -765,16 +768,13 @@ function sensorFromBtName(btName) {
   return Object.keys(known).find(n => known[n].btName && known[n].btName === btName) || null;
 }
 function knownNames() {
-  // Sorted by exactly the text shown in the list ("Description · Bluetooth name").
+  // Sorted by exactly the text shown in the list (see shownName).
   return [...new Set([...Object.keys(rooms), ...Object.keys(known)])].filter(n => /^ATC_/i.test(n))
     .sort((a, b) => byText(shownName(a), shownName(b)));
 }
 const byText = (a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
-// What the lists show for a sensor: its description (if any) and its Bluetooth name.
-function shownName(n) {
-  const bt = (known[n] && known[n].btName) || n;
-  return rooms[n] ? `${rooms[n]} · ${bt}` : bt;
-}
+// What a sensor is called in lists, messages and the chart's sensor menu.
+function shownName(n) { return labelFor(rooms[n], known[n] && known[n].btName, n); }
 // Sensors removed from the list stay out of it until the user connects to, adds or imports them again
 // (otherwise remembered-sensor wake-ups and scans would quietly add them back).
 const removedSensors = new Set(lsGet("removedSensors", []));
@@ -927,11 +927,11 @@ function renderRooms() {
     if (k.t == null) {
       const tile = document.createElement("div"); tile.className = "room stale";
       tile.innerHTML = `<div class="rn"></div><div class="rt">–</div><div class="rh">&nbsp;</div><div class="rm">no reading yet</div>`;
-      tile.querySelector(".rn").textContent = rooms[n] || k.btName || n;
+      tile.querySelector(".rn").textContent = shownName(n);
       box.appendChild(tile); continue;
     }
     const tile = document.createElement("div"); tile.className = "room" + (age > 600000 ? " stale" : "");
-    const title = rooms[n] || k.btName || n;
+    const title = shownName(n);
     tile.innerHTML = `<div class="rn"></div><div class="rt"></div><div class="rh"></div><div class="rm"></div>`;
     tile.querySelector(".rn").textContent = title;
     tile.querySelector(".rt").textContent = `${k.t.toFixed(1)}°`;
@@ -1022,10 +1022,9 @@ function renderKnown() {
     // The name ticks the sensor on the Batch tab; on the Sensor tab (no tick box) it opens the details.
     left.querySelector("label").onclick = ev => { if (document.body.dataset.tab !== "all") { ev.preventDefault(); toggle(); } };
     const nameEl = left.querySelector(".nm span");
-    // Description and Bluetooth name (what the picker shows); the fixed ATC_xxxxxx ID is in the details.
+    // The Bluetooth name (what the picker shows) and the fixed ATC_xxxxxx ID are in the details.
     const btName = k.btName || name;
-    nameEl.textContent = rooms[name] || btName; nameEl.title = shownName(name);
-    if (rooms[name]) { const bt = document.createElement("small"); bt.textContent = ` · ${btName}`; nameEl.append(bt); }
+    nameEl.textContent = nameEl.title = shownName(name);
     // Green = available, bold = the connected one.
     nameEl.style.color = dev ? "var(--ok)" : "";
     nameEl.style.fontWeight = isCur ? "700" : "400";
@@ -1050,7 +1049,7 @@ function renderKnown() {
       $("deviceCard").scrollIntoView({ behavior: "smooth", block: "start" });
       withBusy(async () => {
         if (!(await connectDevice(dev, name))) {
-          $("connMsg").textContent += ` - if this keeps failing, tap “Connect…” above and pick ${rooms[name] ? rooms[name] + " (" + name + ")" : name} in the list.`;
+          $("connMsg").textContent += ` - if this keeps failing, tap “Connect…” above and pick ${shownName(name)}${btName !== shownName(name) ? ` (${btName})` : ""} in the list.`;
         }
       });
     };
@@ -1061,7 +1060,7 @@ function renderKnown() {
       if (!dev) line(rem && rem._waking ? "Looking for the sensor…" : "Not available: tap “Connect…” on the Sensor tab or “Add sensors…” on the Batch tab.");
       if (k.t != null) line(`Last heard: ${k.t.toFixed(2)} °C · ${k.h.toFixed(1)} %${k.b != null ? ` · 🔋${k.b}%` : ""}${k.seen ? ` · ${ago(k.seen)}` : ""}`);
       line(lw.text, "loglvl " + lw.level);
-      line((btName !== name ? `ID ${name} · ` : "") + `MAC ${k.mac || macFromName(name) || "?"}`);
+      line((btName !== shownName(name) ? `Bluetooth name ${btName} · ` : "") + (btName !== name ? `ID ${name} · ` : "") + `MAC ${k.mac || macFromName(name) || "?"}`);
       const rm = document.createElement("button");
       rm.className = "linkbtn"; rm.textContent = "Remove from the list";
       rm.onclick = () => removeSensor(name);
@@ -1291,7 +1290,8 @@ async function connectDeviceNow(dev, expectedName, opts) {
     const room = rooms[sensorName];
     // Details under the big status line: the fixed ID (if the shown name differs) and the MAC.
     const shown = shownName(sensorName);
-    showInfo([shown.endsWith(sensorName) ? "" : `ID ${sensorName}`, macFromName(sensorName) ? `MAC ${macFromName(sensorName)}` : ""].filter(Boolean).join(" · "));
+    const bt = (known[sensorName] && known[sensorName].btName) || sensorName;
+    showInfo([bt === shown ? "" : `Bluetooth name ${bt}`, bt === sensorName ? "" : `ID ${sensorName}`, macFromName(sensorName) ? `MAC ${macFromName(sensorName)}` : ""].filter(Boolean).join(" · "));
     setStatus(`● Connected to ${shownName(sensorName)}`, "ok"); log(`Connected to ${sensorName} (total ${since(sAll)}).`);
     $("roomName").value = room || ""; $("roomName").disabled = false;
     setButtons(true); renderKnown();
@@ -1580,7 +1580,7 @@ async function renameSensor() {
   if (/^ATC_[0-9A-Fa-f]{6}$/.test(name) && name.toUpperCase() !== sensorName) { alert("That looks like another sensor's default name - pick a different one."); return; }
   const clash = Object.keys(known).find(n => n !== sensorName && known[n].btName === name);
   if (clash) { alert(`${clash} already uses that name.`); return; }
-  if (!confirm(`Rename ${devKey().replace("__", " · ")} to “${name}”? It's saved in the sensor and can be reset later.`)) return;
+  if (!confirm(`Rename ${shownName(sensorName)} to “${name}”? It's saved in the sensor and can be reset later.`)) return;
   await setBtName(name);
 }
 async function resetBtName() {
@@ -1850,7 +1850,7 @@ async function updateStorageInfo() {
   $("storageInfo").textContent = txt;
 }
 async function deleteLog() {
-  if (!confirm(`PERMANENTLY erase all recorded history on the sensor ${devKey().replace("__", " · ")}? This cannot be undone. (Data already downloaded to this phone is kept.)`)) return;
+  if (!confirm(`PERMANENTLY erase all recorded history on the sensor ${shownName(sensorName)}? This cannot be undone. (Data already downloaded to this phone is kept.)`)) return;
   const r = await request([0x36, 0x12, 0x34], b => b[0] === 0x36);
   log(r ? "Sensor confirmed: history deleted." : "No reply (idle timeout); it may still have deleted.");
   if (r && sensorName) noteSensorLog(sensorName, 0);
@@ -1963,7 +1963,7 @@ async function getCfg() {
 }
 async function setCfg() {
   const payload = encodeCfg(currentCfg);
-  if (!confirm(`Write ${payload.length} config bytes to ${devKey().replace("__", " · ")}?`)) return;
+  if (!confirm(`Write ${payload.length} config bytes to ${shownName(sensorName)}?`)) return;
   const r = await request([0x55, ...payload], b => b[0] === 0x55 && b.length - 1 >= 9);
   log(r ? "Sensor confirmed the new config." : "No reply (idle timeout); re-read to check.");
 }
@@ -2201,10 +2201,20 @@ function setupChartSettings() {
   $("stLine").onclick = () => setStyle("line");
   $("stCandle").onclick = () => setStyle("candle");
   syncStyleToggle();
+  for (const [p, label] of PERIODS) $("resSel").add(new Option(label, p));
+  $("resSel").value = String(prefs.resolution || 0);
+  $("resSel").onchange = e => { prefs.resolution = +e.target.value; savePrefs(); drawChart(); };
   $("scAuto").onclick = () => setScale(false);
   $("scFixed").onclick = () => setScale(true);
   $("scFit").onclick = fitFixedScale;
   syncScaleToggle();
+}
+// The Resolution list: options this view can't show are greyed out.
+function syncResolution(span, maxCount, minCount) {
+  for (const o of $("resSel").options) {
+    const p = +o.value, off = !!p && !!span && !!periodProblem(p, span, maxCount, minCount);
+    if (o.disabled !== off) o.disabled = off;
+  }
 }
 function syncStyleToggle() {
   const c = prefs.chartStyle === "candle";
@@ -2252,19 +2262,32 @@ function drawChart() {
   const bat = prefs.showB === true;
   const asBat = arr => arr.filter(s => s[3] > 0).map(s => [s[0], s[1], s[3] / 1000, s[3]]);
   const data = bat ? asBat(histData.slice(i0, i1)) : histData.slice(i0, i1);
+  const showT = !bat && prefs.showT !== false, showH = bat || prefs.showH !== false;
+  // Left axis = temperature (humidity when temperature is hidden); right axis only when both are shown.
+  const L = 40, R = showT && showH ? 40 : 14, T = 22, B = 40, pw = W - L - R, ph = H - T - B;
+  const candleMode = prefs.chartStyle === "candle";
   // Averaging slices (0 = single readings): fixed to the clock, see sliceWidth() in core.js.
   const buckets = Math.max(50, Math.floor(W / 2));
   const steps = [], stride = Math.max(1, Math.floor((i1 - i0) / 500));  // a sample is enough for the usual interval
   for (let i = i0 + 1; i < i1; i += stride) steps.push(histData[i][0] - histData[i - 1][0]);
   const interval = steps.length ? steps.sort((a, b) => a - b)[steps.length >> 1] : 600;
-  const slice = dom ? sliceWidth(dom.b - dom.a, buckets, interval) : 0;
-  // Readings to draw: the window plus one neighbour on each side - for averages, plus the rest of the
-  // slices at both edges, so an edge point is the same average however the chart is dragged.
-  const from = slice ? lowerIdx(Math.floor(dom.a / slice) * slice) : i0, to = slice ? lowerIdx(Math.ceil(dom.b / slice) * slice) : i1;
+  const viewSpan = dom ? dom.b - dom.a : 0;
+  // Resolution: the calendar period chosen by the user if this view can show it, else automatic
+  // (candles: ~7 px each; lines: slices of a fitting width, or single readings).
+  const maxPeriods = candleMode ? Math.floor(pw / 3) : pw * 4, minPeriods = candleMode ? 0.9 : 2;
+  const wanted = prefs.resolution || 0, problem = wanted ? periodProblem(wanted, viewSpan, maxPeriods, minPeriods) : "";
+  const period = !dom ? 0 : wanted && !problem ? wanted : candleMode ? choosePeriod(viewSpan, Math.max(8, Math.floor(pw / 7))) : 0;
+  syncResolution(viewSpan, maxPeriods, minPeriods);
+  const slice = dom && !period ? sliceWidth(viewSpan, buckets, interval) : 0;
+  const pStart = t => period ? periodStart(t, period) : Math.floor(t / slice) * slice, pEnd = s => period ? periodEnd(s, period) : s + slice;
+  const grouped = !!(period || slice);
+  // Readings to draw: the window plus one neighbour on each side - when grouped, plus the rest of the
+  // groups at both edges, so an edge point or candle is the same however the chart is dragged.
+  const from = grouped ? lowerIdx(pStart(dom.a)) : i0, to = grouped ? lowerIdx(pEnd(pStart(dom.b))) : i1;
   let j0 = Math.max(0, from - 1), j1 = Math.min(histData.length, to + 1);
-  if (slice) {
-    if (from > 0) j0 = lowerIdx(Math.floor(histData[j0][0] / slice) * slice);
-    if (to < histData.length) j1 = lowerIdx((Math.floor(histData[j1 - 1][0] / slice) + 1) * slice);
+  if (grouped) {
+    if (from > 0) j0 = lowerIdx(pStart(histData[j0][0]));
+    if (to < histData.length) j1 = lowerIdx(pEnd(pStart(histData[j1 - 1][0])));
   }
   const lineData = bat ? asBat(histData.slice(j0, j1)) : histData.slice(j0, j1);
   if (!dom || lineData.length < 2 || dom.b - dom.a <= 0) {
@@ -2274,14 +2297,13 @@ function drawChart() {
   // Points to draw: [time, temp avg, hum avg, n readings, temp min, temp max, hum min, hum max, first
   // time, last time] - single readings, or averages per slice on long ranges (~1 point per 2-3 px).
   const t0 = dom.a, t1 = dom.b, span = Math.max(1, t1 - t0);
-  const pts = slice ? averageSlices(lineData, slice) : lineData.map(s => [s[0], s[1], s[2], 1, s[1], s[1], s[2], s[2], s[0], s[0]]);
-  const averaged = !!slice && pts.some(p => p[3] > 1);
-  const showT = !bat && prefs.showT !== false, showH = bat || prefs.showH !== false;
+  const pts = grouped ? averageSlices(lineData, period ? periodKey(period) : slice) : lineData.map(s => [s[0], s[1], s[2], 1, s[1], s[1], s[2], s[2], s[0], s[0]]);
+  const averaged = grouped && pts.some(p => p[3] > 1);
   const colH = col(bat ? "--batt" : "--hum"), unitH = bat ? "V" : "%";
-  // Left axis = temperature (humidity when temperature is hidden); right axis only when both are shown.
-  const L = 40, R = showT && showH ? 40 : 14, T = 22, B = 40, pw = W - L - R, ph = H - T - B;
   const inWin = pts.filter(p => p[0] >= t0 && p[0] <= t1);
-  const extPts = inWin.length ? inWin : pts;
+  // For the axis range: what's visible - with candles also the ones cut off at the edges.
+  const visible = candleMode ? pts.filter(p => { const s = pStart(p[0]); return s < t1 && pEnd(s) > t0; }) : inWin;
+  const extPts = visible.length ? visible : pts;
   // Axis range covers the min–max band too (indexes 4/5 = temp min/max, 6/7 = humidity min/max).
   const range = i => {
     const [mi, ma] = i === 1 ? [4, 5] : [6, 7];
@@ -2434,14 +2456,13 @@ function drawChart() {
   const gaps = []; for (let i = 1; i < pts.length; i++) gaps.push(pts[i][0] - pts[i - 1][0]);
   const med = gaps.slice().sort((a, b) => a - b)[gaps.length >> 1] || 1;
   const path = fy => pts.map((p, i) => `${i && p[0] - pts[i - 1][0] <= Math.max(med * 6, gapMin) ? "L" : "M"}${x(p[0]).toFixed(1)},${fy(p).toFixed(1)}`).join("");
-  const candleMode = prefs.chartStyle === "candle";
   let candles = null;
   if (candleMode) {
-    // Candles: one per calendar period (chosen to fit ~7 px per candle), from the raw readings in view.
+    // Candles: one per calendar period, from whole periods (also at the edges).
     // open = first reading, high/low = extremes, close = last reading. Hollow = rose, filled = fell.
-    candles = buildCandles(data, t0, t1, Math.max(8, Math.floor(pw / 7)));
+    candles = buildCandles(lineData, period).filter(c => c.start < t1 && c.end > t0);
     const both = showT && showH;
-    for (const c of candles.list) {
+    for (const c of candles) {
       const cx = x((c.start + c.end) / 2), full = Math.max(1.5, (x(c.end) - x(c.start)) * 0.7);
       const w = both ? full / 2 : full;
       const draw = (o, h, l, cl, fy, color, dx) => {
@@ -2478,22 +2499,28 @@ function drawChart() {
   }
   if (showH && !candleMode) el("path", { d: path(p => yH(p[2])), fill: "none", stroke: colH, "stroke-width": 1.6, "stroke-linejoin": "round", "clip-path": "url(#plotClip)" });
   if (showT && !candleMode) el("path", { d: path(p => yT(p[1])), fill: "none", stroke: col("--temp"), "stroke-width": 2, "stroke-linejoin": "round", "clip-path": "url(#plotClip)" });
+  // A chosen resolution with few points: mark them.
+  if (period && !candleMode && pts.length <= 40) for (const p of pts) {
+    if (showH) el("circle", { cx: x(p[0]), cy: yH(p[2]), r: 2.5, fill: colH, "clip-path": "url(#plotClip)" });
+    if (showT) el("circle", { cx: x(p[0]), cy: yT(p[1]), r: 2.5, fill: col("--temp"), "clip-path": "url(#plotClip)" });
+  }
   const cursor = el("line", { x1: 0, x2: 0, y1: T, y2: T + ph, stroke: col("--muted"), "stroke-dasharray": "3 3", visibility: "hidden" });
   const markerLayer = el("g", {});   // value labels next to the marker (showReadoutAt)
   plotted = { pts: inWin.length ? inWin : pts, x, cursor, L, pw, T, ph, yT, yH, showT, showH, markerLayer,
-    candles: candles && candles.list, colT: col("--temp"), colH, colBg: col("--card"), colText: col("--text"),
+    candles, colT: col("--temp"), colH, colBg: col("--card"), colText: col("--text"),
     unitH, decH: bat ? 3 : 0, decH1: bat ? 3 : 1, dataRange: { t: range(1), h: range(2) } };
   // Note under the chart while points are averages (or candles are shown).
   const note = $("avgNote");
+  const tooMuch = problem ? `${periodLabel(wanted)} is too ${problem} for this range, so it's chosen automatically. ` : "";
   if (note) {
     if (candleMode) {
-      note.textContent = `Each candle is ${candles.label}: first, highest, lowest and last reading. Hollow = rose, filled = fell.`;
+      note.textContent = tooMuch + `Each candle is ${periodLabel(period)}: first, highest, lowest and last reading. Hollow = rose, filled = fell.`;
       note.classList.remove("hidden");
     } else if (averaged) {
       const ns = pts.map(p => p[3]).sort((a, b) => a - b), nMed = ns[ns.length >> 1];
-      note.textContent = `Each point is an average of ${fmtDuration(slice)} (~${nMed} readings); the thin lines and shading around it show the highest and lowest reading. Zoom in for single readings.`;
+      note.textContent = tooMuch + `Each point is an average of ${period ? periodLabel(period) : fmtDuration(slice)} (~${nMed} readings); the thin lines and shading around it show the highest and lowest reading. Zoom in for single readings.`;
       note.classList.remove("hidden");
-    } else note.classList.add("hidden");
+    } else { note.textContent = tooMuch; note.classList.toggle("hidden", !tooMuch); }
   }
   // Stats table for the visible window, from the raw readings (same in every chart view).
   const raw = histData.slice(i0, i1);
@@ -2530,7 +2557,7 @@ function showReadoutAt(clientX) {
     // Candle mode: snap to the nearest candle; label its close (last reading).
     let c = plotted.candles[0];
     for (const k of plotted.candles) if (Math.abs(x((k.start + k.end) / 2) - px) < Math.abs(x((c.start + c.end) / 2) - px)) c = k;
-    const cx = x((c.start + c.end) / 2);
+    const cx = Math.max(plotted.L, Math.min(plotted.L + plotted.pw, x((c.start + c.end) / 2)));
     cursor.setAttribute("x1", cx); cursor.setAttribute("x2", cx); cursor.setAttribute("visibility", "visible");
     const f = (v, d) => v.toFixed(d);
     const dh = plotted.decH, u = plotted.unitH;
@@ -2572,35 +2599,6 @@ function drawMarkerLabels(cx, tVal, hVal) {
     mk("rect", { x: bx, y: t.ty - 8, width: w, height: 16, rx: 4, fill: P.colBg, stroke: t.color, "stroke-width": 1 });
     mk("text", { x: bx + w / 2, y: t.ty + 4, "text-anchor": "middle", "font-size": 11, "font-weight": 700, fill: t.color }, t.text);
   }
-}
-// Candles over calendar periods (local time): picks the shortest period giving at most maxCandles.
-// Returns { list: [{start, end, n, t:[open, high, low, close], h:[...]}], label: "1 day" }.
-function buildCandles(data, a, b, maxCandles) {
-  const periods = [[600, "10 minutes"], [1800, "30 minutes"], [3600, "1 hour"], [10800, "3 hours"], [21600, "6 hours"],
-    [43200, "12 hours"], [86400, "1 day"], [604800, "1 week"], [2629800, "1 month"]];
-  const [period, label] = periods.find(([p]) => (b - a) / p <= maxCandles) || periods[periods.length - 1];
-  // Start of the period containing t, in local time (days start at midnight, weeks on Monday, months on the 1st).
-  const periodStart = t => {
-    const d = new Date(t * 1000);
-    if (period === 2629800) return new Date(d.getFullYear(), d.getMonth(), 1).getTime() / 1000;
-    if (period === 604800) { d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime() / 1000; }
-    const m = new Date(d); m.setHours(0, 0, 0, 0);
-    return m.getTime() / 1000 + Math.floor((t - m.getTime() / 1000) / period) * period;
-  };
-  const periodEnd = s => {
-    if (period === 2629800) { const d = new Date(s * 1000); return new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime() / 1000; }
-    if (period === 604800) { const d = new Date(s * 1000); d.setDate(d.getDate() + 7); return d.getTime() / 1000; }
-    return s + period;
-  };
-  const list = []; let cur = null;
-  for (const [t, tm, hm] of data) {
-    const s = periodStart(t);
-    if (!cur || cur.start !== s) { cur = { start: s, end: periodEnd(s), n: 0, t: [tm, tm, tm, tm], h: [hm, hm, hm, hm] }; list.push(cur); }
-    cur.n++;
-    cur.t[1] = Math.max(cur.t[1], tm); cur.t[2] = Math.min(cur.t[2], tm); cur.t[3] = tm;
-    cur.h[1] = Math.max(cur.h[1], hm); cur.h[2] = Math.min(cur.h[2], hm); cur.h[3] = hm;
-  }
-  return { list, label };
 }
 function fmtDuration(sec) {
   if (sec < 90 * 60) return `${Math.max(1, Math.round(sec / 60))} min`;
@@ -2832,6 +2830,7 @@ function updateStatusBar() {
   };
   $("roomName").onchange = e => {
     if (!sensorName) return; rooms[sensorName] = e.target.value.trim(); lsSet("rooms", rooms); renderKnown();
+    if (chr && !connecting) setStatus(`● Connected to ${shownName(sensorName)}`, "ok");
     if ($("btNameNew").dataset.auto) $("btNameNew").value = suggestBtName();
   };
   $("btnAddSensors").onclick = () => withBusy(addSensor);

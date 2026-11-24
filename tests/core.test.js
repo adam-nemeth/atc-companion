@@ -170,6 +170,45 @@ test("dragging the chart stops at the ends of the data", () => {
   assert.deepEqual(core.clampWindow(-50, 200, 100, 1000), { a: 100, b: 300 });
 });
 
+test("chart resolution: calendar periods, also on days with a clock change", () => {
+  const t = (...a) => new Date(...a).getTime() / 1000, D = 86400;
+  assert.equal(core.periodStart(t(2026, 10, 18, 15, 20), D), t(2026, 10, 18));
+  assert.equal(core.periodStart(t(2026, 10, 18, 15, 20), core.WEEK), t(2026, 10, 16));   // Monday
+  assert.equal(core.periodStart(t(2026, 10, 18, 15, 20), core.MONTH), t(2026, 10, 1));
+  assert.equal(core.periodStart(t(2026, 10, 18, 15, 20), 10800), t(2026, 10, 18, 15));
+  for (const [y, m, d, hours] of [[2026, 9, 25, 25], [2026, 2, 29, 23], [2026, 10, 18, 24]]) {
+    const s = core.periodStart(t(y, m, d, 12), D), e = core.periodEnd(s, D);
+    assert.equal((e - s) / 3600, hours);
+    assert.equal(core.periodStart(e - 1, D), s);                    // the last hour still belongs to the day
+    for (const p of [3600, 10800, 21600, 43200]) {                  // shorter periods cover the day without gaps
+      let x = s; while (x < e) { assert.equal(core.periodStart(x, p), x); x = core.periodEnd(x, p); }
+      assert.equal(x, e);
+    }
+  }
+  assert.equal(core.choosePeriod(7 * D, 37), 21600);
+  assert.equal(core.periodProblem(D, 7 * D, 80), "");
+  assert.equal(core.periodProblem(600, 7 * D, 80), "fine");
+  assert.equal(core.periodProblem(core.WEEK, D, 80), "coarse");
+  assert.equal(core.periodProblem(core.MONTH, 30 * D, 80), "");
+  assert.equal(core.periodProblem(core.MONTH, 30 * D, 80, 2), "coarse");              // a line needs two points
+});
+
+test("candles: one per day, the same however much of the range is loaded", () => {
+  const s = [], t0 = new Date(2026, 9, 23).getTime() / 1000;        // across the 25 Oct clock change
+  for (let i = 0; i < 144 * 5; i++) s.push([t0 + i * 600, 20 + (i * 7919 % 37) / 10, 50, 3000]);
+  const c = core.buildCandles(s, 86400);
+  assert.deepEqual(c.map(x => x.n), [144, 144, 150, 144, 138]);
+  assert.deepEqual(c[0].t, [s[0][1], Math.max(...s.slice(0, 144).map(r => r[1])), Math.min(...s.slice(0, 144).map(r => r[1])), s[143][1]]);
+  assert.deepEqual(core.buildCandles(s.slice(144), 86400), c.slice(1));
+});
+
+test("sensor label: description, else Bluetooth name, else ID", () => {
+  assert.equal(core.labelFor("Kitchen", "ATC_Kitchen", "ATC_A1B2C3"), "Kitchen");
+  assert.equal(core.labelFor("", "ATC_Kitchen", "ATC_A1B2C3"), "ATC_Kitchen");
+  assert.equal(core.labelFor("  ", undefined, "ATC_A1B2C3"), "ATC_A1B2C3");
+  assert.equal(core.labelFor(undefined, "", "ATC_A1B2C3"), "ATC_A1B2C3");
+});
+
 test("small helpers", () => {
   assert.equal(core.fmtOffset(3600), "+01:00");
   assert.equal(core.fmtOffset(-16200), "-04:30");

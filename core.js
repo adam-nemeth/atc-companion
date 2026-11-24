@@ -276,6 +276,9 @@ function dstChanges(a, b) {
   return out;
 }
 
+// What a sensor is called everywhere: its description, else its Bluetooth name, else its fixed ID.
+const labelFor = (description, btName, id) => (description || "").trim() || (btName || "").trim() || id;
+
 // A sensor's Bluetooth name must start with "ATC_" (so the Connect picker lists it): added if missing,
 // and any other capitalisation of it is corrected.
 const withAtcPrefix = name => {
@@ -318,10 +321,11 @@ function sliceWidth(span, maxPoints, interval) {
 }
 // Averages [t, v1, v2, …] readings per slice, in order:
 // [time avg, v1 avg, v2 avg, n, v1 min, v1 max, v2 min, v2 max, first time, last time].
-function averageSlices(samples, width) {
-  const acc = new Map();
+// by: slice width in seconds, or a function giving the slice of a time (see periodKey).
+function averageSlices(samples, by) {
+  const acc = new Map(), key = typeof by === "function" ? by : t => Math.floor(t / by);
   for (const s of samples) {
-    const k = Math.floor(s[0] / width);
+    const k = key(s[0]);
     let a = acc.get(k);
     if (!a) acc.set(k, a = [0, 0, 0, 0, Infinity, -Infinity, Infinity, -Infinity, s[0], s[0]]);
     a[0] += s[0]; a[1] += s[1]; a[2] += s[2]; a[3]++;
@@ -330,6 +334,50 @@ function averageSlices(samples, width) {
   }
   return [...acc.entries()].sort((p, q) => p[0] - q[0])
     .map(([, a]) => [a[0] / a[3], a[1] / a[3], a[2] / a[3], a[3], ...a.slice(4)]);
+}
+
+// Calendar periods (local time) for candles and for a chosen resolution. Days start at midnight, weeks
+// on Monday, months on the 1st; shorter periods count from midnight. Days with a clock change have 23
+// or 25 hours and stay one period.
+const WEEK = 604800, MONTH = 2629800;
+const PERIODS = [[600, "10 minutes"], [1800, "30 minutes"], [3600, "1 hour"], [10800, "3 hours"], [21600, "6 hours"],
+  [43200, "12 hours"], [86400, "1 day"], [WEEK, "1 week"], [MONTH, "1 month"]];
+const periodLabel = p => (PERIODS.find(([s]) => s === p) || [0, ""])[1];
+function periodStart(t, period) {
+  const d = new Date(t * 1000);
+  if (period === MONTH) return new Date(d.getFullYear(), d.getMonth(), 1).getTime() / 1000;
+  d.setHours(0, 0, 0, 0);
+  if (period === WEEK) d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  const midnight = d.getTime() / 1000;
+  return period >= 86400 ? midnight : midnight + Math.floor((t - midnight) / period) * period;
+}
+function periodEnd(start, period) {
+  const d = new Date(start * 1000);
+  if (period === MONTH) return new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime() / 1000;
+  if (period === WEEK) { d.setDate(d.getDate() + 7); return d.getTime() / 1000; }
+  const next = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime() / 1000;
+  return period >= 86400 ? next : Math.min(start + period, next);
+}
+// periodStart for times that come in order (only recomputed when the period changes).
+function periodKey(period) {
+  let s = 1, e = 0;
+  return t => { if (t < s || t >= e) { s = periodStart(t, period); e = periodEnd(s, period); } return s; };
+}
+// The shortest period giving at most maxCount periods over a span.
+const choosePeriod = (span, maxCount) => (PERIODS.find(([p]) => span / p <= maxCount) || PERIODS[PERIODS.length - 1])[0];
+// Can this period be shown over this span? "" = yes, else why not.
+const periodProblem = (period, span, maxCount, minCount = 0.9) => span / period > maxCount ? "fine" : span / period < minCount ? "coarse" : "";
+// Candles: [{ start, end, n, t: [open, high, low, close], h: [...] }] per period, from ordered readings.
+function buildCandles(samples, period) {
+  const list = [], key = periodKey(period); let cur = null;
+  for (const [t, tm, hm] of samples) {
+    const s = key(t);
+    if (!cur || cur.start !== s) { cur = { start: s, end: periodEnd(s, period), n: 0, t: [tm, tm, tm, tm], h: [hm, hm, hm, hm] }; list.push(cur); }
+    cur.n++;
+    cur.t[1] = Math.max(cur.t[1], tm); cur.t[2] = Math.min(cur.t[2], tm); cur.t[3] = tm;
+    cur.h[1] = Math.max(cur.h[1], hm); cur.h[2] = Math.min(cur.h[2], hm); cur.h[3] = hm;
+  }
+  return list;
 }
 
 // How a stored reading is identified when merging: the sensor's own timestamp (element 4; older
@@ -342,6 +390,7 @@ if (typeof module !== "undefined") module.exports = {
   CFG_NEW_LAYOUT_VER, fmtOffset, parseOffset, faceValue, macStr, toDataView, advEntries, parseAdv, le32,
   DRIFT_TOL, DRIFT_MAX_PER_DAY, driftCorrect, fmtDur, LOG_CAPACITY, logIntervalFromCfg, fmtDays,
   decodeCfg, FLG_BITS, FLG2_BITS, byteFromBits, encodeCfg, fmtNum, toCsv, parseCsv, histId,
-  timeTicks, utcOffsetMin, dstChanges, sampleKey, withAtcPrefix, downloadLabel,
+  timeTicks, utcOffsetMin, dstChanges, sampleKey, withAtcPrefix, labelFor, downloadLabel,
   sliceWidth, averageSlices, clampWindow,
+  PERIODS, WEEK, MONTH, periodLabel, periodStart, periodEnd, periodKey, choosePeriod, periodProblem, buildCandles,
 };
