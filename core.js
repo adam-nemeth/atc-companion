@@ -276,6 +276,24 @@ function dstChanges(a, b) {
   return out;
 }
 
+// A sensor's Bluetooth name must start with "ATC_" (so the Connect picker lists it): added if missing,
+// and any other capitalisation of it is corrected.
+const withAtcPrefix = name => {
+  const s = String(name).trim();
+  return !s ? "" : "ATC_" + s.replace(/^ATC_/i, "");
+};
+
+// What the download buttons say: exactly what a tap will do. "…" = asks for confirmation first.
+// count: 0xffff = the whole log; a partial download never erases.
+function downloadLabel({ count, sync, erase }) {
+  const all = count === 0xffff, doErase = erase && all;
+  const parts = [all ? "Download" : `Download last ${count}`];
+  if (sync) parts.push("set clock");
+  if (doErase) parts.push("erase");
+  const last = parts.length > 1 ? " & " + parts.pop() : "";
+  return parts.join(", ") + last + (doErase ? "…" : "");
+}
+
 // How a stored reading is identified when merging: the sensor's own timestamp (element 4; older
 // samples have none, and their time IS the sensor's) plus its values. Re-downloads with an updated
 // clock correction then replace the earlier copy, and two readings that got the same time after a
@@ -286,5 +304,5 @@ if (typeof module !== "undefined") module.exports = {
   CFG_NEW_LAYOUT_VER, fmtOffset, parseOffset, faceValue, macStr, toDataView, advEntries, parseAdv, le32,
   DRIFT_TOL, DRIFT_MAX_PER_DAY, driftCorrect, fmtDur, LOG_CAPACITY, logIntervalFromCfg, fmtDays,
   decodeCfg, FLG_BITS, FLG2_BITS, byteFromBits, encodeCfg, fmtNum, toCsv, parseCsv, histId,
-  timeTicks, utcOffsetMin, dstChanges, sampleKey,
+  timeTicks, utcOffsetMin, dstChanges, sampleKey, withAtcPrefix, downloadLabel,
 };

@@ -118,6 +118,23 @@ test("daylight-saving changes are found to the minute", () => {
   assert.deepEqual(year, [{ t: Date.UTC(2026, 2, 29, 1) / 1000, delta: 60 }, { t: Date.UTC(2026, 9, 25, 1) / 1000, delta: -60 }]);
 });
 
+test("renaming: ATC_ is added in front when it's missing", () => {
+  assert.equal(core.withAtcPrefix("Kitchen"), "ATC_Kitchen");
+  assert.equal(core.withAtcPrefix("ATC_Kitchen"), "ATC_Kitchen");
+  assert.equal(core.withAtcPrefix("  atc_Kitchen "), "ATC_Kitchen");
+  assert.equal(core.withAtcPrefix("  "), "");
+});
+
+test("download buttons say what they do", () => {
+  const label = (count, sync, erase) => core.downloadLabel({ count, sync, erase });
+  assert.equal(label(0xffff, true, true), "Download, set clock & erase…");
+  assert.equal(label(0xffff, true, false), "Download & set clock");
+  assert.equal(label(0xffff, false, true), "Download & erase…");
+  assert.equal(label(0xffff, false, false), "Download");
+  assert.equal(label(100, true, true), "Download last 100 & set clock");  // a partial download never erases
+  assert.equal(label(100, false, false), "Download last 100");
+});
+
 test("small helpers", () => {
   assert.equal(core.fmtOffset(3600), "+01:00");
   assert.equal(core.fmtOffset(-16200), "-04:30");

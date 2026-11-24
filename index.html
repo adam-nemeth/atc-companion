@@ -62,9 +62,10 @@ label { display: inline-flex; gap: 6px; align-items: center; }
 #chart * { pointer-events: none; }
 #readout { font-size: 13px; min-height: 20px; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 13px; color: var(--muted); }
-/* Legend entries are toggle buttons: tap to hide/show that line */
-.legend button.lg { font-size: 13px; padding: 5px 10px; border-radius: 999px; background: transparent; }
-.legend button.lg::before { content: ""; display: inline-block; width: 10px; height: 3px; margin-right: 6px; vertical-align: middle; background: currentColor; }
+/* Legend entries are toggle buttons: tap to hide/show that line. All three stay on one line (iPhone mini). */
+.legend .lgs { display: flex; flex: 0 1 auto; gap: 6px; white-space: nowrap; }
+.legend button.lg { font-size: 13px; padding: 5px 9px; border-radius: 999px; background: transparent; }
+.legend button.lg::before { content: ""; display: inline-block; width: 9px; height: 3px; margin-right: 5px; vertical-align: middle; background: currentColor; }
 .legend .t { color: var(--temp); border-color: var(--temp); } .legend .h { color: var(--hum); border-color: var(--hum); }
 .legend .b { color: var(--batt); border-color: var(--batt); }
 .legend button.lg[aria-pressed="false"] { color: var(--muted); border-color: var(--line); text-decoration: line-through; }
@@ -77,6 +78,11 @@ label { display: inline-flex; gap: 6px; align-items: center; }
 .legend .scalesw .seg:first-of-type { border-radius: 9px 0 0 9px; }
 .legend .scalesw .seg:last-of-type { border-radius: 0 9px 9px 0; margin-left: -1px; }
 .legend .scalesw .seg[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+/* The Scale switch and Fit scale stay together */
+.legend .scalegrp { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+@media (max-width: 480px) { .legend .scalesw { margin-left: 0; } }
+#scFit { padding: 4px 10px; font-size: 13px; }
+#scFit[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
 .legend { flex-wrap: wrap; align-items: center; row-gap: 6px; }
 /* Stats under the chart: a table - rows Latest / Lowest / Highest / Average, a column per measurement. */
 .stats { margin-top: 8px; }
@@ -217,17 +223,39 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
     <div class="row"><span class="muted" id="liveNote"></span></div>
   </section>
 
+  <!-- Actions -->
+  <section class="card" data-tab="single all">
+    <h2>Download from <span class="only-single">sensor</span><span class="only-all">ticked sensors</span></h2>
+    <div class="row">
+      <label>Samples
+        <select id="dumpCount">
+          <option value="65535">All stored</option>
+          <option value="100">Last 100</option>
+          <option value="500">Last 500</option>
+          <option value="2000">Last 2000</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="optSync" checked> <span id="optSyncLabel">Set clock afterwards (UTC)</span></label>
+      <label><input type="checkbox" id="optDelete" checked> Erase on sensor afterwards</label>
+      <label><input type="checkbox" id="driftCorr"> Correct clock drift</label>
+    </div>
+    <div class="row only-single">
+      <button id="btnDump" class="primary" disabled>Download</button>
+      <button id="btnDeleteLog" class="danger" disabled>Erase history on sensor…</button>
+    </div>
+    <div class="row only-all">
+      <button id="bDump" class="primary">Download</button>
+      <button id="bShareAll">Share all sensors…</button>
+    </div>
+    <div class="row"><span id="dumpStatus" class="muted"></span></div>
+    <div class="progress" id="dumpProg"><div></div></div>
+    <p class="muted" style="font-size:12px;margin:8px 0 0">Clock drift: a sensor's clock can run fast or slow. The clock is read before downloading and, if it's off, the readings since the last clock set are shifted to the right time; the sensor's own times stay in the sensor_timestamp column.</p>
+  </section>
+
   <!-- Batch operations -->
   <section class="card" data-tab="all">
     <h2>Batch operations</h2>
     <p class="muted">Ticked sensors are handled one after another: connect, do the job, disconnect, next.</p>
-    <h3 class="sub">History</h3>
-    <div class="row">
-      <button id="bDump" class="primary">Download all</button>
-      <button id="bDumpSyncErase" class="danger">Download, set clock &amp; erase…</button>
-      <button id="bShareAll">Share all sensors…</button>
-    </div>
-    <p class="muted">“Download all” uses the History download options below (samples, set clock, erase).</p>
     <h3 class="sub">Clocks</h3>
     <div class="row">
       <button id="bGetTime">Read clocks</button>
@@ -249,32 +277,6 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
     <div class="row" id="batchStatus"><button id="bStop" class="danger hidden">Stop</button></div>
     <div class="progress" id="batchProg"><div></div></div>
     <div id="batchOut" style="margin-top:8px"></div>
-  </section>
-
-  <!-- Actions -->
-  <section class="card" data-tab="single all">
-    <h2>History download</h2>
-    <p class="muted only-all">These options also apply to “Download all”.</p>
-    <div class="row">
-      <label>Samples
-        <select id="dumpCount">
-          <option value="65535">All stored</option>
-          <option value="100">Last 100</option>
-          <option value="500">Last 500</option>
-          <option value="2000">Last 2000</option>
-        </select>
-      </label>
-      <label><input type="checkbox" id="optSync" checked> <span id="optSyncLabel">Set clock afterwards (UTC)</span></label>
-      <label><input type="checkbox" id="optDelete" checked> Erase on sensor afterwards</label>
-      <label><input type="checkbox" id="driftCorr"> Correct clock drift</label>
-    </div>
-    <p class="muted" style="font-size:12px;margin:2px 0 0">Clock drift: a sensor's clock can run fast or slow. The clock is read before downloading and, if it's off, the readings since the last clock set are shifted to the right time; the sensor's own times stay in the sensor_timestamp column.</p>
-    <div class="row only-single">
-      <button id="btnDump" class="primary" disabled>Download history</button>
-      <button id="btnDeleteLog" class="danger" disabled>Erase history on sensor…</button>
-    </div>
-    <div class="row"><span id="dumpStatus" class="muted"></span></div>
-    <div class="progress" id="dumpProg"><div></div></div>
   </section>
 
   <!-- Clock -->
@@ -323,16 +325,21 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
       <button id="btnZoomReset" class="seg hidden">Reset zoom</button>
     </div>
     <div class="legend">
-      <button class="lg t" id="lgTemp" aria-pressed="true" title="Show only temperature (tap again for both)">Temperature °C</button>
-      <button class="lg h" id="lgHum" aria-pressed="true" title="Show only humidity (tap again for both)">Humidity %</button>
-      <button class="lg b" id="lgBatt" aria-pressed="false" title="Show the battery voltage (tap again for temperature and humidity)">Battery V</button>
+      <span class="lgs">
+        <button class="lg t" id="lgTemp" aria-pressed="true" title="Show only temperature (tap again for both)">Temperature</button>
+        <button class="lg h" id="lgHum" aria-pressed="true" title="Show only humidity (tap again for both)">Humidity</button>
+        <button class="lg b" id="lgBatt" aria-pressed="false" title="Show the battery voltage (tap again for temperature and humidity)">Battery</button>
+      </span>
       <span class="scalesw" role="group" aria-label="Chart style" title="Candles: first, highest, lowest and last reading per period">
         <span class="muted">Style</span>
         <button class="seg" id="stLine" aria-pressed="true">Line</button><button class="seg" id="stCandle" aria-pressed="false">Candles</button>
       </span>
+      <span class="scalegrp">
       <span class="scalesw" role="group" aria-label="Chart scale" title="Fixed: same axes for every sensor and zoom (limits in Settings)">
         <span class="muted">Scale</span>
         <button class="seg" id="scAuto" aria-pressed="true">Auto</button><button class="seg" id="scFixed" aria-pressed="false">Fixed</button>
+      </span>
+      <button class="seg" id="scFit" aria-pressed="false" disabled title="Set the fixed scale to the data shown now. Tap Fixed to go back to the limits in Settings.">Fit scale</button>
       </span>
     </div>
     <div id="readout" class="muted"></div>
@@ -364,7 +371,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
         <button id="btnRename" disabled>Rename</button>
         <button id="btnRenameReset" disabled>Reset to default</button>
       </div>
-      <p class="muted">Must start with ATC_ (so the Connect picker still lists it), up to 20 letters, digits, _ or -. The sensor applies the new name after you disconnect; the iPhone may keep showing the old name until Bluetooth is turned off and on.</p>
+      <p class="muted">Up to 16 letters, digits, _ or -. “ATC_” is added in front if you leave it out (the Connect picker only lists names starting with it). The sensor applies the new name after you disconnect; the iPhone may keep showing the old name until Bluetooth is turned off and on.</p>
 
       <h3 class="sub">Settings</h3>
       <p class="muted">Read from the sensor when you connect. Change values, then tap “Write config” - nothing is sent before that. Settings that say “leave as it is” mean different things on different models or firmware versions.</p>
@@ -465,7 +472,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=85"></script>
+<script src="core.js?v=86"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -539,7 +546,7 @@ function openDB() {
 function dbOp(mode, fn) {
   return new Promise((res, rej) => {
     const tx = idb.transaction("history", mode); const st = tx.objectStore("history");
-    const req = fn(st); tx.oncomplete = () => res(req && req.result); tx.onerror = () => rej(tx.error);
+    const req = fn(st); tx.oncomplete = () => res(req && req.result); tx.onerror = tx.onabort = () => rej(tx.error);
   });
 }
 async function loadHistory(dev) {
@@ -572,7 +579,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 85;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 86;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1035,7 +1042,7 @@ function renderKnown() {
   }
   renderRooms();
   const rm = $("readyMsg"); if (rm) rm.textContent = `${ready} available · ${ticked} ticked`;
-  for (const id of ["bDump", "bDumpSyncErase", "bGetTime", "bSetTime", "bGetCfg", "bSetCfg", "btnAddSensors"]) { const b = $(id); if (b) b.disabled = busy || (id !== "btnAddSensors" && !ticked); }
+  for (const id of ["bDump", "bGetTime", "bSetTime", "bGetCfg", "bSetCfg", "btnAddSensors"]) { const b = $(id); if (b) b.disabled = busy || (id !== "btnAddSensors" && !ticked); }
 }
 // One-line description of what a browser put into an advertisement event (for the debug log).
 function describeAdvEvent(ev) {
@@ -1350,14 +1357,20 @@ function devKey() {
   const n = sensorName || "sensor"; const r = rooms[n];
   return r ? `${n}__${r}` : n;
 }
+// What the download options add up to. Erasing after downloading only the last N samples would lose
+// the older ones never downloaded, so a partial download never erases.
+function downloadPlan() {
+  const count = parseInt($("dumpCount").value, 10) & 0xffff;
+  return { count, sync: $("optSync").checked, erase: $("optDelete").checked && count === 0xffff };
+}
+// The download buttons (Sensor and Batch) always say what they'll do.
+function updateDownloadButtons() {
+  const label = downloadLabel(downloadPlan());
+  $("btnDump").textContent = label; $("bDump").textContent = label;
+}
 // Returns { n, total, finished, deleted } (or null if cancelled). opts.skipConfirm: batch already asked.
 async function dump(opts = {}) {
-  const cnt = opts.all ? 0xffff : parseInt($("dumpCount").value, 10) & 0xffff;
-  // opts.sync / opts.del override the checkboxes (used by the combined batch button).
-  let del = opts.del != null ? opts.del : $("optDelete").checked;
-  // Erasing after downloading only the last N samples would lose the older ones never downloaded.
-  if (del && cnt !== 0xffff) { log(`Not erasing: only the last ${cnt} samples are downloaded (choose “All stored” to erase).`, "warn"); del = false; }
-  const sync = opts.sync != null ? opts.sync : $("optSync").checked;
+  const { count: cnt, sync, erase: del } = downloadPlan();
   if (del && !opts.skipConfirm && !confirm("After a successful download, PERMANENTLY erase the history stored on the sensor?")) return null;
   const result = { n: 0, total: 0, finished: false, deleted: false };
   const raw = []; let done = false;
@@ -1399,18 +1412,6 @@ async function dump(opts = {}) {
         }
         catch (e) { log("(non-fatal) clock sync failed: " + e.message); }
       }
-      if (del) {
-        const r = await request([0x36, 0x12, 0x34], b => b[0] === 0x36);
-        log(r ? "Sensor confirmed: history deleted." : "No reply to delete; check with another download.");
-        result.deleted = !!r;
-      }
-    }
-    // Log fill tracking: what's left on the sensor now (only known after a full download or an erase).
-    if (sensorName && finished && (result.deleted || cnt === 0xffff)) {
-      const st = raw.map(r => r[0]).sort((a, b) => a - b), d = [];
-      for (let i = 1; i < st.length; i++) { const x = st[i] - st[i - 1]; if (x >= 30 && x <= 7200) d.push(x); }
-      d.sort((a, b) => a - b);
-      noteSensorLog(sensorName, result.deleted ? 0 : raw.length, d.length ? d[d.length >> 1] : null);
     }
     result.finished = finished;
     if (del && !finished) log("Download incomplete - skipped delete for safety.");
@@ -1439,6 +1440,22 @@ async function dump(opts = {}) {
     // so a later download (with a slightly different correction) replaces it instead of duplicating it.
     const total = await mergeInto(key, raw.map(([e, t, h, v, , c]) => [c - offSec, t, h, v, e - offSec]));
     log(`Stored ${raw.length} new samples for ${key} (${total} total).`);
+    // Erase only now: every downloaded reading is in this phone's storage (checked by reading it back).
+    if (del && finished) {
+      if (!idb || (await loadHistory(key)).length < total) log("Not erasing the sensor: the readings couldn't be saved permanently on this phone.", "err");
+      else try {
+        const r = await request([0x36, 0x12, 0x34], b => b[0] === 0x36);
+        log(r ? "Sensor confirmed: history deleted." : "No reply to delete; check with another download.");
+        result.deleted = !!r;
+      } catch (e) { log("Erasing failed (the readings are saved): " + describeErr(e), "err"); }
+    }
+    // Log fill tracking: what's left on the sensor now (only known after a full download or an erase).
+    if (sensorName && finished && cnt === 0xffff) {
+      const st = raw.map(r => r[0]).sort((a, b) => a - b), d = [];
+      for (let i = 1; i < st.length; i++) { const x = st[i] - st[i - 1]; if (x >= 30 && x <= 7200) d.push(x); }
+      d.sort((a, b) => a - b);
+      noteSensorLog(sensorName, result.deleted ? 0 : raw.length, d.length ? d[d.length >> 1] : null);
+    }
     $("dumpStatus").textContent = `${raw.length} samples downloaded · ${total} stored` + (drift && drift.stretches.some(s => s.applied) ? ` · ${driftSummary(drift)}` : "");
     result.drift = drift ? driftSummary(drift) : "";
     showLatestSample(raw[raw.length - 1] && [0, ...raw[raw.length - 1].slice(1)]);
@@ -1510,8 +1527,9 @@ async function setBtName(name) {
   if (confirm(`Bluetooth name set to “${isReset ? sensorName : name}”. Disconnect now so the sensor applies it?`)) disconnect();
 }
 async function renameSensor() {
-  const name = $("btNameNew").value.trim();
-  if (!/^ATC_[A-Za-z0-9_-]{1,16}$/.test(name)) { alert("Use ATC_ followed by 1-16 letters, digits, _ or - (no spaces or accents), e.g. ATC_Kitchen."); return; }
+  const name = withAtcPrefix($("btNameNew").value);
+  if (!/^ATC_[A-Za-z0-9_-]{1,16}$/.test(name)) { alert("Use 1-16 letters, digits, _ or - (no spaces or accents), e.g. Kitchen. ATC_ is added in front."); return; }
+  $("btNameNew").value = name;  // show the name that will actually be set
   if (/^ATC_[0-9A-Fa-f]{6}$/.test(name) && name.toUpperCase() !== sensorName) { alert("That looks like another sensor's default name - pick a different one."); return; }
   const clash = Object.keys(known).find(n => n !== sensorName && known[n].btName === name);
   if (clash) { alert(`${clash} already uses that name.`); return; }
@@ -1662,22 +1680,16 @@ function mergeCfg(tpl, own) {
   return m;
 }
 const BATCH = {
-  // Download + set clock + erase, regardless of the History download checkboxes.
-  async dumpSyncErase() {
-    if (!confirm(`For ${batchTargets().length} sensor(s): download all stored history, set the clock (${prefs.timeMode === "utc" ? "UTC" : "local time"}), then PERMANENTLY erase the history on the sensor.\n\nA sensor is only erased if its download finished completely.`)) return;
-    await runBatch("Download, set clock & erase", async () => {
-      const r = await dump({ skipConfirm: true, sync: true, del: true, all: true });
-      if (!r) return null;
-      const ok = r.finished && r.synced && r.deleted;
-      return { ok, text: `${r.n} samples downloaded · ${r.total} stored · ${r.synced ? "clock set" : "clock NOT set"} · ${r.deleted ? "erased on sensor" : "NOT erased"}${r.finished ? "" : " · INCOMPLETE download (idle timeout)"}${r.drift ? " · " + r.drift : ""}` };
-    });
-  },
+  // Does what the download options say (the button shows it).
   async dump() {
-    if ($("optDelete").checked && !confirm(`Download from ${batchTargets().length} sensor(s) and then PERMANENTLY erase the history stored on each one (only where the download finished)?`)) return;
-    await runBatch("Download all", async () => {
+    const plan = downloadPlan();
+    if (plan.erase && !confirm(`For ${batchTargets().length} sensor(s): download all stored history${plan.sync ? `, set the clock (${prefs.timeMode === "utc" ? "UTC" : "local time"})` : ""}, then PERMANENTLY erase the history on the sensor.\n\nA sensor is only erased if its download finished completely and is saved on this phone.`)) return;
+    await runBatch(downloadLabel(plan).replace("…", ""), async () => {
       const r = await dump({ skipConfirm: true });
       if (!r) return null;
-      return { ok: r.finished, text: `${r.n} samples downloaded · ${r.total} stored${r.synced ? " · clock set" : ""}${r.deleted ? " · erased on sensor" : ""}${r.finished ? "" : " · INCOMPLETE (idle timeout)"}${r.drift ? " · " + r.drift : ""}` };
+      const ok = r.finished && (!plan.sync || r.synced) && (!plan.erase || r.deleted);
+      return { ok, text: `${r.n} samples downloaded · ${r.total} stored` + (plan.sync ? ` · ${r.synced ? "clock set" : "clock NOT set"}` : "") +
+        (plan.erase ? ` · ${r.deleted ? "erased on sensor" : "NOT erased"}` : "") + (r.finished ? "" : " · INCOMPLETE (idle timeout)") + (r.drift ? " · " + r.drift : "") };
     });
   },
   async getTime() { await runBatch("Read clocks", () => getTime()); },
@@ -1980,7 +1992,7 @@ function backupState() {
   return { last, total, notBacked };
 }
 function updateBackupBanner() {
-  const days = prefs.backupDays == null ? 14 : +prefs.backupDays, { last, total, notBacked } = backupState();
+  const days = prefs.backupDays == null ? 7 : +prefs.backupDays, { last, total, notBacked } = backupState();
   const age = last ? (Date.now() - last.at) / 86400000 : Infinity;
   const info = $("backupInfo");
   if (info) info.textContent = last ? `Last backup ${ago(last.at)} (${last.rows.toLocaleString()} readings).` : "No backup made from this phone yet.";
@@ -2093,6 +2105,19 @@ function comfortPrefs() {
 function scalePrefs() {
   return Object.assign({ on: false, tLo: 15, tHi: 30, hLo: 20, hHi: 80 }, prefs.scale || {});
 }
+// "Fit scale": limits for the fixed scale taken from the data on screen, e.g. { tLo, tHi, hLo, hHi }.
+// Kept only until Auto or Fixed is tapped, the limits in Settings change, or the page is reloaded; the
+// limits in Settings stay as they are.
+let fitScale = null;
+function fitFixedScale() {
+  if (!plotted || !plotted.dataRange || !scalePrefs().on || prefs.showB) return;
+  const { t, h } = plotted.dataRange, f = Object.assign({}, fitScale);
+  if (plotted.showT) { f.tLo = Math.floor(t[0]); f.tHi = Math.max(Math.ceil(t[1]), f.tLo + 1); }
+  if (plotted.showH) { f.hLo = Math.floor(h[0]); f.hHi = Math.max(Math.ceil(h[1]), f.hLo + 1); }
+  fitScale = f;
+  dbg(`Fixed scale fitted to the data shown: ${JSON.stringify(f)}`);
+  drawChart();
+}
 // Wire the Chart settings: number inputs and checkboxes bound to prefs.comfort / prefs.scale.
 function setupChartSettings() {
   const bind = (key, getDefaults, ids) => {
@@ -2106,6 +2131,7 @@ function setupChartSettings() {
         if (!isFinite(c[field]) && elx.type !== "checkbox") { elx.value = getDefaults()[field]; return; }
         // keep "from" below "to"
         if (c.tLo >= c.tHi || c.hLo >= c.hHi) { elx.value = getDefaults()[field]; return; }
+        if (key === "scale") fitScale = null;
         prefs[key] = c; savePrefs(); syncScaleToggle(); drawChart();
       };
     }
@@ -2123,13 +2149,14 @@ function setupChartSettings() {
     prefs.nightFrom = $("nightFrom").value; prefs.nightTo = $("nightTo").value; savePrefs(); drawChart();
   };
   $("nightFrom").onchange = setNight; $("nightTo").onchange = setNight;
-  const setScale = on => { const s = scalePrefs(); s.on = on; prefs.scale = s; savePrefs(); $("fsOn").checked = on; syncScaleToggle(); drawChart(); };
+  const setScale = on => { fitScale = null; const s = scalePrefs(); s.on = on; prefs.scale = s; savePrefs(); $("fsOn").checked = on; syncScaleToggle(); drawChart(); };
   const setStyle = s => { prefs.chartStyle = s; savePrefs(); syncStyleToggle(); drawChart(); };
   $("stLine").onclick = () => setStyle("line");
   $("stCandle").onclick = () => setStyle("candle");
   syncStyleToggle();
   $("scAuto").onclick = () => setScale(false);
   $("scFixed").onclick = () => setScale(true);
+  $("scFit").onclick = fitFixedScale;
   syncScaleToggle();
 }
 function syncStyleToggle() {
@@ -2141,6 +2168,9 @@ function syncScaleToggle() {
   const on = scalePrefs().on;
   $("scAuto").setAttribute("aria-pressed", String(!on));
   $("scFixed").setAttribute("aria-pressed", String(on));
+  // Only for the fixed scale, which the battery view doesn't use.
+  $("scFit").disabled = !on || !!prefs.showB || !histData.length;
+  $("scFit").setAttribute("aria-pressed", String(on && !prefs.showB && !!fitScale));
 }
 // Visible time window {a, b} (UTC seconds) while zoomed/panned; null = follow the range buttons.
 let view = null;
@@ -2160,7 +2190,7 @@ function syncStepButtons() {
   today.disabled = !dom;
 }
 function drawChart() {
-  syncStepButtons();
+  syncStepButtons(); syncScaleToggle();
   const svg = $("chart"); const W = svg.clientWidth || 600, H = 276;
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.innerHTML = "";
   const css = getComputedStyle(document.documentElement);
@@ -2218,7 +2248,7 @@ function drawChart() {
   // 19 / 20 / 21 or 45 / 50 / 55. Both axes get the same number of steps so they share the gridlines.
   const nTarget = Math.max(3, Math.min(8, Math.floor(ph / 42)));
   const niceStep = raw => { const e = Math.pow(10, Math.floor(Math.log10(raw))); for (const f of [1, 2, 2.5, 5, 10]) if (f * e >= raw - 1e-12) return f * e; return 10 * e; };
-  const fixed = scalePrefs();
+  const fixed = Object.assign(scalePrefs(), fitScale);
   const axis = (i, minSpan) => {
     let [lo, hi] = range(i);
     if (fixed.on && !(bat && i === 2)) [lo, hi] = i === 1 ? [fixed.tLo, fixed.tHi] : [fixed.hLo, fixed.hHi];  // same axes everywhere
@@ -2407,7 +2437,7 @@ function drawChart() {
   const markerLayer = el("g", {});   // value labels next to the marker (showReadoutAt)
   plotted = { pts: inWin.length ? inWin : pts, x, cursor, L, pw, T, ph, yT, yH, showT, showH, markerLayer,
     candles: candles && candles.list, colT: col("--temp"), colH, colBg: col("--card"), colText: col("--text"),
-    unitH, decH: bat ? 3 : 0, decH1: bat ? 3 : 1 };
+    unitH, decH: bat ? 3 : 0, decH1: bat ? 3 : 1, dataRange: { t: range(1), h: range(2) } };
   // Note under the chart while points are averages (or candles are shown).
   const note = $("avgNote");
   if (note) {
@@ -2712,7 +2742,7 @@ function updateStatusBar() {
   $("btnRenameReset").onclick = () => withBusy(resetBtName);
   $("btNameNew").oninput = () => delete $("btNameNew").dataset.auto;
   $("csvLocale").onchange = e => { prefs.csvLocale = e.target.value; savePrefs(); };
-  $("backupDays").value = String(prefs.backupDays == null ? 14 : prefs.backupDays);
+  $("backupDays").value = String(prefs.backupDays == null ? 7 : prefs.backupDays);
   $("backupDays").onchange = e => { prefs.backupDays = +e.target.value; savePrefs(); updateBackupBanner(); };
   // Straight from the tap: iOS only opens the share sheet then.
   $("btnBackupNow").onclick = shareAllDevices;
@@ -2722,8 +2752,10 @@ function updateStatusBar() {
   // stretch of the sensor's log starting at a known clock set - see driftCorrect()).
   for (const [id, key] of [["optSync", "dlSync"], ["optDelete", "dlErase"]]) {
     $(id).checked = prefs[key] !== false;
-    $(id).onchange = e => { prefs[key] = e.target.checked; savePrefs(); };
+    $(id).onchange = e => { prefs[key] = e.target.checked; savePrefs(); updateDownloadButtons(); };
   }
+  $("dumpCount").onchange = updateDownloadButtons;
+  updateDownloadButtons();
   $("showNow").checked = !!prefs.showNow;   // off by default
   $("showNow").onchange = e => { prefs.showNow = e.target.checked; savePrefs(); if (prefs.showNow) startLive(); else stopLive(); renderKnown(); };
   $("driftCorr").checked = prefs.driftCorr !== false;
@@ -2766,7 +2798,6 @@ function updateStatusBar() {
   $("btnSelAll").onclick = () => { knownNames().forEach(n => batchSel.add(n)); saveSel(); renderKnown(); };
   $("btnSelNone").onclick = () => { batchSel.clear(); saveSel(); renderKnown(); };
   $("bDump").onclick = () => withBusy(BATCH.dump);
-  $("bDumpSyncErase").onclick = () => withBusy(BATCH.dumpSyncErase);
   // Straight from the tap (iOS only opens the share sheet then); same files as History → Share all sensors.
   $("bShareAll").onclick = () => { shareAllDevices(); $("batchOut").textContent = $("shareMsg").textContent; };
   $("bGetTime").onclick = () => withBusy(BATCH.getTime);
