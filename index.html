@@ -159,6 +159,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 #knownList .kc .more dd.soon { color: var(--warn); }
 #knownList .kc .more dd.full { color: var(--err); }
 #knownList .kc .more .linkbtn { font-size: 13px; padding: 4px 0; }
+#knownList .kc .more .linkbtn.edit { color: var(--accent); margin-left: 6px; padding: 4px 6px; }
 #batchStatus { scroll-margin-top: 70px; } /* stay clear of the sticky tab bar when scrolled to */
 #knownList .nm input[type=checkbox] { width: 20px; height: 20px; }
 .ks .vals { font-variant-numeric: tabular-nums; }
@@ -508,7 +509,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=101"></script>
+<script src="core.js?v=102"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -615,7 +616,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 101;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 102;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1018,6 +1019,7 @@ function clearSensors() {
 }
 
 const openKnown = new Set();  // sensors whose details are open in the list
+let editingDesc = null;  // sensor whose description is being edited in the list
 function setDescription(name, text) {
   text = text.trim();
   if ((rooms[name] || "") === text) return;
@@ -1095,15 +1097,24 @@ function renderKnown() {
         const dt = document.createElement("dt"), dd = document.createElement("dd");
         dt.textContent = label; dd.textContent = value; if (cls) dd.className = cls; dl.append(dt, dd);
       };
-      add("Description", "");
-      // Editable here, whether the sensor is available or not (it's only saved on this phone).
-      const inp = document.createElement("input");
-      inp.className = "descEdit"; inp.value = rooms[name] || ""; inp.placeholder = "no description"; inp.maxLength = 40;
-      inp.autocomplete = "off"; inp.setAttribute("aria-label", `Description of ${shownName(name)}`);
-      inp.onchange = () => setDescription(name, inp.value);
-      inp.onkeydown = ev => { if (ev.key === "Enter") inp.blur(); };
-      inp.onblur = () => scheduleKnownRender();  // a little later, so a tap that ends the editing still lands
-      dl.lastChild.append(inp);
+      // The description with an Edit link, whether the sensor is available or not (it's only saved on this phone).
+      if (editingDesc !== name) {
+        add("Description", (rooms[name] || "").trim() || "no description");
+        const ed = document.createElement("button");
+        ed.className = "linkbtn edit"; ed.textContent = "Edit"; ed.setAttribute("aria-label", `Edit the description of ${shownName(name)}`);
+        ed.onclick = () => { editingDesc = name; renderKnown(); const f = document.querySelector("#knownList .descEdit"); if (f) { f.focus(); f.select(); } };
+        dl.lastChild.append(" ", ed);
+      } else {
+        add("Description", "");
+        const inp = document.createElement("input");
+        inp.className = "descEdit"; inp.value = rooms[name] || ""; inp.placeholder = "no description"; inp.maxLength = 40;
+        inp.autocomplete = "off"; inp.setAttribute("aria-label", `Description of ${shownName(name)}`);
+        inp.onchange = () => { if (editingDesc === name) editingDesc = null; setDescription(name, inp.value); };
+        inp.onkeydown = ev => { if (ev.key === "Escape") inp.value = rooms[name] || ""; if (ev.key === "Enter" || ev.key === "Escape") inp.blur(); };
+        // Leaving the field ends the editing; rendered a little later, so the tap that did it still lands.
+        inp.onblur = () => { if (editingDesc === name) editingDesc = null; scheduleKnownRender(); };
+        dl.lastChild.append(inp);
+      }
       add("Name", k.btName || "no name known yet (connect to read it)");
       add("ID", name);
       add("MAC", k.mac || macFromName(name) || "?");
