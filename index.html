@@ -495,7 +495,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=93"></script>
+<script src="core.js?v=94"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -602,7 +602,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 93;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 94;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1063,7 +1063,7 @@ function renderKnown() {
       if (k.t != null) line(`Last heard: ${k.t.toFixed(2)} °C · ${k.h.toFixed(1)} %${k.b != null ? ` · 🔋${k.b}%` : ""}${k.seen ? ` · ${ago(k.seen)}` : ""}`);
       line(lw.text, "loglvl " + lw.level);
       const dl = document.createElement("dl");
-      for (const [label, value] of [["Description", (rooms[name] || "").trim() || "–"], ["Name", k.btName || "not known yet"], ["ID", name], ["MAC", k.mac || macFromName(name) || "?"]]) {
+      for (const [label, value] of [["Description", (rooms[name] || "").trim() || "no description"], ["Name", k.btName || "no name known yet (connect to read it)"], ["ID", name], ["MAC", k.mac || macFromName(name) || "?"]]) {
         const dt = document.createElement("dt"), dd = document.createElement("dd");
         dt.textContent = label; dd.textContent = value; dl.append(dt, dd);
       }
