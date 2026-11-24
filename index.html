@@ -154,7 +154,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 #knownList .kc .more .loglvl { font-size: 13px; grid-column: auto; white-space: pre-line; }
 #knownList .kc .more dl { display: grid; grid-template-columns: auto 1fr; gap: 0 12px; margin: 0 0 4px; }
 #knownList .kc .more dd { margin: 0; color: var(--text); min-width: 0; }
-#knownList .kc .more dt { align-self: center; }
+#knownList .kc .more dl { align-items: baseline; }
 #knownList .kc .descEdit { width: 100%; max-width: 260px; font-size: 16px; padding: 4px 8px; }
 #knownList .kc .more dd.soon { color: var(--warn); }
 #knownList .kc .more dd.full { color: var(--err); }
@@ -509,7 +509,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=102"></script>
+<script src="core.js?v=103"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -616,7 +616,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 102;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 103;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
