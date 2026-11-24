@@ -143,6 +143,8 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 #knownList .kc .go { padding: 7px 12px; font-size: 14px; }
 #knownList .kc .more { grid-column: 1 / -1; font-size: 13px; color: var(--muted); padding: 2px 0 6px; line-height: 1.5; overflow-wrap: anywhere; }
 #knownList .kc .more .loglvl { font-size: 13px; }
+#knownList .kc .more dl { display: grid; grid-template-columns: auto 1fr; gap: 0 12px; margin: 0 0 4px; }
+#knownList .kc .more dd { margin: 0; color: var(--text); }
 #knownList .kc .more .linkbtn { font-size: 13px; padding: 4px 0; }
 #batchStatus { scroll-margin-top: 70px; } /* stay clear of the sticky tab bar when scrolled to */
 #knownList .nm input[type=checkbox] { width: 20px; height: 20px; }
@@ -493,7 +495,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=92"></script>
+<script src="core.js?v=93"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -600,7 +602,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 92;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 93;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1060,7 +1062,12 @@ function renderKnown() {
       if (!dev) line(rem && rem._waking ? "Looking for the sensor…" : "Not available: tap “Connect…” on the Sensor tab or “Add sensors…” on the Batch tab.");
       if (k.t != null) line(`Last heard: ${k.t.toFixed(2)} °C · ${k.h.toFixed(1)} %${k.b != null ? ` · 🔋${k.b}%` : ""}${k.seen ? ` · ${ago(k.seen)}` : ""}`);
       line(lw.text, "loglvl " + lw.level);
-      line((btName !== shownName(name) ? `Bluetooth name ${btName} · ` : "") + (btName !== name ? `ID ${name} · ` : "") + `MAC ${k.mac || macFromName(name) || "?"}`);
+      const dl = document.createElement("dl");
+      for (const [label, value] of [["Description", (rooms[name] || "").trim() || "–"], ["Name", k.btName || "not known yet"], ["ID", name], ["MAC", k.mac || macFromName(name) || "?"]]) {
+        const dt = document.createElement("dt"), dd = document.createElement("dd");
+        dt.textContent = label; dd.textContent = value; dl.append(dt, dd);
+      }
+      more.prepend(dl);
       const rm = document.createElement("button");
       rm.className = "linkbtn"; rm.textContent = "Remove from the list";
       rm.onclick = () => removeSensor(name);
