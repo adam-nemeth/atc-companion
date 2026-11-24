@@ -5,6 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f172a">
 <title>ATC MiThermometer Companion</title>
+<meta name="description" content="Download, chart and manage Xiaomi LYWSD03MMC thermometers with ATC firmware over Bluetooth, from an iPhone (Bluefy) or a computer.">
+<link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+<link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="ATC Companion">
+<meta property="og:type" content="website">
+<meta property="og:title" content="ATC MiThermometer Companion">
+<meta property="og:description" content="Download, chart and manage Xiaomi LYWSD03MMC thermometers with ATC firmware over Bluetooth.">
+<meta property="og:url" content="https://adam-nemeth.github.io/atc-companion/">
+<meta property="og:image" content="https://adam-nemeth.github.io/atc-companion/icons/icon-512.png">
+<meta name="twitter:card" content="summary">
 <style>
 :root {
   --bg: #f4f5f7; --card: #ffffff; --text: #16181d; --muted: #6b7280; --line: #e3e5e9;
@@ -44,6 +55,10 @@ input, select { font: inherit; color: var(--text); background: var(--input); bor
 input[type=number] { width: 90px; }
 input[type=checkbox] { width: 18px; height: 18px; vertical-align: middle; }
 label { display: inline-flex; gap: 6px; align-items: center; }
+/* Label with a menu: the menu moves below its label if both don't fit on one line */
+label.fld { flex-wrap: wrap; max-width: 100%; }
+label.fld select { max-width: 100%; }
+a { color: var(--accent); }
 .muted { color: var(--muted); font-size: 13px; }
 .status { font-weight: 600; }
 .status.ok { color: var(--ok); } .status.err { color: var(--err); } .status.warn { color: var(--warn); }
@@ -247,7 +262,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
     <div class="row">
       <button id="btnConnect" class="primary">Connect…</button>
       <button id="btnConnectAll">Connect (show all)…</button>
-      <button id="btnDisconnect" disabled>Disconnect</button>
+      <button id="btnDisconnect" class="hidden" disabled>Disconnect</button>
     </div>
     <div class="row"><span id="connMsg" class="muted"></span></div>
     <div class="row">
@@ -323,7 +338,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
     <h2>Sensor clock</h2>
     <p class="muted only-all">The time zone here is also used by “Read clocks”, “Set clocks” and by setting the clock after a download.</p>
     <div class="row">
-      <label>Time zone
+      <label class="fld">Time zone
         <select id="timeMode">
           <option value="utc">UTC (default)</option>
           <option value="local">Local</option>
@@ -459,7 +474,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
       </div>
       <p class="muted" id="backupInfo" style="font-size:12px;margin-top:2px"></p>
       <div class="row">
-        <label>CSV format
+        <label class="fld">CSV format
           <select id="csvLocale">
             <option value="en">en: comma, dot decimals</option>
             <option value="hu">hu: semicolon, comma decimals</option>
@@ -485,8 +500,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
         <label><input type="checkbox" id="nightOn"> Shade night hours when a week or less is shown</label>
       </div>
       <div class="row">
-        <label>Night from <input type="time" id="nightFrom" step="900" style="width:110px"></label>
-        <label>to <input type="time" id="nightTo" step="900" style="width:110px"></label>
+        <label>Night <input type="time" id="nightFrom" aria-label="Night from" step="900" style="width:110px"> – <input type="time" id="nightTo" aria-label="Night to" step="900" style="width:110px"></label>
       </div>
       <div class="row">
         <label><input type="checkbox" id="fsOn"> Fixed scale (same axes for every sensor and zoom)</label>
@@ -514,9 +528,10 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=107"></script>
+<script src="core.js?v=108"></script>
 <script>
 "use strict";
+const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
 // Full 128-bit UUID strings: some iOS Web Bluetooth browsers don't accept 16-bit numeric aliases.
 const uuid16 = n => `0000${n.toString(16).padStart(4, "0")}-0000-1000-8000-00805f9b34fb`;
@@ -621,7 +636,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 107;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 108;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1412,6 +1427,8 @@ function setButtons(on) {
   $("btNameNew").disabled = !on;
   $("btnSetCfg").disabled = !on || busy || !currentCfg;
   $("btnConnect").disabled = $("btnConnectAll").disabled = on || busy || !navigator.bluetooth;
+  for (const id of ["btnConnect", "btnConnectAll"]) $(id).classList.toggle("hidden", !!on);
+  $("btnDisconnect").classList.toggle("hidden", !on);
 }
 async function withBusy(fn) {
   if (busy) { dbg("Tap ignored - another operation is still running"); return; }
@@ -1948,7 +1965,7 @@ function logWarning(name) {
   const est = Math.min(LOG_CAPACITY, L.n + Math.max(0, now - L.at) / P);
   const fullAt = L.at + Math.max(0, LOG_CAPACITY - L.n) * P, daysLeft = (fullAt - now) / 86400;
   const pct = Math.round(est / LOG_CAPACITY * 100);
-  const when = new Date(fullAt * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  const when = new Date(fullAt * 1000).toLocaleDateString(LOCALE, { day: "numeric", month: "short" });
   if (daysLeft <= 0) return { level: "full", short: "⚠ log full", text: `Log full since ~${when}: the oldest readings are being overwritten - download now` };
   if (daysLeft <= 7) return { level: "soon", short: `⚠ log full in ${fmtDays(daysLeft)}`, text: `Log ${pct}% full: full in ${fmtDays(daysLeft)} (~${when}), then the oldest readings are overwritten - download soon` };
   return { level: "ok", short: `log ${pct}%, ${fmtDays(daysLeft)} left`, text: `Log ${pct}% full (${fmtDays(est * P / 86400)} of ~${fmtDays(capDays)}) · full in ${fmtDays(daysLeft)} (~${when})` };
@@ -2113,10 +2130,10 @@ function updateBackupBanner() {
   const days = prefs.backupDays == null ? 7 : +prefs.backupDays, { last, total, notBacked } = backupState();
   const age = last ? (Date.now() - last.at) / 86400000 : Infinity;
   const info = $("backupInfo");
-  if (info) info.textContent = last ? `Last backup ${ago(last.at)} (${last.rows.toLocaleString()} readings).` : "No backup made from this phone yet.";
+  if (info) info.textContent = last ? `Last backup ${ago(last.at)} (${last.rows.toLocaleString(LOCALE)} readings).` : "No backup made from this phone yet.";
   const due = days > 0 && notBacked > 0 && age >= days && Date.now() > (lsGet("backupSnooze", 0) || 0);
   $("backupBanner").classList.toggle("hidden", !due);
-  if (due) $("backupText").innerHTML = `<b>${last ? `Last backup ${ago(last.at)}` : "No backup yet"}</b> · ${notBacked.toLocaleString()} reading${notBacked === 1 ? "" : "s"} exist only on this phone. ` +
+  if (due) $("backupText").innerHTML = `<b>${last ? `Last backup ${ago(last.at)}` : "No backup yet"}</b> · ${notBacked.toLocaleString(LOCALE)} reading${notBacked === 1 ? "" : "s"} exist only on this phone. ` +
     `Save a copy (e.g. to Files or iCloud Drive) in case iOS clears the browser's storage.`;
 }
 function shareRaw() {
@@ -2486,9 +2503,9 @@ function drawChart() {
     if (xb - xa >= 2) el("rect", { x: xa, y: T, width: xb - xa, height: ph, fill: "url(#gapHatch)" });
   }
 
-  // Time axis: ticks at round local times (15 min … 12 h, midnights, Mondays, 1st of month), labels in
-  // the phone's own date format, on two lines: time/day on top, date/month/year below where it changes.
-  const fmt = o => new Intl.DateTimeFormat(undefined, o);
+  // Time axis: ticks at round local times (15 min … 12 h, midnights, Mondays, 1st of month), labels
+  // in English like the rest of the app, on two lines: time/day on top, date/month/year below where it changes.
+  const fmt = o => new Intl.DateTimeFormat(LOCALE, o);
   const formatsFor = unit => [
     unit === "subday" ? fmt({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
       : unit === "day" ? fmt({ weekday: "short", day: "numeric" })
@@ -2609,7 +2626,7 @@ function drawChart() {
   if (!raw.length) return;
   const when = t => { const d = new Date(t * 1000);
     const z = localStrZ(t).match(/\((summer|winter) time\)$/);
-    return `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}${z ? ` (${z[1]})` : ""}`; };
+    return `${d.toLocaleDateString(LOCALE, { day: "numeric", month: "short" })} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}${z ? ` (${z[1]})` : ""}`; };
   // One column: [latest, lowest, highest, average], each [value text, when text].
   const column = (get, dec, skipZero) => {
     const rows = skipZero ? raw.filter(s => get(s) > 0) : raw;
