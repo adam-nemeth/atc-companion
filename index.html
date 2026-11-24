@@ -142,7 +142,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 #knownList .kc .chev { flex: none; padding-left: 8px; }
 #knownList .kc .go { padding: 7px 12px; font-size: 14px; }
 #knownList .kc .more { grid-column: 1 / -1; font-size: 13px; color: var(--muted); padding: 2px 0 6px; line-height: 1.5; overflow-wrap: anywhere; }
-#knownList .kc .more .loglvl { font-size: 13px; grid-column: auto; }
+#knownList .kc .more .loglvl { font-size: 13px; grid-column: auto; white-space: pre-line; }
 #knownList .kc .more dl { display: grid; grid-template-columns: auto 1fr; gap: 0 12px; margin: 0 0 4px; }
 #knownList .kc .more dd { margin: 0; color: var(--text); }
 #knownList .kc .more dd.soon { color: var(--warn); }
@@ -497,7 +497,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=95"></script>
+<script src="core.js?v=96"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -604,7 +604,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 95;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 96;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1070,7 +1070,7 @@ function renderKnown() {
       add("ID", name);
       add("MAC", k.mac || macFromName(name) || "?");
       if (k.t != null) add("Last heard", `${k.t.toFixed(2)} °C · ${k.h.toFixed(1)} %${k.b != null ? ` · 🔋${k.b}%` : ""}${k.seen ? ` · ${ago(k.seen)}` : ""}`);
-      add("Log", lw.text.replace(/^Log /, ""), "loglvl " + lw.level);
+      add("Log", lw.text.replace(/^Log /, "").replace(/(?: ·|:) full in /, "\nfull in "), "loglvl " + lw.level);  // "full in …" on its own line
       more.append(dl);
       // What to do about it ("Looking…" is already in the status line above).
       if (!dev && !(rem && rem._waking)) {
