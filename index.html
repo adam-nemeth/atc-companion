@@ -249,7 +249,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
     </div>
     <div class="row"><span id="dumpStatus" class="muted"></span></div>
     <div class="progress" id="dumpProg"><div></div></div>
-    <p class="muted" style="font-size:12px;margin:8px 0 0">Clock drift: a sensor's clock can run fast or slow. The clock is read before downloading and, if it's off, the readings since the last clock set are shifted to the right time; the sensor's own times stay in the sensor_timestamp column.</p>
+    <p class="muted" style="font-size:12px;margin:8px 0 0">Clock drift: a sensor's clock can run fast or slow. The clock is read before downloading and, if it's off, the readings since the last clock set are shifted to the right time; the sensor's own times stay in the sensor_timestamp column. <b>Keep “Set clock” and “Erase” ticked</b>: the sensor's log then always starts right after a clock set, so the correction doesn't have to work out when the clock was last set.</p>
   </section>
 
   <!-- Batch operations -->
@@ -472,7 +472,7 @@ body[data-tab="all"] #knownList .ks > button { display: none; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=86"></script>
+<script src="core.js?v=87"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -579,7 +579,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 86;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 87;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
