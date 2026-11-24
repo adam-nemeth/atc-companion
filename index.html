@@ -137,7 +137,10 @@ body:not([data-tab="all"]) .only-all { display: none !important; }
 body[data-tab="all"] #knownList .ks > .go { display: none; }
 /* Compact sensor list: name line, status line, details on tap */
 #knownList .kc { grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; padding: 5px 0; }
-#knownList .kl { min-width: 0; }
+#knownList .kl { display: contents; }
+#knownList .kc .nm { grid-area: 1 / 1; min-width: 0; }
+#knownList .kc .go { grid-area: 1 / 2; }
+#knownList .kc .sub { grid-area: 2 / 1 / auto / -1; justify-self: start; }  /* full width, so nothing is cut off */
 #knownList .kc .nm { display: flex; align-items: center; gap: 8px; min-height: 26px; cursor: pointer; }
 #knownList .kc .nm span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #knownList .kc .nm input { flex: none; margin: 0; }
@@ -149,7 +152,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 #knownList .kc .sub .lg2.soon { color: var(--warn); font-weight: 600; }
 #knownList .kc .sub .lg2.full { color: var(--err); font-weight: 700; }
 #knownList .kc .chev { flex: none; padding-left: 8px; }
-#knownList .kc .go { padding: 7px 12px; font-size: 14px; }
+#knownList .kc .go { padding: 4px 12px; font-size: 14px; }
 #knownList .kc .more { grid-column: 1 / -1; font-size: 13px; color: var(--muted); padding: 2px 0 6px; line-height: 1.5; overflow-wrap: anywhere; }
 #knownList .kc .more .loglvl { font-size: 13px; font-weight: 400; grid-column: auto; white-space: pre-line; }
 /* Every line is 20 px with 4 px between rows; the Edit link and the text field don't add height. */
@@ -511,7 +514,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=105"></script>
+<script src="core.js?v=106"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -618,7 +621,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 105;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 106;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
