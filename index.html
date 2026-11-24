@@ -151,15 +151,17 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 #knownList .kc .chev { flex: none; padding-left: 8px; }
 #knownList .kc .go { padding: 7px 12px; font-size: 14px; }
 #knownList .kc .more { grid-column: 1 / -1; font-size: 13px; color: var(--muted); padding: 2px 0 6px; line-height: 1.5; overflow-wrap: anywhere; }
-#knownList .kc .more .loglvl { font-size: 13px; grid-column: auto; white-space: pre-line; }
-#knownList .kc .more dl { display: grid; grid-template-columns: auto 1fr; gap: 0 12px; margin: 0 0 4px; }
+#knownList .kc .more .loglvl { font-size: 13px; font-weight: 400; grid-column: auto; white-space: pre-line; }
+/* Every line is 20 px with 4 px between rows; the Edit link and the text field don't add height. */
+#knownList .kc .more dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 2px 0 6px; }
+#knownList .kc .more dt, #knownList .kc .more dd { line-height: 20px; }
 #knownList .kc .more dd { margin: 0; color: var(--text); min-width: 0; }
-#knownList .kc .more dl { align-items: baseline; }
-#knownList .kc .descEdit { width: 100%; max-width: 260px; font-size: 16px; padding: 4px 8px; }
+#knownList .kc .descEdit { display: block; width: 100%; max-width: 260px; height: 28px; margin: -4px 0; font-size: 16px; padding: 0 8px; }
 #knownList .kc .more dd.soon { color: var(--warn); }
 #knownList .kc .more dd.full { color: var(--err); }
 #knownList .kc .more .linkbtn { font-size: 13px; padding: 4px 0; }
-#knownList .kc .more .linkbtn.edit { color: var(--accent); margin-left: 6px; padding: 4px 6px; }
+#knownList .kc .more .linkbtn.edit { position: relative; color: var(--accent); margin-left: 6px; padding: 0; line-height: 20px; vertical-align: baseline; }
+#knownList .kc .more .linkbtn.edit::after { content: ""; position: absolute; inset: -10px -14px; }  /* bigger tap area */
 #batchStatus { scroll-margin-top: 70px; } /* stay clear of the sticky tab bar when scrolled to */
 #knownList .nm input[type=checkbox] { width: 20px; height: 20px; }
 .ks .vals { font-variant-numeric: tabular-nums; }
@@ -509,7 +511,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 </main>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=103"></script>
+<script src="core.js?v=104"></script>
 <script>
 "use strict";
 // ===== Protocol constants (see ATC_MiThermometer_tools.py) =====
@@ -616,7 +618,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 103;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 104;  // also bump core.js?v= in the <script> tag above
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
