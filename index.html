@@ -127,6 +127,33 @@ details summary { cursor: pointer; font-weight: 600; padding: 10px 0; margin: -1
 #log { font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; max-height: 260px; overflow: auto;
   background: var(--input); border-radius: 8px; padding: 8px; margin-top: 8px; }
 .hidden { display: none !important; }
+/* Sensor tab: what needs a connection is only there while a sensor is connected, and then comes first */
+body[data-tab="single"]:not(.connected) .need-conn { display: none !important; }
+body.devfirst[data-tab="single"] main { display: flex; flex-direction: column; }
+body.devfirst[data-tab="single"] main > section { order: 9; }
+body.devfirst[data-tab="single"] #deviceCard { order: 1; }
+body.devfirst[data-tab="single"] #dumpCard { order: 2; }
+body.devfirst[data-tab="single"] #clockCard { order: 3; }
+body.devfirst[data-tab="single"] #knownCard { order: 4; }
+body.devfirst[data-tab="single"] #roomsCard { order: 5; }
+#knownFold { display: none; }
+body.devfirst[data-tab="single"] #knownFold { display: inline; }
+body.devfirst[data-tab="single"]:not(.knownopen) #knownBody { display: none; }
+body.devfirst[data-tab="single"]:not(.knownopen) #knownCard h2 { margin-bottom: 0; }
+.foldhead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+/* Dialogs and short confirmations */
+dialog#dlg { width: min(420px, calc(100vw - 32px)); padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--text); box-shadow: 0 12px 40px rgba(0,0,0,.28); }
+dialog#dlg::backdrop { background: rgba(0,0,0,.45); }
+#dlgTitle { font-size: 17px; font-weight: 650; margin: 0 0 8px; }
+#dlgText { margin: 0 0 16px; white-space: pre-line; overflow-wrap: anywhere; max-height: 50vh; overflow: auto; }
+#dlgInput { width: 100%; font-size: 16px; margin: 0 0 16px; }
+#dlg .btns { display: flex; gap: 8px; }
+#dlg .btns button { flex: 1 1 0; padding: 9px 8px; }
+#dlg #dlgOk { flex-grow: 1.5; }
+button.dangerfill { background: var(--err); border-color: var(--err); color: var(--card); font-weight: 600; }
+#toast { position: fixed; z-index: 60; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(-50%); width: max-content; max-width: calc(100vw - 32px);
+  padding: 10px 14px; border-radius: 10px; background: var(--text); color: var(--bg); font-size: 14px; line-height: 1.4; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+#toast.warn, #toast.err { border-left: 5px solid #f59e0b; } #toast.err { border-left-color: #ef4444; }
 /* Text links: red for removing, .info in the accent colour; the tap area is bigger than the text */
 button.linkbtn.info { color: var(--accent); font-size: 13px; }
 button.linkbtn.info::after { content: ""; position: absolute; inset: -12px -8px; }
@@ -245,8 +272,9 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
   </section>
 
   <!-- Known sensors -->
-  <section class="card" data-tab="single all">
-    <h2>Known sensors</h2>
+  <section class="card" data-tab="single all" id="knownCard">
+    <h2 class="foldhead">Known sensors <button class="linkbtn info" id="knownFold" aria-expanded="false" aria-controls="knownBody">Show</button></h2>
+    <div id="knownBody">
     <!-- Only shown in browsers that support advertisement scanning (e.g. Chrome with the experimental flag) -->
     <div class="row hidden" id="scanRow">
       <button id="btnScan">Scan nearby (live values)</button>
@@ -263,6 +291,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
         <span id="readyMsg" class="muted"></span>
       </div>
     </div>
+    </div>
   </section>
 
   <!-- Connection -->
@@ -275,7 +304,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
       <button id="btnDisconnect" class="hidden" disabled>Disconnect</button>
     </div>
     <div class="row"><span id="connMsg" class="muted"></span></div>
-    <div class="live" id="liveTiles">
+    <div class="live need-conn" id="liveTiles">
       <div class="tile"><div class="k">Temperature</div><div class="v" id="liveT">–</div></div>
       <div class="tile"><div class="k">Humidity</div><div class="v" id="liveH">–</div></div>
       <div class="tile"><div class="k">Battery</div><div class="v" id="liveB">–</div></div>
@@ -285,7 +314,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
   </section>
 
   <!-- Actions -->
-  <section class="card" data-tab="single all">
+  <section class="card need-conn" data-tab="single all" id="dumpCard">
     <h2>Download from <span class="only-single">sensor</span><span class="only-all">ticked sensors</span></h2>
     <div class="row">
       <label>Readings
@@ -343,7 +372,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
   </section>
 
   <!-- Clock -->
-  <section class="card" data-tab="single">
+  <section class="card need-conn" data-tab="single" id="clockCard">
     <h2>Sensor clock</h2>
     <div class="row">
       <button id="btnGetTime" disabled>Read clock</button>
@@ -354,7 +383,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
   </section>
 
   <!-- History -->
-  <section class="card" data-tab="single history">
+  <section class="card" data-tab="single history" id="histCard">
     <h2>Stored readings</h2>
     <p class="muted hist-extra" id="storageInfo"></p>
     <div class="row">
@@ -420,7 +449,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
   </section>
 
   <!-- Config -->
-  <section class="card" data-tab="single">
+  <section class="card need-conn" data-tab="single" id="cfgCard">
     <details id="cfgDetails">
       <summary>Sensor configuration</summary>
       <h3 class="sub" id="renameBox">Bluetooth name (shown in the Bluetooth picker)</h3>
@@ -538,8 +567,16 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
   </section>
 </main>
 
+<dialog id="dlg" aria-labelledby="dlgTitle" aria-describedby="dlgText">
+  <p id="dlgTitle"></p>
+  <p id="dlgText"></p>
+  <input id="dlgInput" class="hidden" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <div class="btns"><button id="dlgCancel"></button><button id="dlgOk" class="primary"></button></div>
+</dialog>
+<div id="toast" class="hidden" role="status" aria-live="polite"></div>
+
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=109"></script>
+<script src="core.js?v=110"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -647,7 +684,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 109;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 110;  // also bump core.js?v= in the <script> tag above
 const APP_DATE = "2026-11-25";  // release date of this version
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
@@ -719,10 +756,51 @@ function errDetail(e) {
 function showError(where, e) {
   const msg = `${where}: ${describeErr(e)}`;
   log(`${where}: ${errDetail(e)}`, "err"); $("connMsg").textContent = msg; $("connMsg").className = "status err";
+  if (document.body.dataset.tab !== "single") toast(msg, "err");  // the message itself is on the Sensor tab
 }
 function showInfo(msg) { $("connMsg").textContent = msg; $("connMsg").className = "muted"; }
 window.addEventListener("error", e => showError(`Script error at ${e.filename || "?"}:${e.lineno}:${e.colno}`, e.error || e.message));
 window.addEventListener("unhandledrejection", e => showError("Unhandled error", e.reason));
+
+// ===== Dialogs and short confirmations =====
+// ask(): a question with buttons that say what they do. Resolves true / false - or, with input, the text
+// / null. tell(): just a message. The dialog blocks the page like confirm() did, but the page keeps
+// running behind it: whoever asks about a sensor must check afterwards that it's still the one connected.
+let askChain = Promise.resolve();
+function ask(text, opts = {}) { const r = askChain.then(() => askNow(text, opts)); askChain = r.catch(() => {}); return r; }
+function tell(text, title = "") { return ask(text, { title, cancel: null }); }
+function askNow(text, { title = "", ok = "OK", cancel = "Cancel", danger = false, input = null } = {}) {
+  const d = $("dlg"), both = [title, text].filter(Boolean).join("\n\n");
+  if (typeof d.showModal !== "function") {  // very old browsers
+    if (input != null) return Promise.resolve(prompt(both, input));
+    if (cancel === null) { alert(both); return Promise.resolve(true); }
+    return Promise.resolve(confirm(both));
+  }
+  return new Promise(res => {
+    const no = input != null ? null : cancel === null, okB = $("dlgOk"), noB = $("dlgCancel"), inp = $("dlgInput");
+    $("dlgTitle").textContent = title; $("dlgTitle").classList.toggle("hidden", !title);
+    $("dlgText").textContent = text; $("dlgText").classList.toggle("hidden", !text);
+    inp.classList.toggle("hidden", input == null); inp.value = input || "";
+    okB.textContent = ok; okB.className = danger ? "dangerfill" : "primary";
+    noB.textContent = cancel || ""; noB.classList.toggle("hidden", cancel === null);
+    const done = v => { d.onclose = d.oncancel = null; if (d.open) d.close(); res(v); };
+    okB.onclick = () => done(input != null ? inp.value : true);
+    noB.onclick = () => done(no);
+    inp.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); okB.click(); } };
+    d.oncancel = e => { e.preventDefault(); done(no); };
+    d.onclose = () => { if (!d.open) done(no); };  // the previous dialog's close event can arrive late
+    d.showModal();
+    (input != null ? inp : danger ? noB : okB).focus();
+  });
+}
+// A short message at the bottom of the screen. While a batch runs its own list says everything.
+let toastTimer = null, inBatch = false;
+function toast(text, cls = "ok") {
+  if (inBatch || !text) return;
+  const e = $("toast"); e.textContent = text; e.className = cls;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => e.classList.add("hidden"), cls === "ok" ? 4000 : 7000);
+}
+const count = (n, what) => `${n.toLocaleString(LOCALE)} ${what}${n === 1 ? "" : "s"}`;
 
 // ===== Time conventions =====
 const localOffsetSec = () => -new Date().getTimezoneOffset() * 60;
@@ -832,9 +910,10 @@ function rememberSensor(name, data) {
   if (removedSensors.has(name)) return;
   known[name] = Object.assign(known[name] || {}, data); saveKnown(); scheduleKnownRender();
 }
-function removeSensor(name) {
-  if (chr && sensorName === name) { alert("Disconnect from this sensor before removing it."); return; }
-  if (!confirm(`Remove ${shownName(name)} from the sensor list?\n\nIts downloaded readings stay on this phone. It comes back if you ${document.body.dataset.tab === "all" ? "add it with “Add sensors…”" : "connect to it"} or import it again.`)) return;
+async function removeSensor(name) {
+  if (chr && sensorName === name) { tell("Disconnect from this sensor before removing it."); return; }
+  if (!await ask(`Its downloaded readings stay on this phone. It comes back if you ${document.body.dataset.tab === "all" ? "add it with “Add sensors…”" : "connect to it"} or import it again.`,
+    { title: `Remove ${shownName(name)} from the list?`, ok: "Remove", danger: true })) return;
   delete known[name]; delete rooms[name];
   reachable.delete(name); remembered.delete(name); batchSel.delete(name);
   removedSensors.add(name);
@@ -1035,6 +1114,7 @@ async function importSensors(file) {
   saveKnown(); lsSet("rooms", rooms); saveSel();
   log(`Imported sensors from ${file.name}: ${added} added, ${updated} updated, ${skipped} skipped`);
   sensorsMsg(`${file.name}: ${added} added, ${updated} updated${skipped ? `, ${skipped} skipped (no ATC_ name or address)` : ""}. ${sensorsCountText()}`);
+  toast(`Sensor list: ${added} added, ${updated} updated`);
   renderKnown(); refreshDeviceList();
 }
 function exportSensors() {
@@ -1042,8 +1122,9 @@ function exportSensors() {
   if (!list.length) { sensorsMsg("No sensors to save yet."); return; }
   shareFiles([{ name: "sensors.json", rows: list.length, text: JSON.stringify(list, null, 2) + "\n", type: "application/json" }], `Thermometer sensor list (${list.length})`);
 }
-function clearSensors() {
-  if (!confirm("Remove all sensors and their descriptions from this browser? Downloaded readings stay. You can load them again from a sensors.json.")) return;
+async function clearSensors() {
+  if (!await ask("This removes the sensors and their descriptions from this browser. Downloaded readings stay. You can load the list again from a sensors.json.",
+    { title: "Clear the sensor list?", ok: "Clear list", danger: true })) return;
   rooms = {}; known = {}; batchSel.clear();
   lsSet("rooms", rooms); saveKnown(); saveSel();
   log("Sensor list cleared");
@@ -1295,10 +1376,10 @@ let connecting = null;  // { dev, label } from the tap until the connection succ
 async function connectDevice(dev, expectedName, opts = {}) {
   // Say so straight away: disconnecting another sensor and waiting for a broadcast come first and
   // can take several seconds.
-  connecting = { dev, name: expectedName, label: guessLabel(dev, expectedName) };
-  setStatus(`Connecting to ${connecting.label}…`, "warn"); showInfo(""); renderKnown();
+  connecting = { dev, name: expectedName, label: guessLabel(dev, expectedName), batch: !!opts.batch };
+  setStatus(`Connecting to ${connecting.label}…`, "warn"); showInfo(""); renderKnown(); updateLayout(!!chr);
   try { return await connectDeviceNow(dev, expectedName, opts); }
-  finally { connecting = null; renderKnown(); }
+  finally { connecting = null; renderKnown(); updateLayout(!!chr); }
 }
 async function connectDeviceNow(dev, expectedName, opts) {
   if (chr && device && device !== dev) {
@@ -1306,7 +1387,9 @@ async function connectDeviceNow(dev, expectedName, opts) {
     showInfo(`Disconnecting from ${sensorName ? shownName(sensorName) : "the other sensor"} first…`);
     await disconnectAndWait();
   }
-  device = dev; sensorName = null; $("clockState").textContent = "";
+  device = dev; sensorName = null; clearLive();
+  if (!opts.batch) $("dumpStatus").textContent = "";
+  $("btNameNew").value = ""; delete $("btNameNew").dataset.auto; $("btNameCur").textContent = "";
   showInfo("");
   // Diagnostics: is this a fresh handle from the picker/scan, or one reused from an earlier connection?
   dev._uses = (dev._uses || 0) + 1;
@@ -1379,7 +1462,7 @@ async function connectDeviceNow(dev, expectedName, opts) {
     if (!currentCfg) { step = "reading config"; await request([0x55], b => b[0] === 0x55 && b.length - 1 >= 9, 4000); dbg(`Config ${currentCfg ? "received on second request" : "still not received"}`); }
     step = "identifying the sensor";
     sensorName = (await identifySensor()) || expectedName || device.name || "unknown";
-    if (!opts.batch && !known[sensorName] && !rooms[sensorName]) openKnown.add(sensorName);  // new: its details show where to add a description
+    if (!opts.batch && !known[sensorName] && !rooms[sensorName]) { openKnown.add(sensorName); knownOpen = true; syncKnownFold(); }  // new: its details show where to add a description
     unremoveSensor(sensorName);  // connecting on purpose brings a removed sensor back
     rememberSensor(sensorName, Object.assign({ id: device.id, mac: macFromName(sensorName) || undefined },
       currentCfg ? { cfg: currentCfg, cfgRead: Date.now() } : {}));  // config read before the sensor was identified
@@ -1412,7 +1495,7 @@ async function disconnectAndWait() {
   dbg(`Disconnecting ${sensorName || d.name}`);
   try { d.gatt.disconnect(); } catch (e) { dbg(`disconnect() threw: ${describeErr(e)}`); }
   await gone;
-  chr = null; listeners.clear();
+  chr = null; listeners.clear(); clearLive(); setButtons(false);
   // iOS needs a moment after a disconnect before the next connection is reliable.
   await sleep(1500);
 }
@@ -1426,13 +1509,46 @@ function onDisconnected(ev) {
   if (ev && ev.target && ev.target !== device) { dbg(`Disconnect event from previous sensor ${ev.target.name || ev.target.id} (ignored)`); return; }
   log(`Disconnected (gattserverdisconnected); busy=${busy}, ${rxCount} notifications this session, last BLE traffic ${Math.round((Date.now() - lastActivity) / 1000)} s ago, page ${document.hidden ? "hidden" : "visible"}`, "warn");
   const was = sensorName ? shownName(sensorName) : guessLabel(device);
-  chr = null; listeners.clear(); setButtons(false);
+  chr = null; listeners.clear(); clearLive(); setButtons(false);
   // While connecting, disconnects are part of it (switching, retries): keep showing "Connecting to …".
-  if (!connecting) setStatus(`Disconnected from ${was}`);
+  if (!connecting) {
+    setStatus(`Disconnected from ${was}`); toast(`Disconnected from ${was}`);
+    if ($("connMsg").className === "muted") showInfo("");  // errors stay
+  }
   renderKnown();
 }
 function disconnect() { dbg("Disconnect requested by user"); if (device && device.gatt.connected) device.gatt.disconnect(); }
+// Values that belong to one connection: cleared when it ends and before the next one starts.
+function clearLive() {
+  for (const id of ["liveT", "liveH", "liveB"]) $(id).textContent = "–";
+  for (const id of ["liveNote", "clockState", "clockMsg"]) $(id).textContent = "";
+}
+// The Sensor tab's layout: the connected sensor first, with the list folded below it (see the CSS).
+let knownOpen = false;
+function updateLayout(on) {
+  const b = document.body, c = b.classList;
+  // While a job is finishing after the connection was lost, its card stays.
+  const conn = !inBatch && (!!on || (busy && c.contains("connected")));
+  const first = conn || (!inBatch && !!connecting && !connecting.batch);
+  if (conn === c.contains("connected") && first === c.contains("devfirst")) { syncKnownFold(); return; }
+  const started = first && !c.contains("devfirst");
+  // Keep what's on screen where it is (the cards above it change).
+  const anchor = started ? null : ["deviceCard", "histCard"].map($).find(e => { const r = e.getBoundingClientRect(); return r.height && r.bottom > 80 && r.top < innerHeight * 0.7; });
+  const before = anchor && anchor.getBoundingClientRect().top;
+  if (started) knownOpen = false;
+  c.toggle("connected", conn); c.toggle("devfirst", first); syncKnownFold();
+  if (b.dataset.tab !== "single") return;
+  if (started) $("deviceCard").scrollIntoView({ block: "start" });
+  else if (anchor) scrollBy(0, anchor.getBoundingClientRect().top - before);
+  drawChart();
+}
+function syncKnownFold() {
+  document.body.classList.toggle("knownopen", knownOpen);
+  $("knownFold").textContent = knownOpen ? "Hide" : `Show (${knownNames().length})`;
+  $("knownFold").setAttribute("aria-expanded", String(knownOpen));
+}
 function setButtons(on) {
+  updateLayout(on);
   for (const id of ["btnDisconnect", "btnDump", "btnTime", "btnGetTime", "btnDeleteLog", "btnGetCfg", "btnRename", "btnRenameReset"]) $(id).disabled = !on || busy;
   $("btNameNew").disabled = !on;
   $("btnSetCfg").disabled = !on || busy || !currentCfg;
@@ -1448,7 +1564,7 @@ async function withBusy(fn) {
 
 // Live values via the standard Environmental Sensing / Battery services (best effort).
 async function readLive(server) {
-  const out = {};
+  const out = {}, dev0 = device;
   const rd = async (svc, id) => {
     const s = t0();
     try { const v = await (await svc.getCharacteristic(uuid16(id))).readValue(); dbg(`Read 0x${id.toString(16)} in ${since(s)}: ${hex(new Uint8Array(v.buffer, v.byteOffset, v.byteLength))}`); return v; }
@@ -1465,6 +1581,7 @@ async function readLive(server) {
     const v = await rd(bs, 0x2a19); if (v) out.b = v.getUint8(0);
   } catch (e) { dbg(`Battery service 0x180F unavailable: ${describeErr(e)}`); }
   dbg(`Live values: ${JSON.stringify(out)}`);
+  if (device !== dev0 || !chr) return;  // disconnected or switched meanwhile
   if (out.t != null) $("liveT").textContent = out.t.toFixed(2) + "°";
   if (out.h != null) $("liveH").textContent = out.h.toFixed(1) + "%";
   if (out.b != null) $("liveB").textContent = out.b + "%";
@@ -1472,8 +1589,9 @@ async function readLive(server) {
 }
 // On connect: read the sensor clock and show how far off it is (under the live values).
 async function showClockState() {
-  const el = $("clockState"); el.textContent = "Clock: reading…"; el.className = "muted";
+  const el = $("clockState"), dev0 = device; el.textContent = "Clock: reading…"; el.className = "muted";
   let c = null; try { c = await readSensorClock(); } catch (e) { dbg(`Clock read on connect failed: ${describeErr(e)}`); }
+  if (device !== dev0 || !chr) return;  // disconnected or switched meanwhile
   if (!c) { el.textContent = "Clock: no reply"; return; }
   const E = Math.round(c.sensor - c.phone), zone = prefs.timeMode === "utc" ? "UTC" : "local time";
   const other = Math.round(c.sensor - deviceEpochNow(prefs.timeMode === "utc" ? "local" : "utc"));
@@ -1490,7 +1608,7 @@ async function showClockState() {
   log(`Clock on connect: ${txt} (sensor ${faceValue(c.sensor)}, reply ${Math.round(c.rtt)} ms)`);
 }
 function showLatestSample(s) {
-  if (!s) return;
+  if (!s || !chr) return;
   if ($("liveT").textContent === "–") $("liveT").textContent = s[1].toFixed(2) + "°";
   if ($("liveH").textContent === "–") $("liveH").textContent = s[2].toFixed(1) + "%";
   if ($("liveB").textContent === "–") $("liveB").textContent = (s[3] / 1000).toFixed(2) + " V";
@@ -1516,8 +1634,14 @@ function updateDownloadButtons() {
 }
 // Returns { n, total, finished, deleted } (or null if cancelled). opts.skipConfirm: batch already asked.
 async function dump(opts = {}) {
-  const { count: cnt, sync, erase: del } = downloadPlan();
-  if (del && !opts.skipConfirm && !confirm("After a successful download, PERMANENTLY erase the sensor's log?")) return null;
+  // opts.plan: what the user confirmed for the whole batch (the tick boxes may have changed since).
+  const { count: cnt, sync, erase: del } = opts.plan || downloadPlan();
+  if (del && !opts.plan) {
+    const target = sensorName;
+    if (!await ask("The sensor's log is erased permanently, but only after every reading has arrived and is saved on this phone.",
+      { title: `Download from ${shownName(target)} and erase it?`, ok: "Download & erase", danger: true })) return null;
+    if (!stillConnected(target)) return null;
+  }
   const result = { n: 0, total: 0, finished: false, deleted: false };
   const raw = []; let done = false;
   const prog = $("dumpProg"), bar = prog.firstElementChild; prog.style.display = "block"; bar.style.width = "0";
@@ -1604,6 +1728,8 @@ async function dump(opts = {}) {
     }
     $("dumpStatus").textContent = `${raw.length} readings downloaded · ${total} stored` + (drift && drift.stretches.some(s => s.applied) ? ` · ${driftSummary(drift)}` : "");
     result.drift = drift ? driftSummary(drift) : "";
+    toast(!finished ? `Download incomplete: ${count(raw.length, "reading")} saved` : del && !result.deleted ? `${count(raw.length, "reading")} saved, but the sensor was not erased`
+      : `${count(raw.length, "reading")} saved${result.synced ? ", clock set" : ""}${result.deleted ? ", sensor erased" : ""}`, finished && (!del || result.deleted) ? "ok" : "warn");
     showLatestSample(raw[raw.length - 1] && [0, ...raw[raw.length - 1].slice(1)]);
     bar.style.width = "100%";
     await refreshDeviceList(key);
@@ -1659,6 +1785,12 @@ async function readBtName() {
     : "Couldn't read the Bluetooth name from this sensor.";
   if (!$("btNameNew").value || $("btNameNew").dataset.auto) { $("btNameNew").value = suggestBtName(); $("btNameNew").dataset.auto = "1"; }
 }
+// After a question: is the sensor it was about still the connected one?
+function stillConnected(name) {
+  if (chr && sensorName === name) return true;
+  toast(`${name ? shownName(name) : "The sensor"} isn't connected any more - nothing was changed.`, "err");
+  return false;
+}
 async function setBtName(name) {
   const isReset = name === null;
   const bytes = isReset ? [0x01, 0x00] : [0x01, ...[...name].map(ch => ch.charCodeAt(0))];
@@ -1670,20 +1802,23 @@ async function setBtName(name) {
   rememberSensor(sensorName, { btName: isReset ? sensorName : name });
   $("btNameCur").textContent = `Sensor replied: ${got || "(empty)"}. Disconnect to apply - the sensor restarts with the new name.`;
   renderKnown();
-  if (confirm(`Bluetooth name set to “${isReset ? sensorName : name}”. Disconnect now so the sensor applies it?`)) disconnect();
+  if (await ask("The sensor uses the new name after it disconnects.", { title: `Bluetooth name set to “${isReset ? sensorName : name}”`, ok: "Disconnect now", cancel: "Later" })) disconnect();
 }
 async function renameSensor() {
-  const name = withAtcPrefix($("btNameNew").value);
-  if (!/^ATC_[A-Za-z0-9_-]{1,16}$/.test(name)) { alert("Use 1-16 letters, digits, _ or - (no spaces or accents), e.g. Kitchen. ATC_ is added in front."); return; }
+  const name = withAtcPrefix($("btNameNew").value), target = sensorName;
+  if (!/^ATC_[A-Za-z0-9_-]{1,16}$/.test(name)) { tell("Use 1-16 letters, digits, _ or - (no spaces or accents), e.g. Kitchen. ATC_ is added in front."); return; }
   $("btNameNew").value = name;  // show the name that will actually be set
-  if (/^ATC_[0-9A-Fa-f]{6}$/.test(name) && name.toUpperCase() !== sensorName) { alert("That looks like another sensor's default name - pick a different one."); return; }
+  if (/^ATC_[0-9A-Fa-f]{6}$/.test(name) && name.toUpperCase() !== sensorName) { tell("That looks like another sensor's default name - pick a different one."); return; }
   const clash = Object.keys(known).find(n => n !== sensorName && known[n].btName === name);
-  if (clash) { alert(`${clash} already uses that name.`); return; }
-  if (!confirm(`Rename ${shownName(sensorName)} to “${name}”? It's saved in the sensor and can be reset later.`)) return;
+  if (clash) { tell(`${clash} already uses that name.`); return; }
+  if (!await ask("The name is saved in the sensor and can be reset later.", { title: `Rename ${shownName(target)} to “${name}”?`, ok: "Rename" })) return;
+  if (!stillConnected(target)) return;
   await setBtName(name);
 }
 async function resetBtName() {
-  if (!confirm(`Restore the default Bluetooth name (${sensorName})?`)) return;
+  const target = sensorName;
+  if (!await ask(`The sensor's Bluetooth name becomes ${target} again.`, { title: "Restore the default name?", ok: "Restore" })) return;
+  if (!stillConnected(target)) return;
   await setBtName(null);
 }
 
@@ -1728,10 +1863,9 @@ function renderBatchCfgSrc(extra) {
 let batchAbort = false;
 const batchTargets = () => knownNames().filter(isTicked);
 function sensorLabel(n) { return shownName(n); }
-async function runBatch(label, fn) {
-  const targets = batchTargets();
+async function runBatch(label, fn, targets = batchTargets()) {
   if (!targets.length) return;
-  batchAbort = false;
+  batchAbort = false; inBatch = true; updateLayout(false);
   const out = $("batchOut"); out.innerHTML = "";
   const head = document.createElement("div"); head.className = "status"; head.textContent = `${label}: 0/${targets.length}`; out.appendChild(head);
   const rowEls = {};
@@ -1781,6 +1915,7 @@ async function runBatch(label, fn) {
     head.textContent = `${label}: ${okCount}/${targets.length} succeeded${batchAbort ? " (stopped)" : ""}`;
     head.className = "status " + (okCount === targets.length ? "ok" : "warn");
     log(`==== Batch "${label}" done: ${okCount}/${targets.length} OK ====`);
+    inBatch = false; toast(`${label}: ${okCount} of ${count(targets.length, "sensor")} done${batchAbort ? " (stopped)" : ""}`, okCount === targets.length ? "ok" : "warn");
     $("bStop").classList.add("hidden"); setTimeout(() => prog.style.display = "none", 1500);
     renderKnown();
   }
@@ -1828,15 +1963,17 @@ function mergeCfg(tpl, own) {
 const BATCH = {
   // Does what the download options say (the button shows it).
   async dump() {
-    const plan = downloadPlan();
-    if (plan.erase && !confirm(`For ${batchTargets().length} sensor(s): download the whole log${plan.sync ? `, set the clock (${prefs.timeMode === "utc" ? "UTC" : "local time"})` : ""}, then PERMANENTLY erase the log on the sensor.\n\nA sensor is only erased if its download finished completely and is saved on this phone.`)) return;
+    // Both are fixed here: the confirmation is for exactly these sensors and options.
+    const plan = downloadPlan(), targets = batchTargets();
+    if (plan.erase && !await ask(`Their whole logs are downloaded${plan.sync ? `, the clocks set (${prefs.timeMode === "utc" ? "UTC" : "local time"})` : ""}, then erased permanently.\n\nA sensor is only erased if its download finished completely and is saved on this phone.\n\n${targets.map(sensorLabel).join(", ")}`,
+      { title: `Download and erase ${count(targets.length, "sensor")}?`, ok: "Download & erase", danger: true })) return;
     await runBatch(downloadLabel(plan).replace("…", ""), async () => {
-      const r = await dump({ skipConfirm: true });
+      const r = await dump({ plan });
       if (!r) return null;
       const ok = r.finished && (!plan.sync || r.synced) && (!plan.erase || r.deleted);
       return { ok, text: `${r.n} readings downloaded · ${r.total} stored` + (plan.sync ? ` · ${r.synced ? "clock set" : "clock NOT set"}` : "") +
         (plan.erase ? ` · ${r.deleted ? "erased on sensor" : "NOT erased"}` : "") + (r.finished ? "" : " · INCOMPLETE (idle timeout)") + (r.drift ? " · " + r.drift : "") };
-    });
+    }, targets);
   },
   async getTime() { await runBatch("Read clocks", () => getTime()); },
   async setTime() { await runBatch(`Set clocks (${prefs.timeMode === "utc" ? "UTC" : "local"})`, () => setTime()); },
@@ -1857,9 +1994,10 @@ const BATCH = {
       return { n, src };
     });
     const missing = plan.filter(p => !p.src).map(p => sensorLabel(p.n));
-    if (missing.length === plan.length) { alert("No config to write. Tap “Load config JSON…” and choose a file, or prepare one in the Sensor tab's config editor."); return; }
+    if (missing.length === plan.length) { tell("No config to write. Tap “Load config JSON…” and choose a file, or prepare one in the Sensor tab's config editor."); return; }
     const lines = plan.map(p => `• ${sensorLabel(p.n)}: ${p.src ? `${p.src[1].file} - ${cfgSummary(p.src[1].cfg)}` : "nothing to write - skipped"}`);
-    if (!confirm(`Write config to ${plan.length - missing.length} sensor(s)?\n\n${lines.join("\n")}\n\nEach sensor keeps its own hardware-specific bits and calibration offsets.`)) return;
+    if (!await ask(`${lines.join("\n")}\n\nEach sensor keeps its own hardware-specific bits and calibration offsets.`,
+      { title: `Write config to ${count(plan.length - missing.length, "sensor")}?`, ok: "Write config" })) return;
     for (const p of plan) if (p.src) log(`Batch config for ${p.n} from ${p.src[1].file}: ${JSON.stringify(p.src[1].cfg)}`);
     const tplFor = Object.fromEntries(plan.map(p => [p.n, p.src && p.src[1].cfg]));
     await runBatch("Write config", async name => {
@@ -1876,7 +2014,7 @@ const BATCH = {
       rememberSensor(name, { cfg: after, cfgRead: Date.now() });
       const same = hex(encodeCfg(after)) === hex(payload);
       return { ok: same, text: same ? "written: " + cfgSummary(after) : "sensor reports different values: " + cfgSummary(after) };
-    });
+    }, plan.map(p => p.n));
   },
   sendCfg() {
     const items = knownNames().filter(n => known[n] && known[n].cfg).map(n => {
@@ -1913,9 +2051,11 @@ async function setTime() {
     log("Sensor confirmed clock: " + faceValue(got));
     $("clockMsg").textContent = `Clock set to ${faceValue(got)} (${modeLabel(prefs.timeMode)}).`; $("clockMsg").className = "status ok";
     $("clockState").textContent = `Clock: correct (${prefs.timeMode === "utc" ? "UTC" : "local time"}, just set)`; $("clockState").className = "status ok";
+    toast("Clock set");
     return { ok: true, text: `set to ${faceValue(got)} ${prefs.timeMode === "utc" ? "UTC" : "local"}` };
   }
   log("No reply (idle timeout).", "warn"); $("clockMsg").textContent = "No reply from the sensor."; $("clockMsg").className = "status err";
+  toast("No reply from the sensor - the clock may not have been set", "err");
   return { ok: false, text: "no reply" };
 }
 // Read the sensor clock (0x23 with no payload) and compare with the phone in the selected time zone.
@@ -1950,9 +2090,13 @@ async function updateStorageInfo() {
   $("storageInfo").textContent = txt;
 }
 async function deleteLog() {
-  if (!confirm(`PERMANENTLY erase the whole log of the sensor ${shownName(sensorName)}? This cannot be undone. (Readings already downloaded to this phone are kept.)`)) return;
+  const target = sensorName;
+  if (!await ask("Its whole log is erased permanently, without downloading it first. This cannot be undone. Readings already on this phone are kept.",
+    { title: `Erase the log of ${shownName(target)}?`, ok: "Erase log", danger: true })) return;
+  if (!stillConnected(target)) return;
   const r = await request([0x36, 0x12, 0x34], b => b[0] === 0x36);
   log(r ? "Sensor confirmed: log erased." : "No reply (idle timeout); it may still have deleted.");
+  toast(r ? `Log of ${shownName(target)} erased` : "No reply from the sensor - its log may still have been erased", r ? "ok" : "warn");
   if (r && sensorName) noteSensorLog(sensorName, 0);
 }
 // ===== Sensor log fill level =====
@@ -2060,12 +2204,15 @@ function renderCfg() {
 async function getCfg() {
   const r = await request([0x55], b => b[0] === 0x55 && b.length - 1 >= 9);
   log(r ? "Config read." : "No config reply (idle timeout).");
+  toast(r ? "Settings read from the sensor" : "No reply from the sensor", r ? "ok" : "warn");
 }
 async function setCfg() {
-  const payload = encodeCfg(currentCfg);
-  if (!confirm(`Write ${payload.length} config bytes to ${shownName(sensorName)}?`)) return;
+  const payload = encodeCfg(currentCfg), target = sensorName;
+  if (!await ask("The sensor uses these settings straight away.", { title: `Write the settings to ${shownName(target)}?`, ok: "Write config" })) return;
+  if (!stillConnected(target)) return;
   const r = await request([0x55, ...payload], b => b[0] === 0x55 && b.length - 1 >= 9);
   log(r ? "Sensor confirmed the new config." : "No reply (idle timeout); re-read to check.");
+  toast(r ? `Settings written to ${shownName(target)}` : "No reply - tap “Re-read config” to check", r ? "ok" : "warn");
 }
 
 const safe = s => s.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "sensor";
@@ -2075,11 +2222,11 @@ function shareMsg(text, cls) { const m = $("shareMsg"); m.textContent = text; m.
 // from in-memory data - no awaits before navigator.share().
 // onDone: called once the files were shared (or downloaded instead).
 function shareFiles(items, subject, onDone) {
-  if (!items.length) { shareMsg("Nothing to share yet.", "status warn"); return; }
+  if (!items.length) { shareMsg("Nothing to share yet.", "status warn"); toast("Nothing to share yet", "warn"); return; }
   const files = items.map(it => new File([it.text], it.name, { type: it.type || "text/csv" }));
   const rows = items.reduce((n, it) => n + it.rows, 0);
   const body = `${subject}\n${items.map(it => `${it.name} (${it.rows} rows)`).join("\n")}`;
-  const done = () => { dbg("Share completed"); shareMsg(`Shared ${files.length} file(s), ${rows} rows.`, "status ok"); if (onDone) onDone(); };
+  const done = () => { dbg("Share completed"); const txt = `Shared ${count(files.length, "file")}, ${count(rows, "row")}`; shareMsg(txt + ".", "status ok"); toast(txt); if (onDone) onDone(); };
   const failed = e => {
     dbg(`Share result: ${errDetail(e)}`);
     if (e && e.name === "AbortError") { shareMsg("Sharing cancelled."); return; }
@@ -2096,6 +2243,7 @@ function shareFiles(items, subject, onDone) {
     navigator.share({ title: items[0].name, text: items[0].text }).then(done, failed);
   } else {
     shareMsg("This browser has no share sheet - downloading the file(s) instead.", "status warn");
+    toast(`Downloading ${count(items.length, "file")}`);
     downloadFiles(items); if (onDone) onDone();
   }
 }
@@ -2155,21 +2303,21 @@ function shareRaw() {
     `Thermometer download: ${histLabel(lastRaw.dev)}`);
 }
 async function importFiles(files) {
-  let last = null;
+  let last = null, imported = 0;
   for (const f of files) {
     // The sensor is the ATC_xxxxxx in the name: "<Description>-ATC_xxxxxx-<kind>.csv" (current),
     // or the older "history_ATC_xxxxxx[__<Description>]_<kind>.csv".
     const id = /(ATC_[0-9A-F]{6})(?![0-9A-Za-z])/i.exec(f.name);
     const m = /^history_(.+?)_(raw_\d{8}_\d{6}|all|merged|daily_\d+|monthly_\d+|yearly_\d+)\.csv$/i.exec(f.name);
-    let dev = id ? id[1] : m ? m[1] : prompt(`Sensor name for ${f.name}?`, f.name.replace(/\.csv$/i, ""));
+    let dev = id ? id[1] : m ? m[1] : await ask("The file name doesn't say which sensor the readings are from.", { title: `Sensor for ${f.name}?`, ok: "Import", input: f.name.replace(/\.csv$/i, "") });
     if (!dev) continue;
     dev = histId(dev);
     const rows = parseCsv(await f.text());
     const total = await mergeInto(dev, rows);
     log(`Imported ${rows.length} rows from ${f.name} into ${dev} (${total} total).`);
-    last = dev;
+    last = dev; imported += rows.length;
   }
-  if (last) await refreshDeviceList(last);
+  if (last) { await refreshDeviceList(last); toast(imported ? `${count(imported, "reading")} imported` : "No readings found in that file", imported ? "ok" : "warn"); }
 }
 
 function histLabel(d) { return knownNames().includes(d) ? shownName(d) : d.replace("__", " · "); }
@@ -2851,7 +2999,7 @@ function sendLog() {
 }
 async function copyLog() {
   const text = logText();
-  try { await navigator.clipboard.writeText(text); $("logMsg").textContent = `Copied ${logLines.length} lines.`; }
+  try { await navigator.clipboard.writeText(text); $("logMsg").textContent = `Copied ${logLines.length} lines.`; toast("Log copied"); }
   catch (e) {
     // Fallback for browsers without the async clipboard API.
     const ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
@@ -2885,7 +3033,7 @@ function updateStatusBar() {
   logEnvironment(); flushLog();
   $("btnLogSend").onclick = sendLog;
   $("btnLogCopy").onclick = copyLog;
-  $("btnLogClear").onclick = () => { if (confirm("Clear the debug log?")) { logLines.length = 0; log("Log cleared"); flushLog(); } };
+  $("btnLogClear").onclick = async () => { if (await ask("", { title: "Clear the debug log?", ok: "Clear", danger: true })) { logLines.length = 0; log("Log cleared"); flushLog(); } };
   if (!navigator.bluetooth) { $("noBle").classList.remove("hidden"); $("btnConnect").disabled = $("btnConnectAll").disabled = true; }
   $("timeMode").value = prefs.timeMode; $("csvLocale").value = prefs.csvLocale; $("idleTimeout").value = prefs.idleTimeout;
   $("timeMode").onchange = e => { prefs.timeMode = e.target.value; savePrefs(); updateTzLabels(); dbg(`Time zone setting → ${prefs.timeMode}`); };
@@ -2921,6 +3069,7 @@ function updateStatusBar() {
   $("btnConnect").onclick = () => withBusy(() => connect(false));
   $("btnConnectAll").onclick = () => withBusy(() => connect(true));
   $("btnDisconnect").onclick = disconnect;
+  $("knownFold").onclick = () => { knownOpen = !knownOpen; syncKnownFold(); };
   $("btnDump").onclick = () => withBusy(dump);
   $("btnTime").onclick = () => withBusy(setTime);
   $("btnDeleteLog").onclick = () => withBusy(deleteLog);
@@ -2949,7 +3098,7 @@ function updateStatusBar() {
   $("btnSelNone").onclick = () => { batchSel.clear(); saveSel(); renderKnown(); };
   $("bDump").onclick = () => withBusy(BATCH.dump);
   // Straight from the tap (iOS only opens the share sheet then); same files as Readings → Share all sensors.
-  $("bShareAll").onclick = () => { shareAllDevices(); $("batchOut").textContent = $("shareMsg").textContent; };
+  $("bShareAll").onclick = shareAllDevices;
   $("bGetTime").onclick = () => withBusy(BATCH.getTime);
   $("bSetTime").onclick = () => withBusy(BATCH.setTime);
   $("bGetCfg").onclick = () => withBusy(BATCH.getCfg);
@@ -2995,7 +3144,8 @@ function updateStatusBar() {
   $("fileImport").onchange = async e => { await importFiles([...e.target.files]); e.target.value = ""; };
   $("btnForget").onclick = async () => {
     const d = $("histDev").value; if (!d) return;
-    if (confirm(`Delete all stored readings of ${histLabel(d)} from this phone? (The sensor itself is not affected.)`)) { await deleteHistory(d); await refreshDeviceList(); }
+    if (await ask(`${count((histCache.get(d) || []).length, "reading")} are deleted from this phone. The sensor itself is not affected.`,
+      { title: `Forget the readings of ${histLabel(d)}?`, ok: "Delete readings", danger: true })) { await deleteHistory(d); await refreshDeviceList(); toast("Readings deleted"); }
   };
   $("chart").addEventListener("pointermove", onChartPointer);
   setupChartGestures();
