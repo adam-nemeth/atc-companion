@@ -4,18 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f172a">
-<title>ATC MiThermometer Companion</title>
-<meta name="description" content="Download, chart and manage Xiaomi LYWSD03MMC thermometers with ATC firmware over Bluetooth, from an iPhone (Bluefy) or a computer.">
+<title>Xiaomi thermometer history & charts on iPhone - ATC MiThermometer Companion</title>
+<meta name="description" content="Record and view the temperature and humidity history of Xiaomi Mi thermometers (LYWSD03MMC, pvvx ATC firmware) on an iPhone or computer: download over Bluetooth, charts, compare rooms, CSV export. Free, no app, no cloud.">
 <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
 <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-title" content="ATC Companion">
 <meta property="og:type" content="website">
-<meta property="og:title" content="ATC MiThermometer Companion">
-<meta property="og:description" content="Download, chart and manage Xiaomi LYWSD03MMC thermometers with ATC firmware over Bluetooth.">
+<meta property="og:title" content="Xiaomi thermometer history & charts on iPhone">
+<meta property="og:description" content="Download, chart and compare the temperature and humidity of Xiaomi LYWSD03MMC sensors (pvvx ATC firmware) over Bluetooth. Free, no app, no cloud.">
 <meta property="og:url" content="https://adam-nemeth.github.io/atc-companion/">
-<meta property="og:image" content="https://adam-nemeth.github.io/atc-companion/icons/icon-512.png">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="https://adam-nemeth.github.io/atc-companion/screenshots/social.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The app on a computer: latest values per room, the sensor list and a temperature and humidity chart">
+<meta name="twitter:card" content="summary_large_image">
 <style>
 :root {
   --bg: #f4f5f7; --card: #ffffff; --text: #16181d; --muted: #646b79; --line: #e3e5e9;
@@ -718,7 +721,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=123"></script>
+<script src="core.js?v=124"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -826,7 +829,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 123;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 124;  // also bump core.js?v= in the <script> tag above
 const APP_DATE = "2026-11-25";  // release date of this version
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
