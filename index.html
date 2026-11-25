@@ -123,6 +123,7 @@ a::after { content: ""; position: absolute; inset: -12px -6px; }
 .stats .when { display: block; font-size: 11px; color: var(--muted); white-space: nowrap; }
 .cfg-grid { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center; }
 .cfg-grid .info { grid-column: 1 / -1; margin-top: -6px; }
+details.group > summary { font-size: 16px; }
 details summary { cursor: pointer; font-weight: 600; padding: 10px 0; margin: -10px 0; }
 #log { font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; max-height: 260px; overflow: auto;
   background: var(--input); border-radius: 8px; padding: 8px; margin-top: 8px; }
@@ -141,6 +142,21 @@ body.devfirst[data-tab="single"] #knownFold { display: inline; }
 body.devfirst[data-tab="single"]:not(.knownopen) #knownBody { display: none; }
 body.devfirst[data-tab="single"]:not(.knownopen) #knownCard h2 { margin-bottom: 0; }
 .foldhead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+/* First use */
+.steps { margin: 0 0 10px; padding-left: 22px; } .steps li { margin-bottom: 6px; }
+body.nosensors .needs-sensors { display: none !important; }
+body.nodata[data-tab="single"] #histCard { display: none !important; }
+body.nodata #histCard > :not(h2):not(#noData):not(.hist-extra), body.nodata .needs-data { display: none !important; }
+body:not(.nodata) #noData { display: none; }
+/* Batch progress: one row per sensor */
+.br { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 0 8px; padding: 7px 0; border-top: 1px solid var(--line); }
+.br .ic { grid-row: 1 / span 2; font-weight: 700; text-align: center; color: var(--muted); }
+.br .nm { font-weight: 600; overflow-wrap: anywhere; }
+.br .tx { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.br .progress { grid-column: 2; margin-top: 5px; }
+.br.ok .ic, .br.ok .tx { color: var(--ok); } .br.err .ic, .br.err .tx { color: var(--err); } .br.run .ic, .br.run .tx { color: var(--warn); }
+#batchHead { margin: 0 0 4px; }
+#batchCard { scroll-margin-top: 70px; }
 /* Dialogs and short confirmations */
 dialog#dlg { width: min(420px, calc(100vw - 32px)); padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--text); box-shadow: 0 12px 40px rgba(0,0,0,.28); }
 dialog#dlg::backdrop { background: rgba(0,0,0,.45); }
@@ -217,7 +233,6 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 #knownList .kc .more .linkbtn { font-size: 13px; padding: 4px 0; }
 #knownList .kc .more .linkbtn.edit { position: relative; color: var(--accent); margin-left: 6px; padding: 0; line-height: 20px; vertical-align: baseline; }
 #knownList .kc .more .linkbtn.edit::after { content: ""; position: absolute; inset: -10px -14px; }  /* bigger tap area */
-#batchStatus { scroll-margin-top: 70px; } /* stay clear of the sticky tab bar when scrolled to */
 #knownList .nm input[type=checkbox] { width: 20px; height: 20px; }
 .ks .vals { font-variant-numeric: tabular-nums; }
 .rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
@@ -273,7 +288,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 
   <!-- Known sensors -->
   <section class="card" data-tab="single all" id="knownCard">
-    <h2 class="foldhead">Known sensors <button class="linkbtn info" id="knownFold" aria-expanded="false" aria-controls="knownBody">Show</button></h2>
+    <h2 class="foldhead"><span id="knownTitle">Known sensors</span> <button class="linkbtn info" id="knownFold" aria-expanded="false" aria-controls="knownBody">Show</button></h2>
     <div id="knownBody">
     <!-- Only shown in browsers that support advertisement scanning (e.g. Chrome with the experimental flag) -->
     <div class="row hidden" id="scanRow">
@@ -282,15 +297,27 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
     </div>
     <div id="knownList" style="margin-top:10px"></div>
 
-    <div class="only-single row"><button class="seg" onclick="showTab('all')">Batch operations for all sensors →</button></div>
+    <div class="only-single row needs-sensors"><button class="seg" onclick="showTab('all')">Batch operations for all sensors →</button></div>
     <div class="only-all">
       <div class="row">
         <button id="btnAddSensors">Add sensors…</button>
-        <button id="btnSelAll">Tick all</button>
-        <button id="btnSelNone">Untick all</button>
+        <button id="btnSelAll" class="needs-sensors">Tick all</button>
+        <button id="btnSelNone" class="needs-sensors">Untick all</button>
         <span id="readyMsg" class="muted"></span>
       </div>
     </div>
+    </div>
+  </section>
+
+  <!-- Batch progress: appears when a batch starts -->
+  <section class="card hidden" data-tab="all" id="batchCard">
+    <div class="status" id="batchHead"></div>
+    <div class="progress" id="batchProg" style="margin:6px 0 8px"><div></div></div>
+    <div id="batchOut"></div>
+    <div class="row" style="margin-top:8px">
+      <button id="bStop" class="danger hidden">Stop</button>
+      <button id="bRetry" class="primary hidden">Retry failed</button>
+      <button id="bHide" class="hidden">Hide</button>
     </div>
   </section>
 
@@ -328,7 +355,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
       <label><input type="checkbox" id="optSync" checked> <span id="optSyncLabel">Set clock afterwards (UTC)</span></label>
       <label><input type="checkbox" id="optDelete" checked> Erase on sensor afterwards</label>
       <span class="drift"><label><input type="checkbox" id="driftCorr"> Correct clock drift</label>
-        <button class="linkbtn info" id="driftWhy" aria-expanded="false" aria-controls="driftHelp">Why?</button></span>
+        <button class="linkbtn info" data-more="driftHelp">Why?</button></span>
     </div>
     <p class="muted hidden" id="driftHelp">A sensor's clock can run fast or slow. The clock is read before downloading and, if it's off, the readings since the last clock set are shifted to the right time; the sensor's own times stay in the sensor_timestamp column. <b>Keep “Set clock” and “Erase” ticked</b>: the sensor's log then always starts right after a clock set, so the correction doesn't have to work out when the clock was last set.</p>
     <p class="muted hidden" id="driftHint">Keep “Set clock” and “Erase” ticked, so the drift correction works well.</p>
@@ -365,10 +392,8 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
       <input type="file" id="fileBatchCfg" accept=".json,application/json" multiple class="hidden">
     </div>
     <p class="muted" id="batchCfgSrc"></p>
-    <p class="muted">“Write config” keeps each sensor's own hardware‑specific bits and calibration offsets. Files whose name contains a sensor's ID (like <code>Kitchen-ATC_xxxxxx-config.json</code>) go to that sensor only; any other file is used for all ticked sensors without their own file.</p>
-    <div class="row" id="batchStatus"><button id="bStop" class="danger hidden">Stop</button></div>
-    <div class="progress" id="batchProg"><div></div></div>
-    <div id="batchOut" style="margin-top:8px"></div>
+    <button class="linkbtn info" data-more="cfgFilesHelp">Which file goes to which sensor?</button>
+    <p class="muted hidden" id="cfgFilesHelp">“Write config” keeps each sensor's own hardware‑specific bits and calibration offsets. Files whose name contains a sensor's ID (like <code>Kitchen-ATC_xxxxxx-config.json</code>) go to that sensor only; any other file is used for all ticked sensors without their own file.</p>
   </section>
 
   <!-- Clock -->
@@ -379,13 +404,15 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
       <button id="btnTime" disabled>Set clock now</button>
     </div>
     <div class="row"><span id="clockMsg" class="muted"></span></div>
-    <p class="muted" style="margin:8px 0 0"><span id="tzShort"></span> <button class="linkbtn info" onclick="showTab('settings'); $('timeMode').closest('details').open = true; $('timeMode').scrollIntoView({ block: 'center' })">Change in Settings</button></p>
+    <p class="muted" style="margin:8px 0 0"><span id="tzShort"></span> <button class="linkbtn info" onclick="showTab('settings'); $('timeMode').scrollIntoView({ block: 'center' })">Change in Settings</button></p>
   </section>
 
   <!-- History -->
   <section class="card" data-tab="single history" id="histCard">
     <h2>Stored readings</h2>
-    <p class="muted hist-extra" id="storageInfo"></p>
+    <p class="muted hist-extra" style="margin-top:0"><span id="storageShort">Saved only on this phone.</span> <button class="linkbtn info" data-more="storageInfo">Where exactly?</button></p>
+    <p class="muted hist-extra hidden" id="storageInfo"></p>
+    <p id="noData">No readings yet. Connect to a sensor on the Sensor tab and download from it, or import a CSV file here. <a href="?demo&amp;tab=history">See the demo</a>.</p>
     <div class="row">
       <span class="selwrap"><span class="selshow" id="histDevShow" aria-hidden="true"></span><select id="histDev" aria-label="Sensor"><option value="">(no data yet)</option></select></span>
       <span class="muted" id="histCount"></span>
@@ -435,16 +462,16 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
     <div class="stats" id="stats"></div>
     <div class="hist-extra">
     <div class="row" style="margin-top:10px">
-      <button id="btnShareSel" class="primary">Share this sensor…</button>
-      <button id="btnShareAll">Share all sensors…</button>
-      <button id="btnExportRaw" disabled>Share last download (raw)…</button>
+      <button id="btnShareSel" class="primary needs-data">Share this sensor…</button>
+      <button id="btnShareAll" class="needs-data">Share all sensors…</button>
+      <button id="btnExportRaw" class="needs-data" disabled>Share last download (raw)…</button>
     </div>
-    <div class="row"><span id="shareMsg" class="muted">Opens the iPhone share sheet: Mail, Messages, AirDrop, Save to Files… CSV times are UTC.</span></div>
+    <div class="row needs-data"><span id="shareMsg" class="muted">Opens the iPhone share sheet: Mail, Messages, AirDrop, Save to Files… CSV times are UTC.</span></div>
     <div class="row">
       <button id="btnImport">Import CSV…</button>
       <input type="file" id="fileImport" accept=".csv,text/csv" multiple class="hidden">
     </div>
-    <div class="row"><button id="btnForget" class="danger">Forget this sensor's stored data…</button></div>
+    <div class="row needs-data"><button id="btnForget" class="danger">Forget this sensor's stored data…</button></div>
     </div>
   </section>
 
@@ -459,10 +486,12 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
         <button id="btnRename" disabled>Rename</button>
         <button id="btnRenameReset" disabled>Reset to default</button>
       </div>
-      <p class="muted">Up to 16 letters, digits, _ or -. “ATC_” is added in front if you leave it out (the Connect picker only lists names starting with it). The sensor applies the new name after you disconnect; the iPhone may keep showing the old name until Bluetooth is turned off and on.</p>
+      <button class="linkbtn info" data-more="renameHelp">Rules for names</button>
+      <p class="muted hidden" id="renameHelp">Up to 16 letters, digits, _ or -. “ATC_” is added in front if you leave it out (the Connect picker only lists names starting with it). The sensor applies the new name after you disconnect; the iPhone may keep showing the old name until Bluetooth is turned off and on.</p>
 
       <h3 class="sub">Settings</h3>
-      <p class="muted">Read from the sensor when you connect. Change values, then tap “Write config” - nothing is sent before that. Settings that say “leave as it is” mean different things on different models or firmware versions.</p>
+      <p class="muted" style="margin-bottom:4px">Change values, then tap “Write config”. <button class="linkbtn info" data-more="cfgHelp">More</button></p>
+      <p class="muted hidden" id="cfgHelp">They are read from the sensor when you connect, and nothing is sent before you tap “Write config”. Settings that say “leave as it is” mean different things on different models or firmware versions.</p>
       <div class="row">
         <button id="btnGetCfg" disabled>Re-read config</button>
         <button id="btnSetCfg" class="primary" disabled>Write config</button>
@@ -476,10 +505,11 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
     </details>
   </section>
 
-  <!-- Sensor list storage -->
+  <!-- Settings -->
   <section class="card" data-tab="settings">
-    <h2>Sensor list</h2>
-    <p class="muted">Your sensors and their descriptions are saved only in this browser on this phone - not in the web page. Load them from a <code>sensors.json</code> (name, description, address), or let them be added as you connect.</p>
+    <h2>Sensors</h2>
+    <p class="muted" style="margin-top:0">Your sensor list is saved only in this browser. <button class="linkbtn info" data-more="sensorsHelp">More</button></p>
+    <p class="muted hidden" id="sensorsHelp">Sensors and their descriptions stay on this phone - they are not in the web page. Load them from a <code>sensors.json</code> (name, description, address), or let them be added as you connect. Export the list to move it to another phone or browser.</p>
     <div class="row">
       <button id="btnSensorsImport" class="primary">Import sensors from JSON…</button>
       <button id="btnSensorsExport">Export sensors to JSON…</button>
@@ -487,74 +517,77 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
       <input type="file" id="fileSensors" accept=".json,application/json" class="hidden">
     </div>
     <div class="row"><span id="sensorsMsg" class="muted"></span></div>
+    <div class="row" style="margin-top:12px">
+      <label class="fld">Time zone of the sensors' clocks
+        <select id="timeMode">
+          <option value="utc">UTC (default)</option>
+          <option value="local">Local</option>
+        </select>
+      </label>
+    </div>
+    <p class="muted" id="tzHelp" style="font-size:12px;margin-top:2px"></p>
+    <div class="row">
+      <label><input type="checkbox" id="showNow"> Show “Sensors now” on the Sensor tab</label>
+    </div>
+    <button class="linkbtn info" data-more="showNowHelp" style="margin-top:6px">What's that?</button>
+    <p class="muted hidden" id="showNowHelp">Tiles with each sensor's latest values. Live values need a browser that passes on the sensors' broadcasts; Bluefy doesn't, so there they show the latest downloaded readings.</p>
   </section>
 
-  <!-- Settings -->
   <section class="card" data-tab="settings">
-    <details open>
-      <summary>Settings</summary>
-      <div class="row" style="margin-top:10px">
-        <label>Backup reminder
-          <select id="backupDays">
-            <option value="7">after 7 days</option>
-            <option value="14">after 14 days</option>
-            <option value="30">after 30 days</option>
-            <option value="0">off</option>
-          </select>
-        </label>
-      </div>
-      <p class="muted" id="backupInfo" style="font-size:12px;margin-top:2px"></p>
-      <div class="row">
-        <label class="fld">Time zone of the sensors' clocks
-          <select id="timeMode">
-            <option value="utc">UTC (default)</option>
-            <option value="local">Local</option>
-          </select>
-        </label>
-      </div>
-      <p class="muted" id="tzHelp" style="font-size:12px;margin-top:2px"></p>
-      <div class="row">
-        <label class="fld">CSV format
-          <select id="csvLocale">
-            <option value="en">en: comma, dot decimals</option>
-            <option value="hu">hu: semicolon, comma decimals</option>
-          </select>
-        </label>
-      </div>
-      <div class="row">
+    <h2>Readings and backup</h2>
+    <div class="row">
+      <label>Backup reminder
+        <select id="backupDays">
+          <option value="7">after 7 days</option>
+          <option value="14">after 14 days</option>
+          <option value="30">after 30 days</option>
+          <option value="0">off</option>
+        </select>
+      </label>
+    </div>
+    <p class="muted" id="backupInfo" style="font-size:12px;margin-top:2px"></p>
+    <div class="row">
+      <label class="fld">CSV format
+        <select id="csvLocale">
+          <option value="en">en: comma, dot decimals</option>
+          <option value="hu">hu: semicolon, comma decimals</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <section class="card" data-tab="settings">
+    <h2>Chart</h2>
+    <div class="row">
+      <label><input type="checkbox" id="cfOn"> Comfort bands</label>
+    </div>
+    <div class="row">
+      <label>°C <input type="number" id="cfTLo" step="0.5" style="width:70px"> – <input type="number" id="cfTHi" step="0.5" style="width:70px"></label>
+      <label>% <input type="number" id="cfHLo" step="1" style="width:70px"> – <input type="number" id="cfHHi" step="1" style="width:70px"></label>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="nightOn"> Shade night hours when a week or less is shown</label>
+    </div>
+    <div class="row">
+      <label>Night <input type="time" id="nightFrom" aria-label="Night from" step="900" style="width:110px"> – <input type="time" id="nightTo" aria-label="Night to" step="900" style="width:110px"></label>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="fsOn"> Fixed scale (same axes for every sensor and zoom)</label>
+    </div>
+    <div class="row">
+      <label>°C <input type="number" id="fsTLo" step="1" style="width:70px"> – <input type="number" id="fsTHi" step="1" style="width:70px"></label>
+      <label>% <input type="number" id="fsHLo" step="5" style="width:70px"> – <input type="number" id="fsHHi" step="5" style="width:70px"></label>
+    </div>
+  </section>
+
+  <section class="card" data-tab="settings">
+    <details class="group" id="advanced">
+      <summary>Advanced</summary>
+      <div class="row" style="margin-top:12px">
         <label>Idle timeout (s) <input type="number" id="idleTimeout" min="5" max="300" value="30"></label>
       </div>
-      <div class="row">
-        <label><input type="checkbox" id="showNow"> Show “Sensors now” on the Sensor tab</label>
-      </div>
-      <p class="muted">Tiles with each sensor's latest values. Live values need a browser that passes on the sensors' broadcasts; Bluefy doesn't, so there they show the latest downloaded readings.</p>
-      <h3 class="sub">Chart</h3>
-      <div class="row">
-        <label><input type="checkbox" id="cfOn"> Comfort bands</label>
-      </div>
-      <div class="row">
-        <label>°C <input type="number" id="cfTLo" step="0.5" style="width:70px"> – <input type="number" id="cfTHi" step="0.5" style="width:70px"></label>
-        <label>% <input type="number" id="cfHLo" step="1" style="width:70px"> – <input type="number" id="cfHHi" step="1" style="width:70px"></label>
-      </div>
-      <div class="row">
-        <label><input type="checkbox" id="nightOn"> Shade night hours when a week or less is shown</label>
-      </div>
-      <div class="row">
-        <label>Night <input type="time" id="nightFrom" aria-label="Night from" step="900" style="width:110px"> – <input type="time" id="nightTo" aria-label="Night to" step="900" style="width:110px"></label>
-      </div>
-      <div class="row">
-        <label><input type="checkbox" id="fsOn"> Fixed scale (same axes for every sensor and zoom)</label>
-      </div>
-      <div class="row">
-        <label>°C <input type="number" id="fsTLo" step="1" style="width:70px"> – <input type="number" id="fsTHi" step="1" style="width:70px"></label>
-        <label>% <input type="number" id="fsHLo" step="5" style="width:70px"> – <input type="number" id="fsHHi" step="5" style="width:70px"></label>
-      </div>
-    </details>
-  </section>
-
-  <section class="card" data-tab="settings">
-    <details open>
-      <summary>Debug log</summary>
+      <p class="muted" style="font-size:12px;margin-top:2px">How long to wait for a sensor that has stopped answering.</p>
+      <h3 class="sub">Debug log</h3>
       <p class="muted">Records every Bluetooth packet and step. Kept across reloads. If something goes wrong, tap “Share log” and email it.</p>
       <div class="row">
         <button id="btnLogSend" class="primary">Share log…</button>
@@ -576,7 +609,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=110"></script>
+<script src="core.js?v=111"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -684,7 +717,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 110;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 111;  // also bump core.js?v= in the <script> tag above
 const APP_DATE = "2026-11-25";  // release date of this version
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
@@ -1131,6 +1164,19 @@ async function clearSensors() {
   sensorsMsg("Sensor list cleared."); renderKnown();
 }
 
+// The list: the connected sensor, then the available ones, then the rest - in each group the ones whose
+// log is (nearly) full first. It isn't re-sorted while the list is being touched or a batch runs, so a
+// row never moves away from under the finger.
+let listOrder = [], orderHold = 0;
+function orderedNames() {
+  const names = knownNames();
+  if (inBatch || Date.now() < orderHold) {
+    const pos = n => { const i = listOrder.indexOf(n); return i < 0 ? 1e6 : i; };
+    return names.sort((a, b) => pos(a) - pos(b));
+  }
+  const rank = n => chr && sensorName === n ? 0 : (reachable.has(n) ? 1 : 3) + (["soon", "full"].includes(logWarning(n).level) ? 0 : 1);
+  return listOrder = names.sort((a, b) => rank(a) - rank(b));  // stable: by name within a group
+}
 const openKnown = new Set();  // sensors whose details are open in the list
 let editingDesc = null;  // sensor whose description is being edited in the list
 function setDescription(name, text) {
@@ -1150,11 +1196,16 @@ function renderKnown() {
   // Don't rebuild the list under a description being typed; leaving the field renders it.
   if (document.activeElement && document.activeElement.classList.contains("descEdit")) return;
   const box = $("knownList"); box.innerHTML = "";
-  if (!knownNames().length) {
-    box.innerHTML = `<p class="muted">No sensors yet. <span class="only-single">Connect to one with “Connect…”</span><span class="only-all">Add them with “Add sensors…”</span>, or load your <code>sensors.json</code> in the Settings tab.</p>`;
+  const none = !knownNames().length;
+  document.body.classList.toggle("nosensors", none);
+  $("knownTitle").textContent = none ? "Get started" : "Known sensors";
+  if (none) {
+    box.innerHTML = `<ol class="steps"><li><b>Connect</b>: tap <span class="only-single">“Connect…”</span><span class="only-all">“Add sensors…”</span> and pick a sensor (its name starts with ATC_).</li>
+      <li><b>Download</b> its readings. They are saved on this phone.</li><li><b>View</b> them as a chart on the Readings tab.</li></ol>
+      <p class="muted" style="margin:0 0 10px"><a href="?demo">Try the demo</a> with made-up sensors, or import a <code>sensors.json</code> in Settings.</p>`;
   }
   let ready = 0, ticked = 0;
-  for (const name of knownNames()) {
+  for (const name of orderedNames()) {
     const k = known[name] || {};
     const isCur = !!chr && sensorName === name;
     const dev = reachable.get(name);
@@ -1644,7 +1695,8 @@ async function dump(opts = {}) {
   }
   const result = { n: 0, total: 0, finished: false, deleted: false };
   const raw = []; let done = false;
-  const prog = $("dumpProg"), bar = prog.firstElementChild; prog.style.display = "block"; bar.style.width = "0";
+  const prog = $("dumpProg"), bar = prog.firstElementChild; prog.style.display = opts.onProgress ? "none" : "block"; bar.style.width = "0";
+  const expect = cnt !== 0xffff ? cnt : expectedReadings(sensorName);
   const l = b => {
     if (b[0] !== 0x35) return;
     if (b.length >= 13) {
@@ -1653,8 +1705,11 @@ async function dump(opts = {}) {
     } else done = true;
   };
   const ui = setInterval(() => {
-    $("dumpStatus").textContent = `${raw.length} readings…`;
-    if (cnt !== 0xffff) bar.style.width = Math.min(100, raw.length / cnt * 100) + "%";
+    const pct = expect ? Math.min(99, Math.round(raw.length / expect * 100)) : null;
+    const text = `downloading: ${count(raw.length, "reading")}${pct != null && raw.length ? ` (${pct}%)` : ""}`;
+    if (opts.onProgress) { opts.onProgress(text, pct); return; }
+    $("dumpStatus").textContent = text[0].toUpperCase() + text.slice(1);
+    if (pct != null) bar.style.width = pct + "%";
     else bar.style.width = (raw.length ? 50 + 45 * (1 - Math.exp(-raw.length / 3000)) : 5) + "%";
   }, 250);
   listeners.add(l);
@@ -1726,7 +1781,7 @@ async function dump(opts = {}) {
       d.sort((a, b) => a - b);
       noteSensorLog(sensorName, result.deleted ? 0 : raw.length, d.length ? d[d.length >> 1] : null);
     }
-    $("dumpStatus").textContent = `${raw.length} readings downloaded · ${total} stored` + (drift && drift.stretches.some(s => s.applied) ? ` · ${driftSummary(drift)}` : "");
+    if (!opts.onProgress) $("dumpStatus").textContent = `${raw.length} readings downloaded · ${total} stored` + (drift && drift.stretches.some(s => s.applied) ? ` · ${driftSummary(drift)}` : "");
     result.drift = drift ? driftSummary(drift) : "";
     toast(!finished ? `Download incomplete: ${count(raw.length, "reading")} saved` : del && !result.deleted ? `${count(raw.length, "reading")} saved, but the sensor was not erased`
       : `${count(raw.length, "reading")} saved${result.synced ? ", clock set" : ""}${result.deleted ? ", sensor erased" : ""}`, finished && (!del || result.deleted) ? "ok" : "warn");
@@ -1863,63 +1918,80 @@ function renderBatchCfgSrc(extra) {
 let batchAbort = false;
 const batchTargets = () => knownNames().filter(isTicked);
 function sensorLabel(n) { return shownName(n); }
-async function runBatch(label, fn, targets = batchTargets()) {
+// fn(name, progress): progress(text, percent or null) updates the sensor's row. prev: results of an earlier
+// run of the same job, when only the sensors that failed are run again.
+let lastBatch = null;
+async function runBatch(label, fn, targets = batchTargets(), prev = null) {
   if (!targets.length) return;
-  batchAbort = false; inBatch = true; updateLayout(false);
-  const out = $("batchOut"); out.innerHTML = "";
-  const head = document.createElement("div"); head.className = "status"; head.textContent = `${label}: 0/${targets.length}`; out.appendChild(head);
-  const rowEls = {};
-  for (const n of targets) {
-    const r = document.createElement("div"); r.className = "ks";
-    r.innerHTML = `<div class="nm"></div><div class="muted">waiting</div>`;
-    r.querySelector(".nm").textContent = sensorLabel(n); out.appendChild(r); rowEls[n] = r.lastChild;
+  batchAbort = false; inBatch = true; lastBatch = null; updateLayout(false);
+  const results = prev || new Map(targets.map(n => [n, null])), all = [...results.keys()];
+  const out = $("batchOut"), head = $("batchHead"); out.innerHTML = "";
+  const rowEls = {}, ICON = { wait: "○", run: "…", ok: "✓", err: "✕" };
+  const setRow = (n, state, text, pct = null) => {
+    const r = rowEls[n]; r.className = "br " + state;
+    r.querySelector(".ic").textContent = ICON[state]; r.querySelector(".tx").textContent = text;
+    const b = r.querySelector(".progress"); b.style.display = pct == null ? "none" : "block"; b.firstElementChild.style.width = (pct || 0) + "%";
+  };
+  for (const n of all) {
+    const r = document.createElement("div");
+    r.innerHTML = `<span class="ic" aria-hidden="true"></span><div class="nm"></div><div class="tx"></div><div class="progress"><div></div></div>`;
+    r.querySelector(".nm").textContent = sensorLabel(n); out.appendChild(r); rowEls[n] = r;
+    const done = results.get(n);
+    if (targets.includes(n)) setRow(n, "wait", "waiting"); else setRow(n, done && done.ok ? "ok" : "err", done ? done.text : "");
   }
-  const setRow = (n, text, cls) => { rowEls[n].textContent = text; rowEls[n].className = cls ? "status " + cls : "muted"; };
-  const prog = $("batchProg"), bar = prog.firstElementChild; prog.style.display = "block"; bar.style.width = "0";
-  $("bStop").classList.remove("hidden");
-  // Bring the progress (Stop button, bar and per-sensor rows) into view.
-  $("batchStatus").scrollIntoView({ behavior: "smooth", block: "start" });
+  const prog = $("batchProg"), bar = prog.firstElementChild; prog.style.display = "block"; bar.style.width = "0"; head.className = "status";
+  $("batchCard").classList.remove("hidden");
+  $("bStop").classList.remove("hidden"); $("bStop").textContent = "Stop"; $("bRetry").classList.add("hidden"); $("bHide").classList.add("hidden");
+  $("batchCard").scrollIntoView({ behavior: "smooth", block: "start" });
   log(`==== Batch "${label}" on ${targets.length} sensor(s): ${targets.join(", ")} ====`);
-  let okCount = 0;
   try {
     for (let i = 0; i < targets.length; i++) {
-      const name = targets[i];
-      if (batchAbort) { for (const n of targets.slice(i)) setRow(n, "skipped (stopped)", "warn"); log("Batch stopped by user", "warn"); break; }
-      head.textContent = `${label}: ${i + 1}/${targets.length} - ${sensorLabel(name)}`;
+      const name = targets[i], total = part => { bar.style.width = ((i + part) / targets.length * 100) + "%"; };
+      if (batchAbort) { for (const n of targets.slice(i)) { results.set(n, { ok: false, text: "skipped (stopped)" }); setRow(n, "wait", "skipped (stopped)"); } log("Batch stopped by user", "warn"); break; }
+      head.textContent = `${label}: ${i + 1} of ${targets.length}`;
       const dev = reachable.get(name);
-      if (!dev) { setRow(name, "not available - out of range, or tap “Add sensors…” and choose it", "err"); log(`Batch: ${name} not available, skipped`, "warn"); continue; }
+      if (!dev) { results.set(name, { ok: false, text: "not available - out of range, or tap “Add sensors…” and choose it" }); setRow(name, "err", results.get(name).text); log(`Batch: ${name} not available, skipped`, "warn"); total(1); continue; }
       log(`---- [${i + 1}/${targets.length}] ${name} ----`);
       let ok = false, text = "";
       // A failed connection is retried (up to 3 rounds, each with its own connect retries) after a
       // longer pause; a job that ran but failed is not repeated, to avoid doing it twice.
       for (let round = 1; round <= 3 && !ok && !batchAbort; round++) {
         let connected = false;
-        setRow(name, round === 1 ? "connecting…" : `connecting (try ${round}/3)…`, "warn");
+        setRow(name, "run", round === 1 ? "connecting…" : `connecting (try ${round} of 3)…`);
         try {
           connected = await connectDevice(dev, name, { batch: true });
           if (!connected) text = "couldn't connect - " + $("connMsg").textContent.replace(/^Connect failed while /, "");
           else if (sensorName !== name) text = `reached ${sensorName} instead - skipped`;
-          else { setRow(name, "working…", "warn"); const r = await fn(name); ok = !!(r && r.ok); text = r ? r.text : "cancelled"; }
+          else {
+            setRow(name, "run", "working…"); total(0.15);
+            const r = await fn(name, (txt, pct) => { setRow(name, "run", txt, pct); if (pct != null) total(0.15 + 0.8 * pct / 100); });
+            ok = !!(r && r.ok); text = r ? r.text : "cancelled";
+          }
         } catch (e) { text = "error: " + describeErr(e); log(`Batch error on ${name}: ${errDetail(e)}`, "err"); }
         await disconnectAndWait();
         if (connected) break;
         if (!reachable.has(name)) { text = "needs picking again - tap “Add sensors…” and choose it"; break; } // dead handle
         if (round < 3) { log(`Batch: ${name} connect round ${round} failed (${text}); waiting before retry`, "warn"); await sleep(3000); }
       }
-      if (ok) okCount++;
-      setRow(name, text, ok ? "ok" : "err");
+      results.set(name, { ok, text }); setRow(name, ok ? "ok" : "err", text);
       log(`Batch result ${name}: ${ok ? "OK" : "FAILED"} - ${text}`, ok ? undefined : "warn");
-      bar.style.width = ((i + 1) / targets.length * 100) + "%";
+      total(1);
     }
   } finally {
-    head.textContent = `${label}: ${okCount}/${targets.length} succeeded${batchAbort ? " (stopped)" : ""}`;
-    head.className = "status " + (okCount === targets.length ? "ok" : "warn");
-    log(`==== Batch "${label}" done: ${okCount}/${targets.length} OK ====`);
-    inBatch = false; toast(`${label}: ${okCount} of ${count(targets.length, "sensor")} done${batchAbort ? " (stopped)" : ""}`, okCount === targets.length ? "ok" : "warn");
-    $("bStop").classList.add("hidden"); setTimeout(() => prog.style.display = "none", 1500);
+    const failed = all.filter(n => !(results.get(n) && results.get(n).ok)), okCount = all.length - failed.length;
+    head.textContent = `${label}: ${okCount} of ${count(all.length, "sensor")} done${batchAbort ? " (stopped)" : ""}`;
+    head.className = "status " + (failed.length ? "warn" : "ok");
+    log(`==== Batch "${label}" done: ${okCount}/${all.length} OK ====`);
+    inBatch = false; toast(head.textContent, failed.length ? "warn" : "ok");
+    lastBatch = { label, fn, failed, results };
+    $("bRetry").textContent = batchAbort ? `Continue (${failed.length})` : `Retry failed (${failed.length})`;
+    $("bRetry").classList.toggle("hidden", !failed.length); $("bHide").classList.remove("hidden");
+    $("bStop").classList.add("hidden"); setTimeout(() => { if (!inBatch) prog.style.display = "none"; }, 1500);
     renderKnown();
   }
 }
+// Runs the same job again for the sensors it didn't succeed on (the options stay as they were confirmed).
+function retryBatch() { const b = lastBatch; return b && b.failed.length ? runBatch(b.label, b.fn, b.failed, b.results) : null; }
 // "Add sensors…": pick one sensor so it becomes ready. Identifies it from its name when possible,
 // otherwise connects briefly to find out which one it is.
 async function addSensor() {
@@ -1967,8 +2039,8 @@ const BATCH = {
     const plan = downloadPlan(), targets = batchTargets();
     if (plan.erase && !await ask(`Their whole logs are downloaded${plan.sync ? `, the clocks set (${prefs.timeMode === "utc" ? "UTC" : "local time"})` : ""}, then erased permanently.\n\nA sensor is only erased if its download finished completely and is saved on this phone.\n\n${targets.map(sensorLabel).join(", ")}`,
       { title: `Download and erase ${count(targets.length, "sensor")}?`, ok: "Download & erase", danger: true })) return;
-    await runBatch(downloadLabel(plan).replace("…", ""), async () => {
-      const r = await dump({ plan });
+    await runBatch(downloadLabel(plan).replace("…", ""), async (name, onProgress) => {
+      const r = await dump({ plan, onProgress });
       if (!r) return null;
       const ok = r.finished && (!plan.sync || r.synced) && (!plan.erase || r.deleted);
       return { ok, text: `${r.n} readings downloaded · ${r.total} stored` + (plan.sync ? ` · ${r.synced ? "clock set" : "clock NOT set"}` : "") +
@@ -2075,7 +2147,7 @@ async function getTime() {
 }
 // Where history lives: IndexedDB in this browser's storage for this website, on the phone only.
 async function updateStorageInfo() {
-  if (DEMO) { $("storageInfo").textContent = "Demo readings of three made-up sensors, kept in memory only."; return; }
+  if (DEMO) { $("storageShort").textContent = "Demo readings of three made-up sensors."; $("storageInfo").textContent = "They are kept in memory only, until the page is closed."; return; }
   let txt = `Saved only on this phone, inside Bluefy's website storage for ${location.host || "this page"} (IndexedDB${idb ? "" : " unavailable - kept in memory until the page closes"}).`;
   try {
     if (navigator.storage && navigator.storage.estimate) {
@@ -2108,6 +2180,12 @@ async function deleteLog() {
 function noteSensorLog(name, n, intervalSec) {
   const prev = (known[name] && known[name].log) || {};
   rememberSensor(name, { log: { at: Math.floor(Date.now() / 1000), n, P: intervalSec || prev.P || 600 } });
+}
+// How many readings a sensor's log probably holds now (null = unknown): for showing progress.
+function expectedReadings(name) {
+  const k = known[name] || {}, L = k.log; if (!L) return null;
+  const cfgP = logIntervalFromCfg(k.cfg), P = cfgP || L.P || 600;
+  return Math.round(cfgP === 0 ? L.n : Math.min(LOG_CAPACITY, L.n + Math.max(0, Date.now() / 1000 - L.at) / P)) || null;
 }
 function logWarning(name) {
   const k = known[name] || {}, L = k.log;
@@ -2353,6 +2431,7 @@ async function refreshDeviceList(select) {
   const sel = $("histDev"), keep = select || sel.value || lsGet("histDev", "");
   sel.innerHTML = "";
   if (!devs.length) sel.add(new Option("(no data yet)", ""));
+  document.body.classList.toggle("nodata", !devs.length);
   // Shown and sorted the same way as the sensor list.
   for (const d of devs.slice().sort((a, b) => byText(histLabel(a), histLabel(b)))) sel.add(new Option(histLabel(d), d));
   if (devs.includes(keep)) sel.value = keep;
@@ -3032,6 +3111,7 @@ function updateStatusBar() {
   $("appVersionTop").textContent = `v${APP_VERSION} · ${new Date(APP_DATE + "T12:00").toLocaleDateString(LOCALE, { day: "numeric", month: "short", year: "numeric" })}`;
   logEnvironment(); flushLog();
   $("btnLogSend").onclick = sendLog;
+  $("advanced").ontoggle = () => { $("log").scrollTop = $("log").scrollHeight; };
   $("btnLogCopy").onclick = copyLog;
   $("btnLogClear").onclick = async () => { if (await ask("", { title: "Clear the debug log?", ok: "Clear", danger: true })) { logLines.length = 0; log("Log cleared"); flushLog(); } };
   if (!navigator.bluetooth) { $("noBle").classList.remove("hidden"); $("btnConnect").disabled = $("btnConnectAll").disabled = true; }
@@ -3061,7 +3141,12 @@ function updateStatusBar() {
   $("showNow").onchange = e => { prefs.showNow = e.target.checked; savePrefs(); if (prefs.showNow) startLive(); else stopLive(); renderKnown(); };
   $("driftCorr").checked = prefs.driftCorr !== false;
   $("driftCorr").onchange = e => { prefs.driftCorr = e.target.checked; savePrefs(); updateDownloadButtons(); };
-  $("driftWhy").onclick = () => { const open = !$("driftHelp").classList.toggle("hidden"); $("driftWhy").setAttribute("aria-expanded", String(open)); $("driftWhy").textContent = open ? "Hide" : "Why?"; };
+  // "Why?" links: show / hide the explanation they belong to.
+  for (const b of document.querySelectorAll("[data-more]")) {
+    const help = $(b.dataset.more), label = b.textContent;
+    b.setAttribute("aria-expanded", "false"); b.setAttribute("aria-controls", b.dataset.more);
+    b.onclick = () => { const open = !help.classList.toggle("hidden"); b.setAttribute("aria-expanded", String(open)); b.textContent = open ? "Hide" : label; };
+  }
   document.querySelectorAll("#rangeBtns .seg").forEach(b => {
     b.classList.toggle("on", +b.dataset.h === prefs.range);
     b.onclick = () => { prefs.range = +b.dataset.h; savePrefs(); view = null; drawChart(); updateZoomUi(); };
@@ -3069,6 +3154,7 @@ function updateStatusBar() {
   $("btnConnect").onclick = () => withBusy(() => connect(false));
   $("btnConnectAll").onclick = () => withBusy(() => connect(true));
   $("btnDisconnect").onclick = disconnect;
+  $("knownList").addEventListener("pointerdown", () => { orderHold = Date.now() + 4000; });
   $("knownFold").onclick = () => { knownOpen = !knownOpen; syncKnownFold(); };
   $("btnDump").onclick = () => withBusy(dump);
   $("btnTime").onclick = () => withBusy(setTime);
@@ -3114,7 +3200,9 @@ function updateStatusBar() {
   $("bClearCfg").onclick = () => { batchCfgShared = null; for (const k in batchCfgPer) delete batchCfgPer[k]; renderBatchCfgSrc(); };
   renderBatchCfgSrc();
   $("bSendCfg").disabled = !Object.values(known).some(k => k.cfg);
-  $("bStop").onclick = () => { batchAbort = true; $("bStop").textContent = "Stopping after this sensor…"; setTimeout(() => $("bStop").textContent = "Stop", 4000); };
+  $("bStop").onclick = () => { batchAbort = true; $("bStop").textContent = "Stopping after this sensor…"; };
+  $("bRetry").onclick = () => withBusy(retryBatch);
+  $("bHide").onclick = () => { $("batchCard").classList.add("hidden"); };
   if (navigator.bluetooth && navigator.bluetooth.addEventListener) navigator.bluetooth.addEventListener("advertisementreceived", onAdvertisement);
   // Sensors this site was already allowed to use can be reconnected without the picker (if supported).
   if (navigator.bluetooth && navigator.bluetooth.getDevices) {
