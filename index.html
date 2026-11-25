@@ -688,7 +688,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=118"></script>
+<script src="core.js?v=119"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -796,7 +796,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 118;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 119;  // also bump core.js?v= in the <script> tag above
 const APP_DATE = "2026-11-25";  // release date of this version
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
@@ -3230,7 +3230,7 @@ function showCompareAt(px) {
       color: s.color, ink: P.colText, dash: s.slot >= 4 ? "3 2" : null });
     const v = document.createElement("span"); v.className = "rv"; v.append(lineSample(s.slot), `${histLabel(s.id)} ${p[1].toFixed(P.dec)} ${P.unit}`); out.push(v);
   }
-  drawTags(P.x(t), tags);
+  drawTags(P.x(t), tags); drawTimeTag(P.x(t), tagTime(t));
   $("readout").replaceChildren(...out);
 }
 
@@ -3280,7 +3280,7 @@ function showReadoutAt(clientX) {
     $("readout").textContent = `${localStrZ(c.start)} – ${localStrZ(c.end)}` +
       (plotted.showT ? `  ·  °C open ${f(c.t[0], 1)} high ${f(c.t[1], 1)} low ${f(c.t[2], 1)} close ${f(c.t[3], 1)}` : "") +
       (plotted.showH ? `  ·  ${u} open ${f(c.h[0], dh)} high ${f(c.h[1], dh)} low ${f(c.h[2], dh)} close ${f(c.h[3], dh)}` : "") + `  ·  ${c.n} readings`;
-    drawMarkerLabels(cx, c.t[3], c.h[3]);
+    drawMarkerLabels(cx, c.t[3], c.h[3]); drawTimeTag(cx, tagPeriod(c.start, c.end));
     return;
   }
   let best = pts[0]; for (const p of pts) if (Math.abs(x(p[0]) - px) < Math.abs(x(best[0]) - px)) best = p;
@@ -3292,7 +3292,7 @@ function showReadoutAt(clientX) {
     ? `${localStrZ(tA)} – ${localStrZ(tB)}` + (plotted.showT ? `  ·  avg ${tm.toFixed(1)} °C (${tLo.toFixed(1)}–${tHi.toFixed(1)})` : "") +
       (plotted.showH ? `  ·  avg ${hm.toFixed(dh)} ${u} (${hLo.toFixed(dh)}–${hHi.toFixed(dh)})` : "") + `  ·  ${n} readings`
     : `${localStrZ(t)}` + (plotted.showT ? `  ·  ${tm.toFixed(2)} °C` : "") + (plotted.showH ? `  ·  ${hm.toFixed(dh1)} ${u}` : "");
-  drawMarkerLabels(x(best[0]), tm, hm);
+  drawMarkerLabels(x(best[0]), tm, hm); drawTimeTag(x(best[0]), tagTime(best[0]));
 }
 // Small value tags with a dot right on each line where the marker crosses it ("21.3°", "56%").
 // They go right of the marker, or left near the right edge, and never overlap each other.
@@ -3320,6 +3320,25 @@ function drawTags(cx, tags) {
     mk("rect", { x: bx, y: ty[i] - 8, width: w, height: 16, rx: 4, fill: P.colBg, stroke: t.color, "stroke-width": t.ink ? 1.5 : 1, "stroke-dasharray": t.dash });
     mk("text", { x: bx + w / 2, y: ty[i] + 4, "text-anchor": "middle", "font-size": 11, "font-weight": 700, fill: t.ink || t.color }, t.text);
   });
+}
+// The marker's time, on top of its line.
+function drawTimeTag(cx, text) {
+  const P = plotted, ns = "http://www.w3.org/2000/svg", w = measureText11()(text, true) + 12;
+  const bx = Math.max(P.L, Math.min(P.L + P.pw - w, cx - w / 2));
+  const mk = (tag, attrs, txt) => { const e = document.createElementNS(ns, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (txt != null) e.textContent = txt; P.markerLayer.appendChild(e); };
+  mk("rect", { x: bx, y: P.T - 19, width: w, height: 17, rx: 4, fill: P.colText });
+  mk("text", { x: bx + w / 2, y: P.T - 7, "text-anchor": "middle", "font-size": 11, "font-weight": 600, fill: P.colBg }, text);
+}
+// "Sun 22 Nov, 02:55" (with the year if it's another one); time: false = the day only.
+function tagTime(t, time = true) {
+  const d = new Date(t * 1000), year = d.getFullYear() !== new Date().getFullYear() ? " " + d.getFullYear() : "";
+  return `${d.toLocaleDateString(LOCALE, { weekday: "short" })} ${d.toLocaleDateString(LOCALE, { day: "numeric", month: "short" })}${year}${time ? ", " + localStr(t).slice(-5) : ""}`;
+}
+// A candle covers a period: "Sun 22 Nov, 02:00–03:00", "Sun 22 Nov" or "Mon 16 Nov – Sun 22 Nov".
+function tagPeriod(a, b) {
+  if (b - a < 80000) return `${tagTime(a)}–${localStr(b).slice(-5)}`;
+  const from = tagTime(a, false), to = tagTime(b - 1, false);
+  return from === to ? from : `${from} – ${to}`;
 }
 function fmtDuration(sec) {
   if (sec < 90 * 60) return `${Math.max(1, Math.round(sec / 60))} min`;
