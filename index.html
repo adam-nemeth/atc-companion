@@ -412,13 +412,18 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
           <option value="2000">Last 2000</option>
         </select>
       </label>
-      <label><input type="checkbox" id="optSync" checked> <span id="optSyncLabel">Set clock afterwards (UTC)</span></label>
-      <label><input type="checkbox" id="optDelete" checked> Erase on sensor afterwards</label>
+      <span class="drift"><label><input type="checkbox" id="optSetErase" checked> Set clock &amp; erase afterwards</label>
+        <button class="linkbtn info" data-more="setEraseHelp">Why both?</button></span>
       <span class="drift"><label><input type="checkbox" id="driftCorr"> Correct clock drift</label>
         <button class="linkbtn info" data-more="driftHelp">Why?</button></span>
     </div>
-    <p class="muted hidden" id="driftHelp">A sensor's clock can run fast or slow. The clock is read before downloading and, if it's off, the readings since the last clock set are shifted to the right time; the sensor's own times stay in the sensor_timestamp column. <b>Keep “Set clock” and “Erase” ticked</b>: the sensor's log then always starts right after a clock set, so the correction doesn't have to work out when the clock was last set.</p>
-    <p class="muted hidden" id="driftHint">Keep “Set clock” and “Erase” ticked, so the drift correction works well.</p>
+    <div class="muted hidden" id="setEraseHelp">
+      <p style="margin:8px 0">Once every reading is saved on this phone, the sensor's clock is set and its log is erased. The two belong together: the new log then starts right after a clock set, so clock drift can be corrected for every reading in it.</p>
+      <p style="margin:8px 0">Setting only the clock would leave readings from before and after in one log, with a jump in time. Erasing only would start a new log with a clock that may already be off.</p>
+      <p style="margin:8px 0">To do just one of them, use <span class="only-single">“Set clock now” or “Erase sensor log…”</span><span class="only-all">“Set clocks” below, or “Erase sensor log…” on the Sensor tab</span>.</p>
+    </div>
+    <p class="muted hidden" id="driftHelp">A sensor's clock can run fast or slow. The clock is read before downloading and, if it's off, the readings since the last clock set are shifted to the right time; the sensor's own times stay in the sensor_timestamp column. It works best with <b>“Set clock &amp; erase”</b> ticked, because the log then always starts right after a clock set.</p>
+    <p class="muted hidden" id="setEraseHint"></p>
     <div class="row only-single" style="margin-top:8px">
       <button id="btnDump" class="primary" disabled>Download</button>
       <button id="btnDeleteLog" class="danger" disabled>Erase sensor log…</button>
@@ -678,7 +683,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=114"></script>
+<script src="core.js?v=115"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -786,7 +791,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 114;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 115;  // also bump core.js?v= in the <script> tag above
 const APP_DATE = "2026-11-25";  // release date of this version
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
@@ -1741,16 +1746,21 @@ function devKey() {
   return r ? `${n}__${r}` : n;
 }
 // What the download options add up to. Erasing after downloading only the last N samples would lose
-// the older ones never downloaded, so a partial download never erases.
+// the older ones never downloaded, so a partial download never erases (nor sets the clock).
 function downloadPlan() {
   const count = parseInt($("dumpCount").value, 10) & 0xffff;
-  return { count, sync: $("optSync").checked, erase: $("optDelete").checked && count === 0xffff };
+  const both = $("optSetErase").checked && count === 0xffff;  // clock and erase always together (see setEraseHelp)
+  return { count, sync: both, erase: both };
 }
 // The download buttons (Sensor and Batch) always say what they'll do.
 function updateDownloadButtons() {
   const label = downloadLabel(downloadPlan());
   $("btnDump").textContent = label; $("bDump").textContent = label;
-  $("driftHint").classList.toggle("hidden", prefs.driftCorr === false || ($("optSync").checked && $("optDelete").checked));
+  const all = downloadPlan().count === 0xffff, on = $("optSetErase").checked, hint = $("setEraseHint");
+  $("optSetErase").disabled = !all;
+  hint.textContent = !all ? "Only after downloading all stored readings: the others would be lost."
+    : on ? "" : `The sensor's log stays and fills up${prefs.driftCorr === false ? "." : ", and clock drift can be corrected less well."}`;
+  hint.classList.toggle("hidden", !hint.textContent);
 }
 // Returns { n, total, finished, deleted } (or null if cancelled). opts.skipConfirm: batch already asked.
 async function dump(opts = {}) {
@@ -1758,8 +1768,8 @@ async function dump(opts = {}) {
   const { count: cnt, sync, erase: del } = opts.plan || downloadPlan();
   if (del && !opts.plan) {
     const target = sensorName;
-    if (!await ask("The sensor's log is erased permanently, but only after every reading has arrived and is saved on this phone.",
-      { title: `Download from ${shownName(target)} and erase it?`, ok: "Download & erase", danger: true })) return null;
+    if (!await ask(`Once every reading has arrived and is saved on this phone, the sensor's clock is set (${prefs.timeMode === "utc" ? "UTC" : "local time"}) and its log is erased permanently.`,
+      { title: `Download from ${shownName(target)}, set its clock and erase it?`, ok: "Download & erase", danger: true })) return null;
     if (!stillConnected(target)) return null;
   }
   const result = { n: 0, total: 0, finished: false, deleted: false };
@@ -1796,17 +1806,7 @@ async function dump(opts = {}) {
     dbg(`Transfer stats: ${raw.length} readings in ${secs.toFixed(1)} s (${(raw.length / Math.max(secs, 0.001)).toFixed(0)}/s)` +
       (raw.length ? `; sensor times ${faceValue(Math.min(...raw.map(r => r[0])))} … ${faceValue(Math.max(...raw.map(r => r[0])))}` : ""));
     if (!finished) log(`Idle timeout; keeping the ${raw.length} reading(s) received so far.`, "warn");
-    else {
-      log(`Transfer complete: ${raw.length} readings.`);
-      if (sync) {
-        const t = deviceEpochNow(prefs.timeMode);
-        try {
-          await write([0x23, ...le32(t)]); log(`Clock synced to ${faceValue(t)} [${prefs.timeMode}]`); result.synced = true;
-          if (clk) saveClockLog(histId(sensorName || "sensor"), { set: { before: t + Math.round(clk.sensor - clk.phone), at: t } });
-        }
-        catch (e) { log("(non-fatal) clock sync failed: " + e.message); }
-      }
-    }
+    else log(`Transfer complete: ${raw.length} readings.`);
     result.finished = finished;
     if (del && !finished) log("Download incomplete - skipped delete for safety.");
     const key = histId(sensorName || "sensor");  // stored per sensor ID; the description is only for file names
@@ -1834,14 +1834,20 @@ async function dump(opts = {}) {
     // so a later download (with a slightly different correction) replaces it instead of duplicating it.
     const total = await mergeInto(key, raw.map(([e, t, h, v, , c]) => [c - offSec, t, h, v, e - offSec]));
     log(`Stored ${raw.length} new readings for ${key} (${total} total).`);
-    // Erase only now: every downloaded reading is in this phone's storage (checked by reading it back).
+    // Set the clock and erase only now: every downloaded reading is in this phone's storage (checked by
+    // reading it back). Both or neither: if setting the clock fails, nothing is erased.
     if (del && finished) {
-      if (!idb || (await loadHistory(key)).length < total) log("Not erasing the sensor: the readings couldn't be saved permanently on this phone.", "err");
+      if (!idb || (await loadHistory(key)).length < total) log("Not setting the clock or erasing the sensor: the readings couldn't be saved permanently on this phone.", "err");
       else try {
+        if (sync) {
+          const t = deviceEpochNow(prefs.timeMode);
+          await write([0x23, ...le32(t)]); log(`Clock synced to ${faceValue(t)} [${prefs.timeMode}]`); result.synced = true;
+          if (clk) saveClockLog(key, { set: { before: t + Math.round(clk.sensor - clk.phone), at: t } });
+        }
         const r = await request([0x36, 0x12, 0x34], b => b[0] === 0x36);
         log(r ? "Sensor confirmed: log erased." : "No reply to delete; check with another download.");
         result.deleted = !!r;
-      } catch (e) { log("Erasing failed (the readings are saved): " + describeErr(e), "err"); }
+      } catch (e) { log("Setting the clock or erasing failed (the readings are saved): " + describeErr(e), "err"); }
     }
     // Log fill tracking: what's left on the sensor now (only known after a full download or an erase).
     if (sensorName && finished && cnt === 0xffff) {
@@ -1852,7 +1858,7 @@ async function dump(opts = {}) {
     }
     if (!opts.onProgress) $("dumpStatus").textContent = `${raw.length} readings downloaded · ${total} stored` + (drift && drift.stretches.some(s => s.applied) ? ` · ${driftSummary(drift)}` : "");
     result.drift = drift ? driftSummary(drift) : "";
-    toast(!finished ? `Download incomplete: ${count(raw.length, "reading")} saved` : del && !result.deleted ? `${count(raw.length, "reading")} saved, but the sensor was not erased`
+    toast(!finished ? `Download incomplete: ${count(raw.length, "reading")} saved` : del && !result.deleted ? `${count(raw.length, "reading")} saved, but the sensor was not erased${result.synced ? " (its clock was set)" : ""}`
       : `${count(raw.length, "reading")} saved${result.synced ? ", clock set" : ""}${result.deleted ? ", sensor erased" : ""}`, finished && (!del || result.deleted) ? "ok" : "warn");
     showLatestSample(raw[raw.length - 1] && [0, ...raw[raw.length - 1].slice(1)]);
     bar.style.width = "100%";
@@ -2106,8 +2112,8 @@ const BATCH = {
   async dump() {
     // Both are fixed here: the confirmation is for exactly these sensors and options.
     const plan = downloadPlan(), targets = batchTargets();
-    if (plan.erase && !await ask(`Their whole logs are downloaded${plan.sync ? `, the clocks set (${prefs.timeMode === "utc" ? "UTC" : "local time"})` : ""}, then erased permanently.\n\nA sensor is only erased if its download finished completely and is saved on this phone.\n\n${targets.map(sensorLabel).join(", ")}`,
-      { title: `Download and erase ${count(targets.length, "sensor")}?`, ok: "Download & erase", danger: true })) return;
+    if (plan.erase && !await ask(`Their whole logs are downloaded, then the clocks are set (${prefs.timeMode === "utc" ? "UTC" : "local time"}) and the logs erased permanently.\n\nA sensor is only erased if its download finished completely and is saved on this phone.\n\n${targets.map(sensorLabel).join(", ")}`,
+      { title: `Download, set clock and erase ${count(targets.length, "sensor")}?`, ok: "Download & erase", danger: true })) return;
     await runBatch(downloadLabel(plan).replace("…", ""), async (name, onProgress) => {
       const r = await dump({ plan, onProgress });
       if (!r) return null;
@@ -2170,7 +2176,6 @@ const tzName = () => { try { return Intl.DateTimeFormat().resolvedOptions().time
 const modeLabel = m => m === "utc" ? "UTC" : `${tzName()} (UTC${fmtOffset(localOffsetSec())})`;
 function updateTzLabels() {
   $("timeMode").options[1].textContent = `Local - ${modeLabel("local")}`;
-  $("optSyncLabel").textContent = `Set clock afterwards (${prefs.timeMode === "utc" ? "UTC" : modeLabel("local")})`;
   $("tzShort").textContent = `Set to ${modeLabel(prefs.timeMode)}.`;
   $("tzHelp").textContent = "Used for reading and setting the clocks, also after a download. " + (prefs.timeMode === "utc"
     ? "Charts always show your local time."
@@ -3403,12 +3408,21 @@ function updateStatusBar() {
   $("btnBackupNow").onclick = shareAllDevices;
   $("btnBackupLater").onclick = () => { lsSet("backupSnooze", Date.now() + 3 * 86400000); updateBackupBanner(); };
   $("idleTimeout").onchange = e => { prefs.idleTimeout = Math.max(5, parseInt(e.target.value) || 30); savePrefs(); };
-  // Download options are remembered; both are on by default (set clock + erase keeps every
-  // stretch of the sensor's log starting at a known clock set - see driftCorrect()).
-  for (const [id, key] of [["optSync", "dlSync"], ["optDelete", "dlErase"]]) {
-    $(id).checked = prefs[key] !== false;
-    $(id).onchange = e => { prefs[key] = e.target.checked; savePrefs(); updateDownloadButtons(); };
-  }
+  // Remembered; on by default (set clock + erase keeps every stretch of the sensor's log starting at a
+  // known clock set - see driftCorrect()).
+  // Up to v114 these were two options; if either was off, the combined one starts off.
+  if (prefs.dlSetErase == null && (prefs.dlSync === false || prefs.dlErase === false)) { prefs.dlSetErase = false; savePrefs(); }
+  $("optSetErase").checked = prefs.dlSetErase !== false;
+  $("optSetErase").onchange = async e => {
+    const box = e.target, want = box.checked;
+    box.checked = !want;  // only changes once confirmed
+    const yes = want ? await ask("After each complete download, once every reading is saved on this phone, the sensor's clock is set and its log is erased permanently.\n\nYou're asked again before every download.",
+        { title: "Set the clock and erase after downloading?", ok: "Turn on" })
+      : await ask("The clock is not set and nothing is erased.\n\n• The sensor's log keeps filling up, until the oldest readings are overwritten.\n• Clock drift can be corrected less well, because the log no longer starts at a clock set.\n• The next download takes longer: it includes these readings again (they are not stored twice).",
+        { title: "Only download, and keep the log on the sensor?", ok: "Keep the log" });
+    if (yes) { box.checked = want; prefs.dlSetErase = want; savePrefs(); log(`Option "Set clock & erase": ${want ? "on" : "off"}`); }
+    updateDownloadButtons();
+  };
   $("dumpCount").onchange = updateDownloadButtons;
   updateDownloadButtons();
   $("showNow").checked = !!prefs.showNow;   // off by default

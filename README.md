@@ -18,7 +18,7 @@ This only works thanks to [**pvvx/ATC_MiThermometer**](https://github.com/pvvx/A
 
 1. Flash the pvvx firmware onto the sensor (see the [pvvx project](https://github.com/pvvx/ATC_MiThermometer)).
 2. On the iPhone, install the free **Bluefy** browser (Safari has no Web Bluetooth) and open the link above.
-3. **Sensor** tab: *Connect…* → pick the sensor → *Download, set clock & erase…* (setting the clock and erasing the sensor's log are optional; the button says what it will do).
+3. **Sensor** tab: *Connect…* → pick the sensor → *Download, set clock & erase…* (*Set clock & erase* is one option, on by default; the button says what it will do, and the app asks before erasing).
 4. **Readings** tab: chart (pinch to zoom, drag to move, tap for values, turn the phone sideways for full screen), min/max/average, *Compare* for several sensors in one chart, and *Share* to export CSV.
 5. **Batch** tab: the same for all your sensors in one go, with a retry for those that failed.
 
