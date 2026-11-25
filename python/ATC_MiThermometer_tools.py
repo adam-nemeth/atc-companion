@@ -1446,12 +1446,17 @@ examples:
 """
 
 
+# Same pattern as the app: the day it's published, then the build number (all versions ever published).
+VERSION = "2026-11-25.126"
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__.split("\n\n")[0],
         epilog=EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     parser.add_argument("--scan", action="store_true",
                          help="Scan for nearby ATC-firmware sensors, logging each one as it's "
                               "found; press Enter at any time to stop early")

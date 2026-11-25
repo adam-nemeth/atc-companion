@@ -241,6 +241,11 @@ class SensorList(unittest.TestCase):
                 T.load_sensors(str(p))
 
 
+class Version(unittest.TestCase):
+    def test_day_dot_number(self):
+        self.assertRegex(T.VERSION, r"^\d{4}-\d{2}-\d{2}\.[1-9]\d*$")
+
+
 class FileNames(unittest.TestCase):
     def test_device_label(self):
         self.assertEqual(T.device_label({"name": "ATC_A1B2C3", "description": "Living room"}), "Living_room-ATC_A1B2C3")

@@ -242,6 +242,9 @@ test("backup: what's saved comes back, damaged parts are left out", () => {
   assert.deepEqual(b.settings, d.settings);
   assert.deepEqual(b.clockLog, d.clockLog);
   assert.deepEqual([b.removed, b.selected], [["ATC_000001"], ["ATC_A1B2C3"]]);
+  assert.equal(b.version, "118");  // made by an app before the day.build pattern
+  assert.equal(core.parseBackup(core.makeBackup(Object.assign({}, d, { version: "2026-11-25.126" }))).version, "2026-11-25.126");
+  assert.equal(core.parseBackup(core.makeBackup(Object.assign({}, d, { version: "<b>x</b>" }))).version, "");
   // Damaged: only the good parts are kept.
   const bad = core.parseBackup(JSON.stringify({ app: "atc-companion", format: 1, readings: { ATC_A1B2C3: [[1790000000, 21.5, 55, null], "x", [1, null, 2, 3]], ATC_D4E5F6: "x" },
     sensors: { rooms: { x: "y", ATC_A1B2C3: 5 }, known: { ATC_A1B2C3: { mac: "?", cfg: {}, log: { n: "a" } } } }, settings: { deep: { a: { b: { c: 1 } } } }, clockLog: { ATC_A1B2C3: { sets: "x" } } }));

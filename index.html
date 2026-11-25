@@ -723,7 +723,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=125"></script>
+<script src="core.js?v=2026-11-25.126"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -831,8 +831,9 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 125;  // also bump core.js?v= in the <script> tag above
-const APP_DATE = "2026-11-25";  // release date of this version
+// Version: the day it's published (Hungarian time), then the build number, counting every version ever published (v125 was the last plain one).
+// Also in core.js?v= (the <script> tag above) and VERSION in python/ATC_MiThermometer_tools.py when it changes.
+const APP_VERSION = "2026-11-25.126";
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -2641,7 +2642,7 @@ async function restoreBackup(file) {
   const useSettings = { value: fresh, label: "Use the backup's settings instead of the ones here (the app then reloads)" };
   const useNames = { value: false, label: `Use the backup's descriptions: ${renamed.slice(0, 3).map(n => `“${rooms[n].trim()}” → “${b.rooms[n]}”`).join(", ")}${renamed.length > 3 ? ` and ${renamed.length - 3} more` : ""}` };
   const checks = [...(prefsDiffer ? [useSettings] : []), ...(renamed.length ? [useNames] : [])];
-  if (!await ask(`${when}${Number.isFinite(b.version) ? ` · made with v${b.version}` : ""}\n${count(sensors, "sensor")} · ${count(b.count, "reading")}\n\nReadings and sensors are added to those already here; nothing is deleted.`,
+  if (!await ask(`${when}${b.version ? ` · made with v${b.version}` : ""}\n${count(sensors, "sensor")} · ${count(b.count, "reading")}\n\nReadings and sensors are added to those already here; nothing is deleted.`,
     { title: "Restore this backup?", ok: "Restore", checks })) return;
   const settingsToo = prefsDiffer && useSettings.value, namesToo = renamed.length > 0 && useNames.value;
   if (busy) { toast("Wait until the sensor is done", "warn"); return; }
@@ -2667,7 +2668,7 @@ async function restoreBackup(file) {
     for (const [n, v] of Object.entries(b.clockLog)) clocks[n] = mergeClockLog(clocks[n] || {}, v);
     lsSet("clockLog", clocks); lsSet("rooms", rooms); saveKnown(); saveSel(); saveRemoved();
     if (settingsToo) { Object.assign(prefs, b.settings); savePrefs(); }
-    log(`Restored ${file.name} (${when}, v${b.version}): ${added} readings added, ${b.skipped} skipped, ${sensors} sensors; settings ${settingsToo ? "taken over" : "kept"}, descriptions ${namesToo ? "taken over" : "kept"}`);
+    log(`Restored ${file.name} (${when}, v${b.version || "?"}): ${added} readings added, ${b.skipped} skipped, ${sensors} sensors; settings ${settingsToo ? "taken over" : "kept"}, descriptions ${namesToo ? "taken over" : "kept"}`);
     flushLog(true);
     await tell(`${count(added, "reading")} added${b.count > added ? `, ${(b.count - added).toLocaleString(LOCALE)} were already here` : ""}.${b.skipped ? ` ${count(b.skipped, "damaged reading")} left out.` : ""}`, "Backup restored");
     if (settingsToo && !DEMO) { location.reload(); return; }
@@ -3669,7 +3670,7 @@ function updateStatusBar() {
   document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => showTab(b.dataset.go));
   showTab(lsGet("tab", "single"));
   setInterval(updateStatusBar, 1000);
-  $("appVersionTop").textContent = `v${APP_VERSION} · ${new Date(APP_DATE + "T12:00").toLocaleDateString(LOCALE, { day: "numeric", month: "short", year: "numeric" })}`;
+  $("appVersionTop").textContent = `v${APP_VERSION}`;
   logEnvironment(); flushLog();
   $("btnLogSend").onclick = sendLog;
   $("advanced").ontoggle = () => { $("log").scrollTop = $("log").scrollHeight; };

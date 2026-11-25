@@ -73,6 +73,8 @@ python -m unittest discover -s tests
 
 Both test the clock-drift correction against the same simulated sensor logs ([`tests/fixtures`](tests/fixtures/), made by [`tests/make_fixtures.py`](tests/make_fixtures.py)), so the app and the Python tool stay in step.
 
+Versions are the day of publishing and the build number, which counts every version ever published, e.g. `v2026-11-25.126`. The app shows it at the top, and `--version` prints the Python tool's.
+
 ## License
 
 [MIT](LICENSE)

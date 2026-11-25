@@ -415,7 +415,9 @@ function parseBackup(text) {
   try { d = JSON.parse(text); } catch {}
   if (!isObj(d) || d.app !== BACKUP_APP || !isNum(d.format) || !isObj(d.readings)) throw new Error("This isn't a backup of this app.");
   if (d.format > BACKUP_FORMAT) throw new Error("This backup was made by a newer version of the app. Reload the page and try again.");
-  const out = { version: d.version, created: Date.parse(d.created) || 0, rooms: {}, known: {}, removed: [], selected: [], settings: {}, clockLog: {}, readings: {}, count: 0, skipped: 0 };
+  // The app version that made it: a number up to v125, then "2026-11-25.126" (day.build number).
+  const version = isNum(d.version) ? String(d.version) : typeof d.version === "string" && /^[0-9][0-9.-]{0,19}$/.test(d.version) ? d.version : "";
+  const out = { version, created: Date.parse(d.created) || 0, rooms: {}, known: {}, removed: [], selected: [], settings: {}, clockLog: {}, readings: {}, count: 0, skipped: 0 };
   for (const [key, list] of entries(d.readings)) {
     if (!Array.isArray(list)) continue;
     const id = histId(key), keep = out.readings[id] = out.readings[id] || [];
