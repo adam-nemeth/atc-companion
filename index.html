@@ -235,6 +235,7 @@ dialog { width: min(420px, calc(100vw - 32px)); padding: 18px; border: 1px solid
 dialog::backdrop { background: rgba(0,0,0,.45); }
 #dlgTitle, #expTitle { font-size: 17px; font-weight: 650; margin: 0 0 8px; }
 #dlgText { margin: 0 0 16px; white-space: pre-line; overflow-wrap: anywhere; max-height: 50vh; overflow: auto; }
+#dlgChecks label { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 12px; } #dlgChecks input { flex: none; margin-top: 3px; }
 #dlgInput { width: 100%; font-size: 16px; margin: 0 0 16px; }
 dialog .btns { display: flex; gap: 8px; }
 dialog .btns button { flex: 1 1 0; padding: 9px 8px; }
@@ -628,7 +629,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
   <section class="card" data-tab="settings">
     <h2>Readings and backup</h2>
     <p class="muted" style="margin-top:0">A backup is one file with all readings, sensors and settings. <button class="linkbtn info" data-more="backupHelp">More</button></p>
-    <p class="muted hidden" id="backupHelp">Keep it outside this phone, e.g. in iCloud Drive or in an email. “Restore” adds its readings and sensors to the ones already here, so nothing is deleted, and takes over its settings. Anyone who has the file can read it.</p>
+    <p class="muted hidden" id="backupHelp">Keep it outside this phone, e.g. in iCloud Drive or in an email. “Restore” adds its readings and sensors to the ones already here, so nothing is deleted. Where the backup's settings or descriptions differ, you choose which to keep. Anyone who has the file can read it.</p>
     <div class="row">
       <button id="btnBackup" class="primary">Back up…</button>
       <button id="btnRestore">Restore…</button>
@@ -705,6 +706,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <dialog id="dlg" aria-labelledby="dlgTitle" aria-describedby="dlgText">
   <p id="dlgTitle"></p>
   <p id="dlgText"></p>
+  <div id="dlgChecks"></div>
   <input id="dlgInput" class="hidden" autocomplete="off" autocapitalize="off" spellcheck="false">
   <div class="btns"><button id="dlgCancel"></button><button id="dlgOk" class="primary"></button></div>
 </dialog>
@@ -721,7 +723,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=124"></script>
+<script src="core.js?v=125"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -829,7 +831,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 124;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 125;  // also bump core.js?v= in the <script> tag above
 const APP_DATE = "2026-11-25";  // release date of this version
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
@@ -909,12 +911,13 @@ window.addEventListener("unhandledrejection", e => showError("Unhandled error", 
 
 // ===== Dialogs and short confirmations =====
 // ask(): a question with buttons that say what they do. Resolves true / false - or, with input, the text
-// / null. tell(): just a message. The dialog blocks the page like confirm() did, but the page keeps
+// / null. opts.checks: [{ label, value }] tick boxes; each value is updated when the dialog closes.
+// tell(): just a message. The dialog blocks the page like confirm() did, but the page keeps
 // running behind it: whoever asks about a sensor must check afterwards that it's still the one connected.
 let askChain = Promise.resolve();
 function ask(text, opts = {}) { const r = askChain.then(() => askNow(text, opts)); askChain = r.catch(() => {}); return r; }
 function tell(text, title = "") { return ask(text, { title, cancel: null }); }
-function askNow(text, { title = "", ok = "OK", cancel = "Cancel", danger = false, input = null } = {}) {
+function askNow(text, { title = "", ok = "OK", cancel = "Cancel", danger = false, input = null, checks = [] } = {}) {
   const d = $("dlg"), both = [title, text].filter(Boolean).join("\n\n");
   if (typeof d.showModal !== "function") {  // very old browsers
     if (input != null) return Promise.resolve(prompt(both, input));
@@ -926,9 +929,11 @@ function askNow(text, { title = "", ok = "OK", cancel = "Cancel", danger = false
     $("dlgTitle").textContent = title; $("dlgTitle").classList.toggle("hidden", !title);
     $("dlgText").textContent = text; $("dlgText").classList.toggle("hidden", !text);
     inp.classList.toggle("hidden", input == null); inp.value = input || "";
+    const boxes = checks.map(c => { const l = document.createElement("label"), b = document.createElement("input"); b.type = "checkbox"; b.checked = !!c.value; l.append(b, c.label); return [l, b, c]; });
+    $("dlgChecks").replaceChildren(...boxes.map(([l]) => l));
     okB.textContent = ok; okB.className = danger ? "dangerfill" : "primary";
     noB.textContent = cancel || ""; noB.classList.toggle("hidden", cancel === null);
-    const done = v => { d.onclose = d.oncancel = null; if (d.open) d.close(); res(v); };
+    const done = v => { d.onclose = d.oncancel = null; for (const [, b, c] of boxes) c.value = b.checked; if (d.open) d.close(); res(v); };
     okB.onclick = () => done(input != null ? inp.value : true);
     noB.onclick = () => done(no);
     inp.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); okB.click(); } };
@@ -2627,8 +2632,18 @@ async function restoreBackup(file) {
   try { b = parseBackup(await file.text()); } catch (e) { tell(e.message, "Can't restore this file"); return; }
   const when = b.created ? new Date(b.created).toLocaleString(LOCALE, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "Date unknown";
   const ids = Object.keys(b.readings), sensors = new Set([...Object.keys(b.known), ...Object.keys(b.rooms), ...ids]).size;
-  if (!await ask(`${when}${Number.isFinite(b.version) ? ` · made with v${b.version}` : ""}\n${count(sensors, "sensor")} · ${count(b.count, "reading")}\n\nReadings and sensors are added to those already here, and the settings are replaced. The app then reloads.`,
-    { title: "Restore this backup?", ok: "Restore" })) return;
+  // Readings and sensors are always added. Where the backup and this phone differ, the user chooses:
+  // its settings (on by default only for a phone with nothing on it yet), and its descriptions.
+  const fresh = !knownNames().length && !cmpAll().length;
+  const ignore = ["hintUses", "utcDefaultApplied"], same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const prefsDiffer = Object.keys(b.settings).some(k => !ignore.includes(k) && !same(b.settings[k], prefs[k]));
+  const renamed = Object.keys(b.rooms).filter(n => (rooms[n] || "").trim() && rooms[n].trim() !== b.rooms[n]);
+  const useSettings = { value: fresh, label: "Use the backup's settings instead of the ones here (the app then reloads)" };
+  const useNames = { value: false, label: `Use the backup's descriptions: ${renamed.slice(0, 3).map(n => `“${rooms[n].trim()}” → “${b.rooms[n]}”`).join(", ")}${renamed.length > 3 ? ` and ${renamed.length - 3} more` : ""}` };
+  const checks = [...(prefsDiffer ? [useSettings] : []), ...(renamed.length ? [useNames] : [])];
+  if (!await ask(`${when}${Number.isFinite(b.version) ? ` · made with v${b.version}` : ""}\n${count(sensors, "sensor")} · ${count(b.count, "reading")}\n\nReadings and sensors are added to those already here; nothing is deleted.`,
+    { title: "Restore this backup?", ok: "Restore", checks })) return;
+  const settingsToo = prefsDiffer && useSettings.value, namesToo = renamed.length > 0 && useNames.value;
   if (busy) { toast("Wait until the sensor is done", "warn"); return; }
   await withBusy(async () => {
     let added = 0;
@@ -2645,17 +2660,18 @@ async function restoreBackup(file) {
       if (removedSensors.has(n)) continue;
       if (!knownNames().includes(n) && b.selected.includes(n)) batchSel.add(n);
       known[n] = Object.assign({}, b.known[n], known[n]);
-      if (!(rooms[n] || "").trim() && b.rooms[n]) rooms[n] = b.rooms[n];
+      if (b.rooms[n] && (namesToo || !(rooms[n] || "").trim())) rooms[n] = b.rooms[n];
     }
     for (const n of b.removed) if (!knownNames().includes(n)) removedSensors.add(n);
     const clocks = lsGet("clockLog", {});
     for (const [n, v] of Object.entries(b.clockLog)) clocks[n] = mergeClockLog(clocks[n] || {}, v);
     lsSet("clockLog", clocks); lsSet("rooms", rooms); saveKnown(); saveSel(); saveRemoved();
-    Object.assign(prefs, b.settings); savePrefs();
-    log(`Restored ${file.name} (${when}, v${b.version}): ${added} readings added, ${b.skipped} skipped, ${sensors} sensors`);
+    if (settingsToo) { Object.assign(prefs, b.settings); savePrefs(); }
+    log(`Restored ${file.name} (${when}, v${b.version}): ${added} readings added, ${b.skipped} skipped, ${sensors} sensors; settings ${settingsToo ? "taken over" : "kept"}, descriptions ${namesToo ? "taken over" : "kept"}`);
     flushLog(true);
     await tell(`${count(added, "reading")} added${b.count > added ? `, ${(b.count - added).toLocaleString(LOCALE)} were already here` : ""}.${b.skipped ? ` ${count(b.skipped, "damaged reading")} left out.` : ""}`, "Backup restored");
-    if (DEMO) await refreshDeviceList(); else location.reload();
+    if (settingsToo && !DEMO) { location.reload(); return; }
+    sensorsMsg(sensorsCountText()); syncKnownFold(); renderKnown(); await refreshDeviceList();
   });
 }
 function updateBackupBanner() {
