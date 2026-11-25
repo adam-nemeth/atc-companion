@@ -171,10 +171,11 @@ details summary { cursor: pointer; font-weight: 600; padding: 10px 0; margin: -1
 body[data-tab="single"]:not(.connected) .need-conn { display: none !important; }
 body.devfirst[data-tab="single"] main { display: flex; flex-direction: column; }
 body.devfirst[data-tab="single"] main > section { order: 9; }
-body.devfirst[data-tab="single"] #deviceCard { order: 1; }
-body.devfirst[data-tab="single"] #dumpCard { order: 2; }
-body.devfirst[data-tab="single"] #clockCard { order: 3; }
-body.devfirst[data-tab="single"] #knownCard { order: 4; }
+body.devfirst[data-tab="single"] #knownCard { order: 1; }
+body.devfirst[data-tab="single"] #deviceCard { order: 2; }
+body.devfirst[data-tab="single"] #dumpCard { order: 3; }
+body.devfirst[data-tab="single"] #clockCard { order: 4; }
+#knownCard { scroll-margin-top: 70px; }
 body.devfirst[data-tab="single"] #roomsCard { order: 5; }
 #knownFold { display: none; }
 body.devfirst[data-tab="single"] #knownFold { display: inline; }
@@ -210,8 +211,8 @@ body.devfirst[data-tab="single"] #rcol > section { order: 9; }
   body[data-tab="single"] main > section { grid-column: 1; }
   body[data-tab="single"] #rcol { display: block; grid-column: 2; grid-row: 6 / -1; }
   #roomsCard { grid-row: 6; } #knownCard { grid-row: 7; } #deviceCard { grid-row: 8; } #dumpCard { grid-row: 9; } #clockCard { grid-row: 10; }
-  body.devfirst[data-tab="single"] #deviceCard { grid-row: 6; } body.devfirst[data-tab="single"] #dumpCard { grid-row: 7; } body.devfirst[data-tab="single"] #clockCard { grid-row: 8; }
-  body.devfirst[data-tab="single"] #knownCard { grid-row: 9; } body.devfirst[data-tab="single"] #roomsCard { grid-row: 10; }
+  body.devfirst[data-tab="single"] #knownCard { grid-row: 6; } body.devfirst[data-tab="single"] #deviceCard { grid-row: 7; } body.devfirst[data-tab="single"] #dumpCard { grid-row: 8; }
+  body.devfirst[data-tab="single"] #clockCard { grid-row: 9; } body.devfirst[data-tab="single"] #roomsCard { grid-row: 10; }
   body[data-tab="all"] #knownCard { grid-column: 1; grid-row: 6 / -1; }
   body[data-tab="all"] main > section:not(#knownCard) { grid-column: 2; }
   body[data-tab="all"] #batchCard { grid-row: 6; } body[data-tab="all"] #dumpCard { grid-row: 7; } body[data-tab="all"] #batchOps { grid-row: 8; }
@@ -677,7 +678,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=113"></script>
+<script src="core.js?v=114"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -785,7 +786,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 113;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 114;  // also bump core.js?v= in the <script> tag above
 const APP_DATE = "2026-11-25";  // release date of this version
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
@@ -1311,9 +1312,7 @@ function renderKnown() {
     if (isCur) btn.classList.add("is-current");
     btn.disabled = !dev || isCur || busy;
     btn.onclick = () => {
-      // Show the Sensor card (where connection progress and errors appear) straight away.
-      showTab("single");
-      $("deviceCard").scrollIntoView({ behavior: "smooth", block: "start" });
+      showTab("single");  // connectDevice() brings the Sensor card (progress, errors) into view
       withBusy(async () => {
         if (!(await connectDevice(dev, name))) {
           $("connMsg").textContent += ` - if this keeps failing, tap “Connect…” above and pick ${shownName(name)}${btName !== shownName(name) ? ` (${btName})` : ""} in the list.`;
@@ -1496,7 +1495,11 @@ async function connectDevice(dev, expectedName, opts = {}) {
   // Say so straight away: disconnecting another sensor and waiting for a broadcast come first and
   // can take several seconds.
   connecting = { dev, name: expectedName, label: guessLabel(dev, expectedName), batch: !!opts.batch };
-  setStatus(`Connecting to ${connecting.label}…`, "warn"); showInfo(""); renderKnown(); updateLayout(!!chr);
+  setStatus(`Connecting to ${connecting.label}…`, "warn"); showInfo(""); renderKnown();
+  if (!opts.batch) knownOpen = false;
+  updateLayout(!!chr);
+  // The folded list at the top of the screen, with the sensor right below it.
+  if (!opts.batch && document.body.dataset.tab === "single") $("knownCard").scrollIntoView({ block: "start" });
   try { return await connectDeviceNow(dev, expectedName, opts); }
   finally { connecting = null; renderKnown(); updateLayout(!!chr); }
 }
@@ -1642,7 +1645,7 @@ function clearLive() {
   for (const id of ["liveT", "liveH", "liveB"]) $(id).textContent = "–";
   for (const id of ["liveNote", "clockState", "clockMsg"]) $(id).textContent = "";
 }
-// The Sensor tab's layout: the connected sensor first, with the list folded below it (see the CSS).
+// The Sensor tab's layout while connected: the list folded on top, then the sensor (see the CSS).
 let knownOpen = false;
 function updateLayout(on) {
   const b = document.body, c = b.classList;
@@ -1654,11 +1657,9 @@ function updateLayout(on) {
   // Keep what's on screen where it is (the cards above it change).
   const anchor = started ? null : ["deviceCard", "histCard"].map($).find(e => { const r = e.getBoundingClientRect(); return r.height && r.bottom > 80 && r.top < innerHeight * 0.7; });
   const before = anchor && anchor.getBoundingClientRect().top;
-  if (started) knownOpen = false;
   c.toggle("connected", conn); c.toggle("devfirst", first); syncKnownFold();
   if (b.dataset.tab !== "single") return;
-  if (started) $("deviceCard").scrollIntoView({ block: "start" });
-  else if (anchor) scrollBy(0, anchor.getBoundingClientRect().top - before);
+  if (anchor) scrollBy(0, anchor.getBoundingClientRect().top - before);
   drawChart();
 }
 function syncKnownFold() {
