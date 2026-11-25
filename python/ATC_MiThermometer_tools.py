@@ -13,8 +13,9 @@ ATC_MiThermometer custom firmware, over BLE, from the command line:
   --set-config         write a (possibly edited) config JSON file back to the sensor
   --set-time           set the sensor's clock (UTC unless --time-mode local)
   --delete-log         erase the sensor's log (all its recorded readings)
-  --keep-log           (with --dump) keep the sensor's log; by default it's erased
-                       once the whole log is downloaded and saved
+  --keep-log           (with --dump) only download; by default the sensor's clock
+                       is set and its log erased once the whole log is
+                       downloaded and saved
   --sensors FILE       run any of the above against a whole list of sensors at
                         once, loaded from a JSON file (see "Batch mode" below)
 
@@ -54,22 +55,15 @@ that long. So a large --dump won't get cut off partway just because the
 whole transfer takes longer than --timeout - only if the sensor genuinely
 stalls with no new data for that long.
 
-NOTE ON THE POST-DUMP CLOCK SYNC (--no-clock-sync): by default, once a
---dump finishes successfully, this script also writes the current time to
-the sensor's clock, and (unless --keep-log is given) deletes the
-sensor's log - both reusing the SAME already-open connection rather
-than reconnecting, which is faster. Checked against the actual firmware
-source (src/ble.c: send_memo_blk()) - the log transfer is already
-fully complete and the sensor has already cleaned up its read state
-(reset rd_memo.cnt, restored normal connection latency) the moment it
-sends the short trailing 0x35 packet. Nothing about finishing the
-transfer depends on a clock write afterward. The clock sync is purely a
-courtesy this script inherited from pvvx's own web tool (GraphMemo.html
-does the same thing) - since you're already connected anyway, it's a
-convenient moment to keep the clock from drifting. Pass --no-clock-sync
-to skip it; it's skipped automatically anyway if the dump was cut short
-by an idle timeout (and so is erasing, for the same reason). The download is
-always written to its CSV file before the sensor is erased.
+NOTE ON SETTING THE CLOCK AND ERASING (--keep-log): by default, once a
+--dump has downloaded the whole log and saved it to its CSV file, this
+script sets the sensor's clock and then erases its log, reusing the SAME
+already-open connection. Always both or neither, like the iPhone app:
+the new log then starts with a correct clock. If setting the clock fails,
+nothing is erased. Neither is done after an interrupted download, a partial
+one (--count), an empty one, or one with gaps: the firmware numbers the
+readings 1, 2, 3... (src/ble.c: send_memo_blk()), so readings that got lost
+on the way are noticed. Pass --keep-log to only download.
 
 NOTE ON CLOCK DRIFT (--no-drift-correction): a sensor's clock can gain or
 lose time steadily (how much, and whether at all, is still being measured
@@ -967,11 +961,12 @@ async def scan(timeout: float, save: bool = False):
 
 
 async def dump(address: str, out_prefix: str, requested_count: int, timeout: float,
-                locale: str, time_mode: str, delete_after: bool = False,
-                sync_time: bool = True, merge_tz: str = "source",
+                locale: str, time_mode: str, set_and_erase: bool = False,
+                merge_tz: str = "source",
                 merge_levels=("all",), drift_corr: bool = True) -> bool:
-    """Returns True if the transfer completed cleanly (not cut off by an
-    idle timeout)."""
+    """set_and_erase: set the sensor's clock and erase its log once the whole log is saved (both
+    or neither). Returns True if everything worked: nothing missing, and the clock set and the
+    log erased if asked for."""
     samples = []
     done = asyncio.Event()
     delete_done = asyncio.Event()
@@ -1027,59 +1022,74 @@ async def dump(address: str, out_prefix: str, requested_count: int, timeout: flo
                 f"writing the {len(samples)} reading(s) received so far. (This only "
                 "fires when the sensor goes quiet, not from the transfer's total "
                 "length - raise --timeout if the sensor is just slow to respond.)")
+        # Complete = the sensor said it's done, and no record number is missing in between.
+        missing = missing_records(s[4] for s in samples)
+        complete = finished and not missing
+        if missing:
+            log(f"{missing} reading(s) got lost on the way. Download again to get them.")
         # Save the download to disk BEFORE anything else happens on the sensor, so erasing it
         # (the default) can never lose readings that didn't make it into a file.
-        out_path, saved = _save_dump(samples, address, out_prefix, locale, time_mode, drift_corr, clk)
-        if finished:
-            if sync_time:
-                # Not required to complete the transfer (see NOTE ON THE POST-DUMP
-                # CLOCK SYNC in this file's docstring) - purely a courtesy clock
-                # sync while we're already connected. Query the current time right
-                # before sending it, not earlier in the connection.
-                t = device_epoch_now(time_mode)
-                payload = bytes([0x23]) + t.to_bytes(4, "little")
-                try:
-                    await client.write_gatt_char(CHAR_UUID, payload)
-                    activity.touch()
-                    log(f"Updated sensor clock to "
-                        f"{device_epoch_as_datetime(t).isoformat(sep=' ')} "
-                        f"[{time_mode_label(time_mode)}]")
-                    if clk:
-                        save_clock_log(address, {"before": t + round(clk[0] - clk[1]), "at": t})
-                except Exception as e:
-                    log(f"(non-fatal) failed to sync sensor clock after dump: {e}")
+        out_path, saved = None, 0
+        if samples:
+            out_path, saved = _save_dump(samples, address, out_prefix, locale, time_mode, drift_corr, clk)
+        elif finished:
+            log("No readings on the sensor.")
 
-            if delete_after and cnt != 0xFFFF:
-                log(f"Not erasing the sensor: only the last {cnt} readings were downloaded "
-                    "(erasing would lose the older ones). Download all to erase.")
-            elif delete_after and saved != len(samples):
-                log("Not erasing the sensor: the download file couldn't be confirmed on disk.")
-            elif delete_after:
-                # Deliberately reuse this same still-open connection instead of
-                # calling delete_log() (which would reconnect from scratch) -
-                # we're already connected and notifying, so this is just one
-                # more write+wait on the link we already have, which is faster.
-                log(f"Saved all {saved} readings to {out_path}; erasing the sensor's log "
-                    "(--keep-log to keep it)...")
-                await client.write_gatt_char(CHAR_UUID, bytes([0x36, 0x12, 0x34]))
-                activity.touch()
-                if await wait_idle(delete_done, activity, timeout):
-                    log("Sensor confirmed: log erased.")
-                else:
-                    log(f"No response from the sensor for {timeout:.0f}s (idle timeout); "
-                        "it may still have processed the deletion. Consider trying "
-                        "--dump again to check whether the log is actually empty.")
+        ok = complete and saved == len(samples)
+        if set_and_erase:
+            why = ("the download is incomplete" if not complete
+                   else f"only the last {cnt} readings were downloaded" if cnt != 0xFFFF
+                   else "there are no readings" if not samples
+                   else "the download file couldn't be confirmed on disk" if saved != len(samples) else "")
+            if why:
+                log(f"Not setting the clock or erasing the sensor: {why}.")
+            else:
+                log(f"Saved all {saved} readings to {out_path}; setting the clock and erasing the "
+                    "sensor's log (--keep-log to do neither)...")
+                ok = await _set_clock_and_erase(client, address, time_mode, clk, activity, delete_done, timeout)
 
         await client.stop_notify(CHAR_UUID)
-
-    if delete_after and not finished:
-        log("Dump did not finish cleanly (idle timeout) - the sensor was NOT erased. "
-            "Re-run --dump to get everything.")
 
     prefix = out_prefix[:-4] if out_prefix.lower().endswith(".csv") else out_prefix
     if merge_levels:
         _merge_and_report(prefix, locale, merge_tz, merge_levels)
-    return finished
+    return ok
+
+
+def missing_records(numbers) -> int:
+    """How many readings of a download never arrived. The firmware numbers them 1, 2, 3... without
+    gaps (1 = the newest), so any number not seen up to the highest one was lost on the way."""
+    seen = set(numbers)
+    return max(seen, default=0) + (1 if 0 in seen else 0) - len(seen)
+
+
+async def _set_clock_and_erase(client, address, time_mode, clk, activity, delete_done, timeout) -> bool:
+    """Both or neither: if setting the clock fails, nothing is erased. Uses the connection that is
+    still open after the download."""
+    # Take the time right before sending it, not earlier in the connection.
+    t = device_epoch_now(time_mode)
+    try:
+        await client.write_gatt_char(CHAR_UUID, bytes([0x23]) + t.to_bytes(4, "little"))
+    except Exception as e:
+        log(f"Setting the clock failed, so the sensor was NOT erased (the readings are saved): {e}")
+        return False
+    activity.touch()
+    log(f"Updated sensor clock to {device_epoch_as_datetime(t).isoformat(sep=' ')} "
+        f"[{time_mode_label(time_mode)}]")
+    if clk:
+        save_clock_log(address, {"before": t + round(clk[0] - clk[1]), "at": t})
+    try:
+        await client.write_gatt_char(CHAR_UUID, bytes([0x36, 0x12, 0x34]))
+    except Exception as e:
+        log(f"Erasing failed (the readings are saved): {e}")
+        return False
+    activity.touch()
+    if await wait_idle(delete_done, activity, timeout):
+        log("Sensor confirmed: log erased.")
+        return True
+    log(f"No response from the sensor for {timeout:.0f}s (idle timeout); it may still have erased "
+        "its log. Run --dump again to check.")
+    return False
 
 
 def _save_dump(samples, address, out_prefix, locale, time_mode, drift_corr, clk):
@@ -1394,18 +1404,17 @@ def strip_suffix(path: str, suffix: str) -> str:
 EXAMPLES = """
 examples:
   A download sets the sensor's clock (UTC) and then erases its log - but only
-  after the whole log was downloaded and saved to a file. --keep-log keeps the
-  log, --no-clock-sync leaves the clock alone. --scan has no batch form: it's
-  how you build a sensors.json in the first place.
+  after the whole log was downloaded and saved to a file. --keep-log does neither.
+  --scan has no batch form: it's how you build a sensors.json in the first place.
 
   --- batch mode (--sensors sensors.json): every sensor in the list ---
     python ATC_MiThermometer_tools.py --sensors sensors.json --dump
         -> <Description>-<name>-raw-<timestamp>.csv per download, merged into
            <Description>-<name>-all.csv; then clock set and log erased
     python ATC_MiThermometer_tools.py --sensors sensors.json --dump --keep-log
-        -> same, but the sensors keep their logs
+        -> only download: clocks and logs stay as they are
     python ATC_MiThermometer_tools.py --sensors sensors.json --dump --count 500
-        -> only the last 500 readings (a partial download never erases)
+        -> only the last 500 readings (a partial download changes nothing on the sensor)
     python ATC_MiThermometer_tools.py --sensors sensors.json --dump --locale hu
         -> Excel-friendly CSV: semicolons and decimal commas
     python ATC_MiThermometer_tools.py --sensors sensors.json --dump --merge-levels all,daily,monthly
@@ -1467,14 +1476,11 @@ def main():
                          help="MAC address of the sensor whose log to erase; "
                               "omit the address (with --sensors) to run on all of them")
     parser.add_argument("--keep-log", action="store_true",
-                         help="(--dump) Don't erase the sensor's log after downloading. By default "
-                              "it's erased once the whole log has been downloaded and saved to a "
-                              "file (never after an incomplete download, or with --count).")
+                         help="(--dump) Only download: don't set the sensor's clock or erase its log. By "
+                              "default both are done, together, once the whole log has been downloaded "
+                              "and saved to a file (never after an incomplete download, or with --count).")
     parser.add_argument("--no-clock-sync", action="store_true",
-                         help="(--dump) Skip updating the sensor's clock after a successful dump. "
-                              "On by default to keep the clock from drifting, matching pvvx's own "
-                              "tools - but this is NOT required to complete the transfer (see this "
-                              "file's docstring for why); pass this flag to skip it.")
+                         help="(--dump) Same as --keep-log: the clock is only set together with erasing.")
     parser.add_argument("--no-drift-correction", action="store_true",
                          help="(--dump) Don't correct the sensor clock's drift. By default the clock "
                               "is read before downloading and the readings since each clock set are "
@@ -1579,15 +1585,16 @@ def main():
         asyncio.run(scan(args.timeout, args.save_sensors))
 
     elif args.dump is not None:
-        sync_time = not args.no_clock_sync
-        # Erasing after a download is the default (like the iPhone app). It only happens when the
-        # whole log was downloaded and saved to a file first; --keep-log turns it off.
-        erase = not args.keep_log
-        if erase and (args.count & 0xFFFF) != 0xFFFF:
-            log(f"--count {args.count}: only part of the log is downloaded, so the sensor won't be erased.")
-            erase = False
-        if erase:
-            log("After each complete download the sensor's log is erased (use --keep-log to keep it).")
+        # Setting the clock and erasing after a download is the default, always both or neither
+        # (like the iPhone app), and only once the whole log is saved to a file.
+        set_and_erase = not (args.keep_log or args.no_clock_sync)
+        if set_and_erase and (args.count & 0xFFFF) != 0xFFFF:
+            log(f"--count {args.count}: only part of the log is downloaded, so the clock won't be set "
+                "and nothing is erased.")
+            set_and_erase = False
+        if set_and_erase:
+            log("After each complete download the sensor's clock is set and its log is erased "
+                "(use --keep-log to do neither).")
 
         if want_batch(args.dump):
             sensors = require_sensors()
@@ -1595,14 +1602,15 @@ def main():
             async def _one(dev):
                 label = sanitize_name(device_label(dev))
                 prefix = f"{args.out}-{label}" if args.out else label
-                await dump(dev["address"], prefix, args.count, args.timeout, args.locale,
-                           args.time_mode, erase, sync_time, args.merge_tz,
-                           merge_levels, not args.no_drift_correction)
+                if not await dump(dev["address"], prefix, args.count, args.timeout, args.locale,
+                                  args.time_mode, set_and_erase, args.merge_tz,
+                                  merge_levels, not args.no_drift_correction):
+                    raise RuntimeError("incomplete, or not erased (see the messages above)")
 
             asyncio.run(run_batch(sensors, "dump", _one))
         else:
             asyncio.run(dump(args.dump, args.out or "atc_history", args.count, args.timeout, args.locale,
-                              args.time_mode, erase, sync_time, args.merge_tz,
+                              args.time_mode, set_and_erase, args.merge_tz,
                               merge_levels, not args.no_drift_correction))
 
     elif args.get_config is not None:

@@ -679,7 +679,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=116"></script>
+<script src="core.js?v=117"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -787,7 +787,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 116;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 117;  // also bump core.js?v= in the <script> tag above
 const APP_DATE = "2026-11-25";  // release date of this version
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
@@ -1758,7 +1758,7 @@ function updateDownloadButtons() {
     : on ? "" : `The log keeps filling up${prefs.driftCorr === false ? "." : ", and clock drift is harder to correct."}`;
   hint.classList.toggle("hidden", !hint.textContent);
 }
-// Returns { n, total, finished, deleted } (or null if cancelled). opts.skipConfirm: batch already asked.
+// Returns { n, total, complete, problem, empty, synced, deleted, drift } (or null if cancelled).
 async function dump(opts = {}) {
   // opts.plan: what the user confirmed for the whole batch (the tick boxes may have changed since).
   const { count: cnt, sync, erase: del } = opts.plan || downloadPlan();
@@ -1768,7 +1768,7 @@ async function dump(opts = {}) {
       { title: `Download, set clock and erase ${shownName(target)}?`, ok: "Download & erase", danger: true })) return null;
     if (!stillConnected(target)) return null;
   }
-  const result = { n: 0, total: 0, finished: false, deleted: false };
+  const result = { n: 0, total: 0, complete: false, problem: "", empty: false, deleted: false };
   const raw = []; let done = false;
   const prog = $("dumpProg"), bar = prog.firstElementChild; prog.style.display = opts.onProgress ? "none" : "block"; bar.style.width = "0";
   const expect = cnt !== 0xffff ? cnt : expectedReadings(sensorName);
@@ -1803,8 +1803,16 @@ async function dump(opts = {}) {
       (raw.length ? `; sensor times ${faceValue(Math.min(...raw.map(r => r[0])))} … ${faceValue(Math.max(...raw.map(r => r[0])))}` : ""));
     if (!finished) log(`Idle timeout; keeping the ${raw.length} reading(s) received so far.`, "warn");
     else log(`Transfer complete: ${raw.length} readings.`);
-    result.finished = finished;
-    if (del && !finished) log("Download incomplete - skipped delete for safety.");
+    // Complete = the sensor said it's done, and no record number is missing in between. An empty reply
+    // is only believed if the log isn't known to hold readings. Nothing is erased otherwise.
+    const missing = missingRecords(raw.map(r => r[4]));
+    result.empty = finished && !raw.length;
+    result.problem = !finished ? "the sensor stopped answering"
+      : missing ? `${count(missing, "reading")} got lost on the way`
+      : result.empty && cnt === 0xffff && expect > 2 ? `no readings received, but about ${expect} expected` : "";
+    result.complete = !result.problem;
+    if (result.problem) log(`Download incomplete: ${result.problem}.${del ? " Not setting the clock or erasing." : ""}`, "warn");
+    else if (result.empty) log("The sensor's log is empty." + (del ? " Not setting the clock or erasing." : ""));
     const key = histId(sensorName || "sensor");  // stored per sensor ID; the description is only for file names
     // Log order (needed to see clock sets, since a clock set back makes times overlap): by record
     // number, in whichever direction makes the times increase.
@@ -1828,11 +1836,11 @@ async function dump(opts = {}) {
     $("btnExportRaw").disabled = !raw.length;
     // Stored: [corrected time, t, h, mV, sensor's own time] - the sensor time identifies the reading,
     // so a later download (with a slightly different correction) replaces it instead of duplicating it.
-    const total = await mergeInto(key, raw.map(([e, t, h, v, , c]) => [c - offSec, t, h, v, e - offSec]));
+    const total = raw.length ? await mergeInto(key, raw.map(([e, t, h, v, , c]) => [c - offSec, t, h, v, e - offSec])) : (await loadHistory(key)).length;
     log(`Stored ${raw.length} new readings for ${key} (${total} total).`);
     // Set the clock and erase only now: every downloaded reading is in this phone's storage (checked by
     // reading it back). Both or neither: if setting the clock fails, nothing is erased.
-    if (del && finished) {
+    if (del && result.complete && !result.empty) {
       if (!idb || (await loadHistory(key)).length < total) log("Not setting the clock or erasing the sensor: the readings couldn't be saved permanently on this phone.", "err");
       else try {
         if (sync) {
@@ -1846,16 +1854,16 @@ async function dump(opts = {}) {
       } catch (e) { log("Setting the clock or erasing failed (the readings are saved): " + describeErr(e), "err"); }
     }
     // Log fill tracking: what's left on the sensor now (only known after a full download or an erase).
-    if (sensorName && finished && cnt === 0xffff) {
+    if (sensorName && result.complete && cnt === 0xffff) {
       const st = raw.map(r => r[0]).sort((a, b) => a - b), d = [];
       for (let i = 1; i < st.length; i++) { const x = st[i] - st[i - 1]; if (x >= 30 && x <= 7200) d.push(x); }
       d.sort((a, b) => a - b);
       noteSensorLog(sensorName, result.deleted ? 0 : raw.length, d.length ? d[d.length >> 1] : null);
     }
-    if (!opts.onProgress) $("dumpStatus").textContent = `${raw.length} readings downloaded · ${total} stored` + (drift && drift.stretches.some(s => s.applied) ? ` · ${driftSummary(drift)}` : "");
+    if (!opts.onProgress) $("dumpStatus").textContent = `${raw.length} readings downloaded · ${total} stored` + (result.problem ? ` · incomplete: ${result.problem}${del ? ", so the clock was not set and nothing was erased" : ""}; download again` : "") + (drift && drift.stretches.some(s => s.applied) ? ` · ${driftSummary(drift)}` : "");
     result.drift = drift ? driftSummary(drift) : "";
-    toast(!finished ? `Download incomplete: ${count(raw.length, "reading")} saved` : del && !result.deleted ? `${count(raw.length, "reading")} saved, but the sensor was not erased${result.synced ? " (its clock was set)" : ""}`
-      : `${count(raw.length, "reading")} saved${result.synced ? ", clock set" : ""}${result.deleted ? ", sensor erased" : ""}`, finished && (!del || result.deleted) ? "ok" : "warn");
+    toast(result.problem ? `Download incomplete: ${result.problem}${raw.length ? `, ${count(raw.length, "reading")} saved` : ""}` : result.empty ? "No readings on the sensor" : del && !result.deleted ? `${count(raw.length, "reading")} saved, but the sensor was not erased${result.synced ? " (its clock was set)" : ""}`
+      : `${count(raw.length, "reading")} saved${result.synced ? ", clock set" : ""}${result.deleted ? ", sensor erased" : ""}`, result.complete && (!del || result.empty || result.deleted) ? "ok" : "warn");
     showLatestSample(raw[raw.length - 1] && [0, ...raw[raw.length - 1].slice(1)]);
     bar.style.width = "100%";
     await refreshDeviceList(key);
@@ -2113,9 +2121,10 @@ const BATCH = {
     await runBatch(downloadLabel(plan).replace("…", ""), async (name, onProgress) => {
       const r = await dump({ plan, onProgress });
       if (!r) return null;
-      const ok = r.finished && (!plan.sync || r.synced) && (!plan.erase || r.deleted);
+      if (r.empty && r.complete) return { ok: true, text: `no readings on the sensor · ${r.total} stored` };
+      const ok = r.complete && (!plan.sync || r.synced) && (!plan.erase || r.deleted);
       return { ok, text: `${r.n} readings downloaded · ${r.total} stored` + (plan.sync ? ` · ${r.synced ? "clock set" : "clock NOT set"}` : "") +
-        (plan.erase ? ` · ${r.deleted ? "erased on sensor" : "NOT erased"}` : "") + (r.finished ? "" : " · INCOMPLETE (idle timeout)") + (r.drift ? " · " + r.drift : "") };
+        (plan.erase ? ` · ${r.deleted ? "erased on sensor" : "NOT erased"}` : "") + (r.problem ? ` · INCOMPLETE: ${r.problem}` : "") + (r.drift ? " · " + r.drift : "") };
     }, targets);
   },
   async getTime() { await runBatch("Read clocks", () => getTime()); },
@@ -2368,18 +2377,23 @@ function shareMsg(text, cls) { const m = $("shareMsg"); m.textContent = text; m.
 // Opens the iOS share sheet (Mail, Messages, AirDrop, Save to Files…) with the CSV file(s) attached.
 // iOS only allows the share sheet straight from a tap, so everything is prepared synchronously
 // from in-memory data - no awaits before navigator.share().
-// onDone: called once the files were shared (or downloaded instead).
+// onDone (backups): called once the files were shared, or the user says the downloads were saved.
 function shareFiles(items, subject, onDone) {
   if (!items.length) { shareMsg("Nothing to share yet.", "status warn"); toast("Nothing to share yet", "warn"); return; }
   const files = items.map(it => new File([it.text], it.name, { type: it.type || "text/csv" }));
   const rows = items.reduce((n, it) => n + it.rows, 0);
   const body = `${subject}\n${items.map(it => `${it.name} (${it.rows} rows)`).join("\n")}`;
   const done = () => { dbg("Share completed"); const txt = `Shared ${count(files.length, "file")}, ${count(rows, "row")}`; shareMsg(txt + ".", "status ok"); toast(txt); if (onDone) onDone(); };
+  // A download gives no sign of success, so ask instead of assuming it worked.
+  const download = async () => {
+    downloadFiles(items);
+    if (onDone && await ask("Check that the files are there, e.g. in Files or Downloads.", { title: "Were the backup files saved?", ok: "Yes, saved", cancel: "No" })) onDone();
+  };
   const failed = e => {
     dbg(`Share result: ${errDetail(e)}`);
     if (e && e.name === "AbortError") { shareMsg("Sharing cancelled."); return; }
     shareMsg("Share sheet failed: " + describeErr(e) + " - downloading instead.", "status err");
-    downloadFiles(items); if (onDone) onDone();
+    download();
   };
   let canFiles = false;
   try { canFiles = !!(navigator.canShare && navigator.canShare({ files })); } catch (e) { dbg(`canShare threw: ${describeErr(e)}`); }
@@ -2392,7 +2406,7 @@ function shareFiles(items, subject, onDone) {
   } else {
     shareMsg("This browser has no share sheet - downloading the file(s) instead.", "status warn");
     toast(`Downloading ${count(items.length, "file")}`);
-    downloadFiles(items); if (onDone) onDone();
+    download();
   }
 }
 function downloadFiles(items) {
@@ -2421,17 +2435,31 @@ function shareSelected() {
 }
 function shareAllDevices() {
   const items = [...histCache.keys()].sort().map(csvAllFor).filter(it => it.rows);
+  const counts = Object.fromEntries([...histCache].map(([d, s]) => [d, s.length]));
   // Sharing every sensor's full history counts as a backup (once the share sheet reports success).
-  shareFiles(items, `Thermometer readings: ${items.length} sensor(s)`, () => noteBackup(items.reduce((n, it) => n + it.rows, 0)));
+  shareFiles(items, `Thermometer readings: ${items.length} sensor(s)`, () => noteBackup(counts));
 }
 // ===== Backup reminder =====
 // The history exists only in this browser's storage on this phone, and iOS may clear it (Bluefy
 // isn't granted persistent storage). A backup = "Share all sensors" to Files / iCloud Drive / mail.
-function noteBackup(rows) { lsSet("lastBackup", { at: Date.now(), rows }); lsSet("backupSnooze", 0); updateBackupBanner(); }
+// counts: how many readings of each sensor the backup holds. Stored readings only ever grow, so whatever
+// a sensor has beyond that isn't backed up - also old readings that were downloaded after the backup.
+function noteBackup(counts) {
+  lsSet("lastBackup", { at: Date.now(), rows: Object.values(counts).reduce((a, n) => a + n, 0), counts });
+  lsSet("backupSnooze", 0); updateBackupBanner();
+}
+// Keeps the counts right when readings are deleted from the phone (-) or imported from a file, i.e. a copy exists (+).
+function adjustBackup(dev, n) {
+  const last = lsGet("lastBackup", null); if (!last) return;
+  if (last.counts) last.counts[dev] = Math.max(0, (last.counts[dev] || 0) + n);
+  else last.rows = Math.max(0, last.rows + n);  // backup noted before v117: only the total is known
+  lsSet("lastBackup", last);
+}
 function backupState() {
-  const last = lsGet("lastBackup", null), since = last ? last.at / 1000 : 0;
+  const last = lsGet("lastBackup", null);
   let total = 0, notBacked = 0;
-  for (const s of histCache.values()) { total += s.length; for (let i = s.length - 1; i >= 0 && s[i][0] > since; i--) notBacked++; }
+  for (const [d, s] of histCache) { total += s.length; notBacked += Math.max(0, s.length - (last && last.counts && last.counts[d] || 0)); }
+  if (last && !last.counts) notBacked = Math.max(0, total - last.rows);
   return { last, total, notBacked };
 }
 function updateBackupBanner() {
@@ -2461,7 +2489,8 @@ async function importFiles(files) {
     if (!dev) continue;
     dev = histId(dev);
     const rows = parseCsv(await f.text());
-    const total = await mergeInto(dev, rows);
+    const before = (await loadHistory(dev)).length, total = await mergeInto(dev, rows);
+    adjustBackup(dev, total - before);
     log(`Imported ${rows.length} rows from ${f.name} into ${dev} (${total} total).`);
     last = dev; imported += rows.length;
   }
@@ -3517,7 +3546,7 @@ function updateStatusBar() {
   $("btnForget").onclick = async () => {
     const d = $("histDev").value; if (!d) return;
     if (await ask(`${count((histCache.get(d) || []).length, "reading")} are deleted from this phone. The sensor itself is not affected.`,
-      { title: `Forget the readings of ${histLabel(d)}?`, ok: "Delete readings", danger: true })) { await deleteHistory(d); await refreshDeviceList(); toast("Readings deleted"); }
+      { title: `Forget the readings of ${histLabel(d)}?`, ok: "Delete readings", danger: true })) { await deleteHistory(d); adjustBackup(d, -(histCache.get(d) || []).length); await refreshDeviceList(); toast("Readings deleted"); }
   };
   $("chart").addEventListener("pointermove", onChartPointer);
   setupChartGestures();

@@ -218,6 +218,15 @@ test("chart resolution: closest one that fits the range", () => {
   assert.equal(core.closestPeriod(H, 120, 80, 0.9), 0);               // nothing fits a 2-minute view
 });
 
+test("readings lost during a download are noticed", () => {
+  assert.equal(core.missingRecords([]), 0);
+  assert.equal(core.missingRecords([1, 2, 3]), 0);
+  assert.equal(core.missingRecords([3, 2, 1, 0]), 0);       // any order, from 0 or 1
+  assert.equal(core.missingRecords([1, 2, 5]), 2);
+  assert.equal(core.missingRecords([2, 3]), 1);             // the newest one
+  assert.equal(core.missingRecords([1, 2, 2, 4]), 1);       // one arrived twice in place of another
+});
+
 test("small helpers", () => {
   assert.equal(core.fmtOffset(3600), "+01:00");
   assert.equal(core.fmtOffset(-16200), "-04:30");

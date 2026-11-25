@@ -393,11 +393,20 @@ function buildCandles(samples, period) {
 // clock set are both kept.
 const sampleKey = s => `${s[4] != null ? s[4] : s[0]}|${(+s[1]).toFixed(2)}|${(+s[2]).toFixed(2)}|${s[3]}`;
 
+// How many readings of a download never arrived. The firmware numbers them 1, 2, 3… without gaps
+// (1 = the newest), so any number not seen up to the highest one was lost on the way.
+function missingRecords(nums) {
+  const seen = new Set(nums);
+  let max = 0;
+  for (const n of seen) if (n > max) max = n;
+  return max + (seen.has(0) ? 1 : 0) - seen.size;
+}
+
 if (typeof module !== "undefined") module.exports = {
   CFG_NEW_LAYOUT_VER, fmtOffset, parseOffset, faceValue, macStr, toDataView, advEntries, parseAdv, le32,
   DRIFT_TOL, DRIFT_MAX_PER_DAY, driftCorrect, fmtDur, LOG_CAPACITY, logIntervalFromCfg, fmtDays,
   decodeCfg, FLG_BITS, FLG2_BITS, byteFromBits, encodeCfg, fmtNum, toCsv, parseCsv, histId,
-  timeTicks, utcOffsetMin, dstChanges, sampleKey, withAtcPrefix, labelFor, downloadLabel,
+  timeTicks, utcOffsetMin, dstChanges, sampleKey, missingRecords, withAtcPrefix, labelFor, downloadLabel,
   sliceWidth, averageSlices, clampWindow,
   PERIODS, WEEK, MONTH, periodLabel, periodStart, periodEnd, periodKey, choosePeriod, periodProblem, closestPeriod, buildCandles,
 };

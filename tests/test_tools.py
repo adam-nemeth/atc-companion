@@ -110,8 +110,9 @@ class SensorConfig(unittest.TestCase):
 class FakeSensor:
     """Stands in for bleak's BleakClient: answers the clock (0x23), history (0x35) and erase
     (0x36) commands like a sensor with `n` readings, and records what was sent."""
-    def __init__(self, n=50, finish=True):
+    def __init__(self, n=50, finish=True, lost=(), clock_fails=False):
         self.n, self.finish, self.sent, self.erased_with_files = n, finish, [], None
+        self.lost, self.clock_fails, self.clock_set = lost, clock_fails, False
         self.prefix_dir = None
 
     def __call__(self, address):  # used as BleakClient(address)
@@ -135,10 +136,14 @@ class FakeSensor:
         now = int(__import__("time").time())
         if data[0] == 0x23 and len(data) == 1:
             self.handler(None, bytearray(b"\x23" + now.to_bytes(4, "little")))
+        elif data[0] == 0x23:
+            if self.clock_fails:
+                raise OSError("simulated Bluetooth error")
+            self.clock_set = True
         elif data[0] == 0x35:
-            for i in range(self.n):
-                t = now - (self.n - i) * 600
-                self.handler(None, bytearray(b"\x35" + T.struct.pack("<HIhHH", self.n - 1 - i, t, 2150, 5000, 3000)))
+            for i in range(1, self.n + 1):  # like the firmware: numbered from 1, newest first
+                if i not in self.lost:
+                    self.handler(None, bytearray(b"\x35" + T.struct.pack("<HIhHH", i, now - i * 600, 2150, 5000, 3000)))
             if self.finish:
                 self.handler(None, bytearray(b"\x35"))  # short packet = end of transfer
         elif data[0] == 0x36:
@@ -158,36 +163,69 @@ class DownloadAndErase(unittest.TestCase):
             T.BleakClient, T._warm_up, T.CLOCK_LOG, T.log = sensor, no_warm_up, Path(d) / "clock_log.json", lambda *a: None
             try:
                 finished = T.asyncio.run(T.dump("A4:C1:38:A1:B2:C3", str(Path(d) / "Kitchen-ATC_A1B2C3"), count,
-                                                timeout, "en", "utc", erase, True, "source", ("all",), True))
+                                                timeout, "en", "utc", erase, "source", ("all",), True))
                 files = sorted(p.name for p in Path(d).glob("*.csv"))
             finally:
                 T.BleakClient, T._warm_up, T.CLOCK_LOG, T.log = saved
         return finished, files
 
-    def test_erases_by_default_after_the_file_is_saved(self):
+    def assert_left_alone(self, s):
+        self.assertFalse(s.clock_set)
+        self.assertNotIn(0x36, s.sent)
+
+    def test_sets_clock_and_erases_by_default_after_the_file_is_saved(self):
         s = FakeSensor()
-        finished, files = self.run_dump(s)
-        self.assertTrue(finished)
+        ok, files = self.run_dump(s)
+        self.assertTrue(ok)
+        self.assertTrue(s.clock_set)
         self.assertIn(0x36, s.sent)
         self.assertEqual(len(s.erased_with_files), 1, "download file must exist before erasing")
         self.assertIn("Kitchen-ATC_A1B2C3-all.csv", files)
 
     def test_keep_log(self):
         s = FakeSensor()
-        self.run_dump(s, erase=False)
-        self.assertNotIn(0x36, s.sent)
+        ok, _files = self.run_dump(s, erase=False)
+        self.assertTrue(ok)
+        self.assert_left_alone(s)
 
-    def test_partial_download_never_erases(self):
+    def test_partial_download_leaves_the_sensor_alone(self):
         s = FakeSensor()
         self.run_dump(s, count=500)
-        self.assertNotIn(0x36, s.sent)
+        self.assert_left_alone(s)
 
-    def test_incomplete_download_never_erases(self):
+    def test_incomplete_download_leaves_the_sensor_alone(self):
         s = FakeSensor(finish=False)
-        finished, files = self.run_dump(s, timeout=1)
-        self.assertFalse(finished)
-        self.assertNotIn(0x36, s.sent)
+        ok, files = self.run_dump(s, timeout=1)
+        self.assertFalse(ok)
+        self.assert_left_alone(s)
         self.assertTrue(any("-raw-" in f for f in files), "what arrived is still saved")
+
+    def test_lost_readings_leave_the_sensor_alone(self):
+        for lost in ((1,), (20, 21)):
+            s = FakeSensor(lost=lost)
+            ok, files = self.run_dump(s)
+            self.assertFalse(ok)
+            self.assert_left_alone(s)
+            self.assertTrue(any("-raw-" in f for f in files), "what arrived is still saved")
+
+    def test_empty_download_leaves_the_sensor_alone(self):
+        s = FakeSensor(n=0)
+        ok, files = self.run_dump(s)
+        self.assertTrue(ok)
+        self.assert_left_alone(s)
+        self.assertEqual([f for f in files if "-raw-" in f], [])
+
+    def test_nothing_is_erased_if_setting_the_clock_fails(self):
+        s = FakeSensor(clock_fails=True)
+        ok, _files = self.run_dump(s)
+        self.assertFalse(ok)
+        self.assert_left_alone(s)
+
+    def test_missing_records(self):
+        self.assertEqual(T.missing_records([]), 0)
+        self.assertEqual(T.missing_records([3, 2, 1]), 0)
+        self.assertEqual(T.missing_records([0, 1, 2]), 0)
+        self.assertEqual(T.missing_records([1, 2, 2, 5]), 2)
 
 
 class SensorList(unittest.TestCase):
