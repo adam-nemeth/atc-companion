@@ -402,11 +402,114 @@ function missingRecords(nums) {
   return max + (seen.has(0) ? 1 : 0) - seen.size;
 }
 
+// ===== Complete backup (one JSON file) =====
+const BACKUP_APP = "atc-companion", BACKUP_FORMAT = 1;
+// d: { version, created, sensors: { rooms, known, removed, selected }, settings, clockLog, readings }
+const makeBackup = d => JSON.stringify(Object.assign({ app: BACKUP_APP, format: BACKUP_FORMAT }, d));
+// Reads a backup file. Throws an Error with a message for the user if it isn't one. Only entries that look
+// right are kept, so a damaged or edited file can't leave something in the storage that breaks the app.
+function parseBackup(text) {
+  const isObj = o => !!o && typeof o === "object" && !Array.isArray(o), isNum = Number.isFinite;
+  const entries = o => isObj(o) ? Object.entries(o).filter(([k]) => k.length <= 80 && !["__proto__", "constructor", "prototype"].includes(k)) : [];
+  let d = null;
+  try { d = JSON.parse(text); } catch {}
+  if (!isObj(d) || d.app !== BACKUP_APP || !isNum(d.format) || !isObj(d.readings)) throw new Error("This isn't a backup of this app.");
+  if (d.format > BACKUP_FORMAT) throw new Error("This backup was made by a newer version of the app. Reload the page and try again.");
+  const out = { version: d.version, created: Date.parse(d.created) || 0, rooms: {}, known: {}, removed: [], selected: [], settings: {}, clockLog: {}, readings: {}, count: 0, skipped: 0 };
+  for (const [key, list] of entries(d.readings)) {
+    if (!Array.isArray(list)) continue;
+    const id = histId(key), keep = out.readings[id] = out.readings[id] || [];
+    for (const s of list) {
+      if (!Array.isArray(s) || !isNum(s[0]) || s[0] <= 0 || !isNum(s[1]) || !isNum(s[2])) { out.skipped++; continue; }
+      keep.push([s[0], s[1], s[2], isNum(s[3]) ? s[3] : 0, ...(isNum(s[4]) ? [s[4]] : [])]);
+    }
+    out.count += keep.length;
+  }
+  for (const id of Object.keys(out.readings)) if (!out.readings[id].length) delete out.readings[id];
+  const sensors = isObj(d.sensors) ? d.sensors : {}, isId = n => typeof n === "string" && /^ATC_[0-9A-F]{6}$/.test(n);
+  for (const [n, v] of entries(sensors.rooms)) if (isId(n) && typeof v === "string" && v.trim()) out.rooms[n] = v.trim().slice(0, 40);
+  for (const [n, v] of entries(sensors.known)) {
+    if (!isId(n) || !isObj(v)) continue;
+    const k = out.known[n] = {};  // not the browser's own ID of the sensor: it means nothing elsewhere
+    if (typeof v.mac === "string" && /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test(v.mac)) k.mac = v.mac;
+    if (typeof v.btName === "string" && v.btName) k.btName = v.btName.slice(0, 20);
+    if (isNum(v.t) && isNum(v.h)) { k.t = v.t; k.h = v.h; for (const f of ["b", "mv", "seen"]) if (isNum(v[f])) k[f] = v[f]; }
+    if (isObj(v.log) && isNum(v.log.at) && isNum(v.log.n) && v.log.P > 0) k.log = { at: v.log.at, n: v.log.n, P: v.log.P };
+    if (isObj(v.cfg)) try { encodeCfg(v.cfg); k.cfg = v.cfg; if (isNum(v.cfgRead)) k.cfgRead = v.cfgRead; } catch {}
+  }
+  for (const f of ["removed", "selected"]) if (Array.isArray(sensors[f])) out[f] = sensors[f].filter(isId);
+  const flat = v => v === null || ["string", "number", "boolean"].includes(typeof v);
+  for (const [k, v] of entries(d.settings))
+    if (flat(v) || (isObj(v) && Object.values(v).every(x => flat(x) || (isObj(x) && Object.values(x).every(flat))))) out.settings[k] = v;
+  for (const [n, v] of entries(d.clockLog)) if (isObj(v)) out.clockLog[n] = {
+    sets: (Array.isArray(v.sets) ? v.sets : []).filter(s => isObj(s) && isNum(s.before) && isNum(s.at)).map(s => ({ before: s.before, at: s.at })),
+    rate: isNum(v.rate) ? v.rate : null };
+  return out;
+}
+// Clock sets of both records in order of time; the drift rate of `a` (what's on this phone) goes first.
+function mergeClockLog(a, b) {
+  const sets = new Map([...(b.sets || []), ...(a.sets || [])].map(s => [s.at, s]));
+  return { sets: [...sets.values()].sort((x, y) => x.at - y.at).slice(-40), rate: a.rate != null ? a.rate : b.rate != null ? b.rate : null };
+}
+
+// ===== Battery =====
+// The sensors' CR2032 stays near 2.9-3.0 V for most of its life (after a quick drop in the first days) and
+// then falls faster and faster. So there's no estimate while it's on that plateau, and the time left is
+// counted to 2.5 V, well before the sensor stops.
+const BATT_PLATEAU = 2850, BATT_LOW = 2700, BATT_EMPTY = 2500;
+const median = a => { const s = a.slice().sort((x, y) => x - y); return s.length ? s[s.length >> 1] : NaN; };
+// samples: stored readings in order of time. Returns null without battery values, else { mv: median of the
+// last 24 h, at, change: mV over 30 days (null = too few days), days: left until empty (null = no
+// estimate), level: "ok" | "low" | "empty" }. Uses the medians of the last 30 days.
+function batteryState(samples) {
+  let i = samples.length - 1;
+  while (i >= 0 && !(samples[i][3] > 0)) i--;
+  if (i < 0) return null;
+  const at = samples[i][0], byDay = [];
+  for (; i >= 0 && at - samples[i][0] < 30 * 86400; i--) {
+    const day = Math.floor((at - samples[i][0]) / 86400);
+    if (samples[i][3] > 0) (byDay[day] = byDay[day] || []).push(samples[i][3]);
+  }
+  let days = []; byDay.forEach((v, day) => days.push([-day, median(v)]));  // newest first
+  const mv = days[0][1];
+  // A jump up = a new battery: only what came after it counts.
+  for (let k = 1; k < days.length; k++) if (days[k - 1][1] - days[k][1] > 120) { days = days.slice(0, k); break; }
+  // Median of the slopes between all pairs of days: not upset by single odd days.
+  const slopes = [];
+  if (days.length >= 7 && days[0][0] - days[days.length - 1][0] >= 10)
+    for (let a = 0; a < days.length; a++) for (let b = a + 1; b < days.length; b++) slopes.push((days[a][1] - days[b][1]) / (days[a][0] - days[b][0]));
+  const perDay = slopes.length ? median(slopes) : null;
+  const left = perDay != null && perDay < -0.5 && mv < BATT_PLATEAU ? Math.max(0, (mv - BATT_EMPTY) / -perDay) : null;
+  return { mv, at, change: perDay == null ? null : Math.round(perDay * 30), days: left,
+    level: mv <= BATT_EMPTY ? "empty" : mv <= BATT_LOW || (left != null && left <= 30) ? "low" : "ok" };
+}
+function batteryText(b) {
+  const left = b.level === "empty" || b.days == null ? "" : b.days < 14 ? `about ${count1(Math.max(1, Math.round(b.days)), "day")} left`
+    : b.days < 70 ? `about ${Math.round(b.days / 7)} weeks left` : b.days < 365 ? `about ${Math.round(b.days / 30)} months left` : "";
+  const trend = b.change == null ? "" : Math.abs(b.change) < 10 ? "steady" : `${b.change < 0 ? "down" : "up"} ${Math.abs(b.change)} mV in 30 days`;
+  return [`${(b.mv / 1000).toFixed(2)} V`, { ok: "good", low: "getting low", empty: "change it now" }[b.level], left, trend].filter(Boolean).join(" · ");
+}
+const count1 = (n, what) => `${n} ${what}${n === 1 ? "" : "s"}`;
+
+// Moves labels apart: the positions nearest to the wanted ones (ascending) that are at least `gap` apart and
+// inside lo…hi. Labels too close together are spread around their common middle.
+function spreadLabels(ys, gap, lo, hi) {
+  const blocks = [];  // [sum, n] of "position minus i × gap", which must never fall
+  ys.forEach((y, i) => {
+    blocks.push([y - i * gap, 1]);
+    for (let k = blocks.length - 1; k && blocks[k - 1][0] / blocks[k - 1][1] > blocks[k][0] / blocks[k][1]; k--) {
+      const [s, n] = blocks.pop(); blocks[k - 1][0] += s; blocks[k - 1][1] += n;
+    }
+  });
+  const top = Math.max(lo, hi - (ys.length - 1) * gap);
+  return blocks.flatMap(([s, n]) => Array(n).fill(s / n)).map((v, i) => Math.max(lo, Math.min(top, v)) + i * gap);
+}
+
 if (typeof module !== "undefined") module.exports = {
   CFG_NEW_LAYOUT_VER, fmtOffset, parseOffset, faceValue, macStr, toDataView, advEntries, parseAdv, le32,
   DRIFT_TOL, DRIFT_MAX_PER_DAY, driftCorrect, fmtDur, LOG_CAPACITY, logIntervalFromCfg, fmtDays,
   decodeCfg, FLG_BITS, FLG2_BITS, byteFromBits, encodeCfg, fmtNum, toCsv, parseCsv, histId,
-  timeTicks, utcOffsetMin, dstChanges, sampleKey, missingRecords, withAtcPrefix, labelFor, downloadLabel,
+  timeTicks, utcOffsetMin, dstChanges, sampleKey, missingRecords, makeBackup, parseBackup, mergeClockLog, batteryState, batteryText, spreadLabels, withAtcPrefix, labelFor, downloadLabel,
   sliceWidth, averageSlices, clampWindow,
   PERIODS, WEEK, MONTH, periodLabel, periodStart, periodEnd, periodKey, choosePeriod, periodProblem, closestPeriod, buildCandles,
 };

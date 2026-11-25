@@ -139,7 +139,7 @@ body:not(.comparing) #cmpChips, body.comparing .selwrap, body.comparing #styleSw
 body.chartfull { overflow: hidden; }
 body.chartfull #histCard { position: fixed; inset: 0; z-index: 50; margin: 0; border: 0; border-radius: 0; display: flex; flex-direction: column; overflow: hidden;
   padding: calc(10px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left)); }
-body.chartfull #histCard > :is(h2, .hist-extra, #avgNote, #stats, #zoomRow, #noData), body.chartfull #histCount { display: none !important; }
+body.chartfull #histCard > :is(h2, .hist-extra, #avgNote, #battNote, #battHelp, #stats, #zoomRow, #noData), body.chartfull #histCount { display: none !important; }
 body.chartfull #chartWrap { flex: 1 1 0; min-height: 120px; touch-action: none; }
 body.chartfull #chart { position: absolute; inset: 0; height: 100%; }
 @media (orientation: landscape) and (max-height: 500px) {
@@ -474,7 +474,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
     <h2>Stored readings</h2>
     <p class="muted hist-extra" style="margin-top:0"><span id="storageShort">Saved only on this phone.</span> <button class="linkbtn info" data-more="storageInfo">Where exactly?</button></p>
     <p class="muted hist-extra hidden" id="storageInfo"></p>
-    <p id="noData">No readings yet. Connect to a sensor on the Sensor tab and download from it, or import a CSV file here. <a href="?demo&amp;tab=history">See the demo</a>.</p>
+    <p id="noData">No readings yet. Connect to a sensor on the Sensor tab and download from it, import a CSV file here, or restore a backup in Settings. <a href="?demo&amp;tab=history">See the demo</a>.</p>
     <div class="row" id="selRow">
       <span class="selwrap"><span class="selshow" id="histDevShow" aria-hidden="true"></span><select id="histDev" aria-label="Sensor"><option value="">(no data yet)</option></select></span>
       <button class="seg" id="btnCompare" aria-pressed="false">Compare</button>
@@ -527,6 +527,8 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
     </div>
     <div id="readout" class="muted"></div>
     <div id="avgNote" class="muted hidden" style="font-size:12px;margin-top:2px"></div>
+    <p id="battNote" class="hidden" style="margin:8px 0 0"><span id="battText"></span> <button class="linkbtn info" data-more="battHelp">How?</button></p>
+    <p class="muted hidden" id="battHelp">From the stored readings of the last 30 days. The battery (CR2032) stays near 2.9–3.0 V for most of its life and then drops quickly, so the app warns from 2.7 V and estimates the time until 2.5 V only below 2.85 V. Cold lowers the voltage, too.</p>
     <div class="stats" id="stats"></div>
     <div class="hist-extra">
     <div class="row" style="margin-top:10px">
@@ -605,6 +607,13 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 
   <section class="card" data-tab="settings">
     <h2>Readings and backup</h2>
+    <p class="muted" style="margin-top:0">A backup is one file with all readings, sensors and settings. <button class="linkbtn info" data-more="backupHelp">More</button></p>
+    <p class="muted hidden" id="backupHelp">Keep it outside this phone, e.g. in iCloud Drive or in an email. “Restore” adds its readings and sensors to the ones already here, so nothing is deleted, and takes over its settings. Anyone who has the file can read it.</p>
+    <div class="row">
+      <button id="btnBackup" class="primary">Back up…</button>
+      <button id="btnRestore">Restore…</button>
+      <input type="file" id="fileBackup" accept=".json,application/json" class="hidden">
+    </div>
     <div class="row">
       <label>Backup reminder
         <select id="backupDays">
@@ -679,7 +688,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=117"></script>
+<script src="core.js?v=118"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -709,7 +718,7 @@ if (DEMO) {
 }
 // 45 days of readings every 10 minutes: daily temperature cycle, humidity moving the other way,
 // a slowly falling battery. Deterministic, so screenshots don't change from run to run.
-function demoHistory(seed, base, swing, hum) {
+function demoHistory(seed, base, swing, hum, mv = 2992, fall = 0.4) {
   const now = Math.floor(Date.now() / 1000 / 600) * 600, out = [];
   let r = seed;
   const rnd = () => (r = (r * 16807) % 2147483647) / 2147483647 - 0.5;
@@ -719,7 +728,7 @@ function demoHistory(seed, base, swing, hum) {
     drift += rnd() * 0.04; drift *= 0.995;
     const day = Math.sin((h - 9) / 24 * 2 * Math.PI), weather = Math.sin(t / 86400 / 6.3 * 2 * Math.PI);
     const temp = base + swing * day + 0.8 * weather + drift + rnd() * 0.06;
-    out.push([t, +temp.toFixed(2), +(hum - 1.6 * (temp - base) + 4 * weather + rnd() * 0.4).toFixed(2), Math.round(3010 - (now - t) / 86400 * 0.4 + rnd() * 4)]);
+    out.push([t, +temp.toFixed(2), +(hum - 1.6 * (temp - base) + 4 * weather + rnd() * 0.4).toFixed(2), Math.round(mv + (now - t) / 86400 * fall + rnd() * 4)]);
   }
   return out;
 }
@@ -787,7 +796,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 117;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 118;  // also bump core.js?v= in the <script> tag above
 const APP_DATE = "2026-11-25";  // release date of this version
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
@@ -1167,7 +1176,7 @@ function renderRooms() {
     tile.querySelector(".rt").textContent = `${k.t.toFixed(1)}°`;
     tile.querySelector(".rh").textContent = `${k.h.toFixed(0)} %`;
     const logW = logWarning(n);
-    tile.querySelector(".rm").textContent = [k.b != null ? `🔋${k.b}%` : "", k.seen ? (k.fromLog ? "downloaded, " : "") + ago(k.seen) : "", logW && (logW.level === "soon" || logW.level === "full") ? "⚠ log" : ""].filter(Boolean).join(" · ");
+    tile.querySelector(".rm").textContent = [k.b != null ? `🔋${k.b}%` : "", k.seen ? (k.fromLog ? "downloaded, " : "") + ago(k.seen) : "", logW && (logW.level === "soon" || logW.level === "full") ? "⚠ log" : "", (battery(n) || {}).level === "low" || (battery(n) || {}).level === "empty" ? "⚠ battery" : ""].filter(Boolean).join(" · ");
     tile.title = `${shownName(n)}${k.seen ? " - heard " + ago(k.seen) : ""}`;
     box.appendChild(tile);
   }
@@ -1272,7 +1281,7 @@ function renderKnown() {
   if (none) {
     box.innerHTML = `<ol class="steps"><li><b>Connect</b>: tap <span class="only-single">“Connect…”</span><span class="only-all">“Add sensors…”</span> and pick a sensor (its name starts with ATC_).</li>
       <li><b>Download</b> its readings. They are saved on this phone.</li><li><b>View</b> them as a chart on the Readings tab.</li></ol>
-      <p class="muted" style="margin:0 0 10px"><a href="?demo">Try the demo</a> with made-up sensors, or import a <code>sensors.json</code> in Settings.</p>`;
+      <p class="muted" style="margin:0 0 10px"><a href="?demo">Try the demo</a> with made-up sensors, or restore a backup in Settings.</p>`;
   }
   let ready = 0, ticked = 0;
   for (const name of orderedNames()) {
@@ -1285,7 +1294,7 @@ function renderKnown() {
     const row = document.createElement("div"); row.className = "ks kc" + (isCur ? " current" : "") + (open ? " open" : "");
     const toggle = () => { openKnown.has(name) ? openKnown.delete(name) : openKnown.add(name); renderKnown(); };
     const left = document.createElement("div"); left.className = "kl";
-    left.innerHTML = `<label class="nm"><input type="checkbox"> <span></span></label><button class="sub" type="button"><span class="st"></span><span class="lg2"></span><span class="chev" aria-hidden="true"></span></button>`;
+    left.innerHTML = `<label class="nm"><input type="checkbox"> <span></span></label><button class="sub" type="button"><span class="st"></span><span class="lg2"></span><span class="bt"></span><span class="chev" aria-hidden="true"></span></button>`;
     const cb = left.querySelector("input"); cb.checked = isTicked(name); cb.disabled = !dev;
     cb.onchange = () => { cb.checked ? batchSel.add(name) : batchSel.delete(name); saveSel(); renderKnown(); };
     // The name ticks the sensor on the Batch tab; on the Sensor tab (no tick box) it opens the details.
@@ -1304,9 +1313,11 @@ function renderKnown() {
     if (dev) st.classList.add("ok");
     const lg2 = left.querySelector(".lg2");
     lg2.className = "lg2 " + lw.level; lg2.textContent = lw.short ? " · " + lw.short : "";
+    const bt = battery(name), bt2 = left.querySelector(".bt");
+    if (bt && bt.level !== "ok") { bt2.className = "bt lg2 " + BATT_CLASS[bt.level]; bt2.textContent = bt.level === "empty" ? " · ⚠ battery empty" : " · ⚠ battery low"; }
     const subBtn = left.querySelector(".sub");
     left.querySelector(".chev").textContent = open ? "▾" : "▸";
-    subBtn.setAttribute("aria-expanded", String(open)); subBtn.setAttribute("aria-label", `${st.textContent}${lg2.textContent} - ${open ? "hide" : "show"} details of ${shownName(name)}`);
+    subBtn.setAttribute("aria-expanded", String(open)); subBtn.setAttribute("aria-label", `${st.textContent}${lg2.textContent}${bt2.textContent} - ${open ? "hide" : "show"} details of ${shownName(name)}`);
     subBtn.onclick = toggle;
     const btn = document.createElement("button"); btn.className = "go";
     btn.textContent = connecting && connecting.dev === dev && dev ? "Connecting…" : isCur ? "Connected" : chr ? "Switch" : "Connect";
@@ -1351,6 +1362,7 @@ function renderKnown() {
       add("MAC", k.mac || macFromName(name) || "?");
       if (k.t != null) add("Last heard", `${k.t.toFixed(2)} °C · ${k.h.toFixed(1)} %${k.b != null ? ` · 🔋${k.b}%` : ""}${k.seen ? ` · ${ago(k.seen)}` : ""}`);
       add("Log", lw.text.replace(/^Log /, "").replace(/(?: ·|:) full in /, "\nfull in "), "loglvl " + lw.level);  // "full in …" on its own line
+      if (bt) add("Battery", `${batteryText(bt)}${Date.now() / 1000 - bt.at > 3 * 86400 ? ` (${ago(bt.at * 1000)})` : ""}`, "loglvl " + BATT_CLASS[bt.level]);
       more.append(dl);
       // What to do about it ("Looking…" is already in the status line above).
       if (!dev && !(rem && rem._waking)) {
@@ -2235,7 +2247,7 @@ async function updateStorageInfo() {
     }
     if (navigator.storage && navigator.storage.persisted) {
       const p = await navigator.storage.persisted();
-      txt += p ? " Marked persistent." : " Not marked persistent: clearing Bluefy's website data, deleting Bluefy, or iOS clean-up can erase it - use “Share all sensors” now and then as a backup.";
+      txt += p ? " Marked persistent." : " Not marked persistent: clearing Bluefy's website data, deleting Bluefy, or iOS clean-up can erase it - make a backup now and then (in Settings).";
     }
   } catch (e) { dbg(`storage info error: ${describeErr(e)}`); }
   $("storageInfo").textContent = txt;
@@ -2282,6 +2294,22 @@ function logWarning(name) {
   if (daysLeft <= 0) return { level: "full", short: "⚠ log full", text: `Log full since ~${when}: the oldest readings are being overwritten - download now` };
   if (daysLeft <= 7) return { level: "soon", short: `⚠ log full in ${fmtDays(daysLeft)}`, text: `Log ${pct}% full: full in ${fmtDays(daysLeft)} (~${when}), then the oldest readings are overwritten - download soon` };
   return { level: "ok", short: `log ${pct}%, ${fmtDays(daysLeft)} left`, text: `Log ${pct}% full (${fmtDays(est * P / 86400)} of ~${fmtDays(capDays)}) · full in ${fmtDays(daysLeft)} (~${when})` };
+}
+
+// ===== Battery (batteryState() in core.js), from the stored readings =====
+const battCache = new WeakMap();  // readings array -> state (a new array is loaded whenever they change)
+function battery(name) {
+  const arr = histCache.get(histId(name)); if (!arr || !arr.length) return null;
+  if (!battCache.has(arr)) battCache.set(arr, batteryState(arr));
+  return battCache.get(arr);
+}
+const BATT_CLASS = { ok: "ok", low: "soon", empty: "full" };
+function syncBattNote() {
+  const b = prefs.showB && !compareOn() ? battery($("histDev").value) : null;
+  $("battNote").classList.toggle("hidden", !b);
+  if (!b) { if (!$("battHelp").classList.contains("hidden")) document.querySelector("[data-more=battHelp]").click(); return; }
+  $("battText").textContent = `Battery: ${batteryText(b)}`;
+  $("battText").className = { ok: "", low: "status warn", empty: "status err" }[b.level];
 }
 
 // Plain-language label and explanation per setting. Explanations may be functions of the whole config,
@@ -2387,7 +2415,7 @@ function shareFiles(items, subject, onDone) {
   // A download gives no sign of success, so ask instead of assuming it worked.
   const download = async () => {
     downloadFiles(items);
-    if (onDone && await ask("Check that the files are there, e.g. in Files or Downloads.", { title: "Were the backup files saved?", ok: "Yes, saved", cancel: "No" })) onDone();
+    if (onDone && await ask(`Check that ${items.length === 1 ? "it is" : "they are"} there, e.g. in Files or Downloads.`, { title: items.length === 1 ? "Was the backup file saved?" : "Were the backup files saved?", ok: "Yes, saved", cancel: "No" })) onDone();
   };
   const failed = e => {
     dbg(`Share result: ${errDetail(e)}`);
@@ -2400,7 +2428,7 @@ function shareFiles(items, subject, onDone) {
   dbg(`Share "${subject}": ${items.map(it => `${it.name} ${it.rows} rows ${it.text.length} B`).join("; ")}; canShare(files)=${canFiles}, share=${!!navigator.share}`);
   if (canFiles) {
     navigator.share({ files, title: subject, text: body }).then(done, failed);
-  } else if (navigator.share && items.length === 1) {
+  } else if (navigator.share && items.length === 1 && !items[0].fileOnly) {
     // Browser can't attach files: share the CSV as text instead (still works for Mail/Notes).
     navigator.share({ title: items[0].name, text: items[0].text }).then(done, failed);
   } else {
@@ -2441,7 +2469,7 @@ function shareAllDevices() {
 }
 // ===== Backup reminder =====
 // The history exists only in this browser's storage on this phone, and iOS may clear it (Bluefy
-// isn't granted persistent storage). A backup = "Share all sensors" to Files / iCloud Drive / mail.
+// isn't granted persistent storage). "Back up" and "Share all sensors" (CSV) both count for the reminder.
 // counts: how many readings of each sensor the backup holds. Stored readings only ever grow, so whatever
 // a sensor has beyond that isn't backed up - also old readings that were downloaded after the backup.
 function noteBackup(counts) {
@@ -2462,6 +2490,54 @@ function backupState() {
   if (last && !last.counts) notBacked = Math.max(0, total - last.rows);
   return { last, total, notBacked };
 }
+// Everything the app keeps, in one file (no debug log). Synchronous, see shareFiles().
+function shareBackup() {
+  const readings = {}, counts = {}; let rows = 0;
+  for (const [d, s] of histCache) if (s.length) { readings[d] = s; counts[d] = s.length; rows += s.length; }
+  if (!rows && !knownNames().length) { toast("Nothing to back up yet", "warn"); return; }
+  const text = makeBackup({ version: APP_VERSION, created: new Date().toISOString(),
+    sensors: { rooms, known, removed: [...removedSensors], selected: [...batchSel] }, settings: prefs, clockLog: lsGet("clockLog", {}), readings });
+  shareFiles([{ name: `ATC-Companion-backup-${stamp()}.json`, rows, text, type: "application/json", fileOnly: true }],
+    `ATC Companion backup: ${count(Object.keys(readings).length, "sensor")}, ${count(rows, "reading")}`, () => noteBackup(counts));
+}
+// Adds a backup to what's here: nothing is deleted, and what this phone knows about a sensor goes first.
+async function restoreBackup(file) {
+  if (busy) { toast("Wait until the sensor is done", "warn"); return; }
+  let b;
+  try { b = parseBackup(await file.text()); } catch (e) { tell(e.message, "Can't restore this file"); return; }
+  const when = b.created ? new Date(b.created).toLocaleString(LOCALE, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "Date unknown";
+  const ids = Object.keys(b.readings), sensors = new Set([...Object.keys(b.known), ...Object.keys(b.rooms), ...ids]).size;
+  if (!await ask(`${when} · ${count(sensors, "sensor")} · ${count(b.count, "reading")}\n\nReadings and sensors are added to those already here, and the settings are replaced. The app then reloads.`,
+    { title: "Restore this backup?", ok: "Restore" })) return;
+  if (busy) { toast("Wait until the sensor is done", "warn"); return; }
+  await withBusy(async () => {
+    let added = 0;
+    const last = lsGet("lastBackup", null), counts = Object.assign({}, last && last.counts);
+    for (const id of ids) {
+      const before = (await loadHistory(id)).length, total = await mergeInto(id, b.readings[id]);
+      if ((await loadHistory(id)).length < total) throw new Error("the readings couldn't be saved on this phone");
+      added += total - before;
+      counts[id] = Math.max(counts[id] || 0, b.readings[id].length);
+    }
+    // These readings exist in the backup file, too.
+    if (ids.length && (b.created || last)) lsSet("lastBackup", { at: Math.max(b.created, last ? last.at : 0), rows: Object.values(counts).reduce((a, n) => a + n, 0), counts });
+    for (const n of new Set([...Object.keys(b.known), ...Object.keys(b.rooms)])) {
+      if (removedSensors.has(n)) continue;
+      if (!knownNames().includes(n) && b.selected.includes(n)) batchSel.add(n);
+      known[n] = Object.assign({}, b.known[n], known[n]);
+      if (!(rooms[n] || "").trim() && b.rooms[n]) rooms[n] = b.rooms[n];
+    }
+    for (const n of b.removed) if (!knownNames().includes(n)) removedSensors.add(n);
+    const clocks = lsGet("clockLog", {});
+    for (const [n, v] of Object.entries(b.clockLog)) clocks[n] = mergeClockLog(clocks[n] || {}, v);
+    lsSet("clockLog", clocks); lsSet("rooms", rooms); saveKnown(); saveSel(); saveRemoved();
+    Object.assign(prefs, b.settings); savePrefs();
+    log(`Restored ${file.name} (${when}): ${added} readings added, ${b.skipped} skipped, ${sensors} sensors`);
+    flushLog(true);
+    await tell(`${count(added, "reading")} added${b.count > added ? `, ${(b.count - added).toLocaleString(LOCALE)} were already here` : ""}.${b.skipped ? ` ${count(b.skipped, "damaged reading")} left out.` : ""}`, "Backup restored");
+    if (DEMO) await refreshDeviceList(); else location.reload();
+  });
+}
 function updateBackupBanner() {
   const days = prefs.backupDays == null ? 7 : +prefs.backupDays, { last, total, notBacked } = backupState();
   const age = last ? (Date.now() - last.at) / 86400000 : Infinity;
@@ -2470,7 +2546,7 @@ function updateBackupBanner() {
   const due = days > 0 && notBacked > 0 && age >= days && Date.now() > (lsGet("backupSnooze", 0) || 0);
   $("backupBanner").classList.toggle("hidden", !due);
   if (due) $("backupText").innerHTML = `<b>${last ? `Last backup ${ago(last.at)}` : "No backup yet"}</b> · ${notBacked.toLocaleString(LOCALE)} reading${notBacked === 1 ? "" : "s"} exist only on this phone. ` +
-    `Save a copy (e.g. to Files or iCloud Drive) in case iOS clears the browser's storage.`;
+    `Save a backup (e.g. to Files or iCloud Drive) in case iOS clears the browser's storage.`;
 }
 function shareRaw() {
   if (!lastRaw) return;
@@ -2763,7 +2839,7 @@ function drawTimeAxis({ el, col, x, L, T, pw, ph, t0, t1, span }) {
   }
 }
 function drawChart() {
-  syncStepButtons(); syncScaleToggle();
+  syncStepButtons(); syncScaleToggle(); syncBattNote();
   const svg = $("chart"); const W = svg.clientWidth || 600, H = Math.max(120, svg.clientHeight || 276);
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.innerHTML = "";
   const css = getComputedStyle(document.documentElement);
@@ -3121,7 +3197,7 @@ function drawCompare(svg, W, H, col, dom) {
   const cursor = el("line", { x1: 0, x2: 0, y1: T, y2: T + ph, stroke: col("--muted"), "stroke-dasharray": "3 3", visibility: "hidden" });
   const markerLayer = el("g", {});
   const times = []; for (const s of series) for (const p of s.pts) if (p[0] >= t0 && p[0] <= t1) times.push(p[0]);
-  plotted = { compare: series, pts: times.map(t => [t]), x, y, cursor, L, pw, T, ph, showT: m === "t", showH: m === "h", markerLayer, colBg: col("--card"), unit, dec,
+  plotted = { compare: series, pts: times.map(t => [t]), x, y, cursor, L, pw, T, ph, showT: m === "t", showH: m === "h", markerLayer, colBg: col("--card"), colText: col("--text"), unit, dec,
     dataRange: { t: dataRange, h: dataRange } };
   const tooMuch = wanted && period !== wanted ? `${periodLabel(wanted)} doesn't fit this range, so ${period ? `it's ${periodLabel(period)} here` : "the resolution is automatic here"}. ` : "";
   note.textContent = tooMuch + (anyAvg ? `Each point is an average of ${period ? periodLabel(period) : fmtDuration(slice)}.` : "");
@@ -3144,16 +3220,17 @@ function showCompareAt(px) {
   P.cursor.setAttribute("x1", P.x(t)); P.cursor.setAttribute("x2", P.x(t)); P.cursor.setAttribute("visibility", "visible");
   P.markerLayer.innerHTML = "";
   const when = document.createElement("span"); when.className = "rv"; when.textContent = localStrZ(t);
-  const out = [when];
+  const out = [when], tags = [];
   for (const s of P.compare) {
     if (!s.pts.length) continue;
     let k = Math.min(s.pts.length - 1, lowerIn(s.pts, t)); if (k && Math.abs(s.pts[k - 1][0] - t) < Math.abs(s.pts[k][0] - t)) k--;
     const p = s.pts[k]; if (Math.abs(p[0] - t) > s.gap) continue;  // no reading near this time
-    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    for (const [a, v] of [["cx", P.x(p[0])], ["cy", P.y(p[1])], ["r", 4], ["fill", s.color], ["stroke", P.colBg], ["stroke-width", 2], ["clip-path", "url(#plotClip)"]]) c.setAttribute(a, v);
-    P.markerLayer.append(c);
+    const yy = P.y(p[1]);  // (a fixed scale can leave a line outside the plot: no tag there)
+    if (yy >= P.T - 2 && yy <= P.T + P.ph + 2) tags.push({ y: yy, cx: P.x(p[0]), text: P.unit === "°C" ? `${p[1].toFixed(1)}°` : P.unit === "%" ? `${p[1].toFixed(0)}%` : `${p[1].toFixed(2)} V`,
+      color: s.color, ink: P.colText, dash: s.slot >= 4 ? "3 2" : null });
     const v = document.createElement("span"); v.className = "rv"; v.append(lineSample(s.slot), `${histLabel(s.id)} ${p[1].toFixed(P.dec)} ${P.unit}`); out.push(v);
   }
+  drawTags(P.x(t), tags);
   $("readout").replaceChildren(...out);
 }
 
@@ -3222,22 +3299,27 @@ function showReadoutAt(clientX) {
 function drawMarkerLabels(cx, tVal, hVal) {
   const P = plotted, g = P.markerLayer; if (!g) return;
   g.innerHTML = "";
-  const ns = "http://www.w3.org/2000/svg";
-  const mk = (tag, attrs, text) => { const e = document.createElementNS(ns, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; g.appendChild(e); return e; };
   const tags = [];
   if (P.showT) tags.push({ y: P.yT(tVal), text: `${tVal.toFixed(1)}°`, color: P.colT });
   if (P.showH) tags.push({ y: P.yH(hVal), text: P.unitH === "V" ? `${hVal.toFixed(2)} V` : `${hVal.toFixed(0)}%`, color: P.colH });
-  // Keep tags at least 18 px apart vertically and inside the plot.
+  drawTags(cx, tags);
+}
+// tags: [{ y, text, color, cx?: the dot's own x, dash?: for the second sensor of a colour, ink?: text colour }].
+function drawTags(cx, tags) {
+  const P = plotted, g = P.markerLayer, ns = "http://www.w3.org/2000/svg";
+  const mk = (tag, attrs, text) => { const e = document.createElementNS(ns, tag); for (const k in attrs) if (attrs[k] != null) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; g.appendChild(e); return e; };
+  // Tags stay at least 18 px apart (a little less if they don't fit) and inside the plot.
   tags.sort((a, b) => a.y - b.y);
-  tags.forEach(t => t.ty = Math.max(P.T + 8, Math.min(P.T + P.ph - 8, t.y)));
-  if (tags.length === 2 && tags[1].ty - tags[0].ty < 18) { const m = (tags[0].ty + tags[1].ty) / 2; tags[0].ty = m - 9; tags[1].ty = m + 9; }
-  const left = cx > P.L + P.pw - 52;
-  for (const t of tags) {
-    mk("circle", { cx, cy: t.y, r: 3.5, fill: t.color, stroke: P.colBg, "stroke-width": 1.5 });
+  const ty = spreadLabels(tags.map(t => t.y), Math.min(18, (P.ph - 16) / Math.max(1, tags.length - 1)), P.T + 8, P.T + P.ph - 8);
+  const widest = Math.max(...tags.map(t => t.text.length * 6.6 + 8)), left = cx + 7 + widest > P.L + P.pw + 6;
+  // A tag that had to move away from its dot is joined to it by a thin line.
+  tags.forEach((t, i) => { if (Math.abs(ty[i] - t.y) > 9) mk("line", { x1: cx, y1: t.y, x2: left ? cx - 7 : cx + 7, y2: ty[i], stroke: t.color, "stroke-width": 1 }); });
+  for (const t of tags) mk("circle", { cx: t.cx == null ? cx : t.cx, cy: t.y, r: 3.5, fill: t.color, stroke: P.colBg, "stroke-width": 1.5 });
+  tags.forEach((t, i) => {
     const w = t.text.length * 6.6 + 8, bx = left ? cx - 7 - w : cx + 7;
-    mk("rect", { x: bx, y: t.ty - 8, width: w, height: 16, rx: 4, fill: P.colBg, stroke: t.color, "stroke-width": 1 });
-    mk("text", { x: bx + w / 2, y: t.ty + 4, "text-anchor": "middle", "font-size": 11, "font-weight": 700, fill: t.color }, t.text);
-  }
+    mk("rect", { x: bx, y: ty[i] - 8, width: w, height: 16, rx: 4, fill: P.colBg, stroke: t.color, "stroke-width": t.ink ? 1.5 : 1, "stroke-dasharray": t.dash });
+    mk("text", { x: bx + w / 2, y: ty[i] + 4, "text-anchor": "middle", "font-size": 11, "font-weight": 700, fill: t.ink || t.color }, t.text);
+  });
 }
 function fmtDuration(sec) {
   if (sec < 90 * 60) return `${Math.max(1, Math.round(sec / 60))} min`;
@@ -3430,7 +3512,9 @@ function updateStatusBar() {
   $("backupDays").value = String(prefs.backupDays == null ? 7 : prefs.backupDays);
   $("backupDays").onchange = e => { prefs.backupDays = +e.target.value; savePrefs(); updateBackupBanner(); };
   // Straight from the tap: iOS only opens the share sheet then.
-  $("btnBackupNow").onclick = shareAllDevices;
+  $("btnBackupNow").onclick = $("btnBackup").onclick = shareBackup;
+  $("btnRestore").onclick = () => $("fileBackup").click();
+  $("fileBackup").onchange = async e => { const f = e.target.files[0]; if (f) await restoreBackup(f); e.target.value = ""; };
   $("btnBackupLater").onclick = () => { lsSet("backupSnooze", Date.now() + 3 * 86400000); updateBackupBanner(); };
   $("idleTimeout").onchange = e => { prefs.idleTimeout = Math.max(5, parseInt(e.target.value) || 30); savePrefs(); };
   // Remembered; on by default (set clock + erase keeps every stretch of the sensor's log starting at a
@@ -3580,7 +3664,7 @@ function updateStatusBar() {
   if (DEMO) {
     // History only in memory; the real stored history isn't opened at all.
     memDB.set("ATC_A1B2C3", demoHistory(11, 22.5, 1.4, 52));
-    memDB.set("ATC_D4E5F6", demoHistory(23, 19.5, 0.9, 58));
+    memDB.set("ATC_D4E5F6", demoHistory(23, 19.5, 0.9, 58, 2680, 4));
     memDB.set("ATC_0F1E2D", demoHistory(37, 21.5, 1.1, 49));
     $("demoBanner").classList.remove("hidden");
   } else {

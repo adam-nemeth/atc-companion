@@ -22,7 +22,7 @@ This only works thanks to [**pvvx/ATC_MiThermometer**](https://github.com/pvvx/A
 4. **Readings** tab: chart (pinch to zoom, drag to move, tap for values, turn the phone sideways for full screen), min/max/average, *Compare* for several sensors in one chart, and *Share* to export CSV.
 5. **Batch** tab: the same for all your sensors in one go, with a retry for those that failed.
 
-Your data stays on your phone. Nothing is sent anywhere. The app reminds you to save a backup copy (to Files, iCloud Drive, mail…) now and then.
+Your data stays on your phone. Nothing is sent anywhere. The app reminds you to save a backup (to Files, iCloud Drive, mail…) now and then: one file with all readings, sensors and settings, which you can restore on another phone. It also warns when a sensor's log fills up or its battery gets low.
 
 ## On a computer
 

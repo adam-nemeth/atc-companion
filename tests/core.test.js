@@ -227,6 +227,69 @@ test("readings lost during a download are noticed", () => {
   assert.equal(core.missingRecords([1, 2, 2, 4]), 1);       // one arrived twice in place of another
 });
 
+test("backup: what's saved comes back, damaged parts are left out", () => {
+  const cfg = core.decodeCfg([0x55, 88, 133, 16, 10, 6, 40, 4, 169, 49, 49, 0, 60]);
+  const d = { version: 118, created: "2026-11-25T10:00:00.000Z",
+    sensors: { rooms: { ATC_A1B2C3: "Kitchen" }, known: { ATC_A1B2C3: { id: "browser-id", mac: "A4:C1:38:A1:B2:C3", cfg, log: { at: 5, n: 2, P: 600 } } }, removed: ["ATC_000001"], selected: ["ATC_A1B2C3"] },
+    settings: { timeMode: "utc", showB: false, cmp: { on: true, m: "t", sel: { ATC_A1B2C3: 0 } } },
+    clockLog: { ATC_A1B2C3: { sets: [{ before: 10, at: 8 }], rate: 0.0001 } },
+    readings: { ATC_A1B2C3: [[1790000000, 21.5, 55, 2990], [1790000600, 21.6, 55, 2990, 1790000610]] } };
+  const b = core.parseBackup(core.makeBackup(d));
+  assert.deepEqual(b.readings, d.readings);
+  assert.equal(b.count, 2); assert.equal(b.skipped, 0);
+  assert.deepEqual(b.rooms, d.sensors.rooms);
+  assert.deepEqual(b.known.ATC_A1B2C3, { mac: "A4:C1:38:A1:B2:C3", log: { at: 5, n: 2, P: 600 }, cfg: JSON.parse(JSON.stringify(cfg)) });
+  assert.deepEqual(b.settings, d.settings);
+  assert.deepEqual(b.clockLog, d.clockLog);
+  assert.deepEqual([b.removed, b.selected], [["ATC_000001"], ["ATC_A1B2C3"]]);
+  // Damaged: only the good parts are kept.
+  const bad = core.parseBackup(JSON.stringify({ app: "atc-companion", format: 1, readings: { ATC_A1B2C3: [[1790000000, 21.5, 55, null], "x", [1, null, 2, 3]], ATC_D4E5F6: "x" },
+    sensors: { rooms: { x: "y", ATC_A1B2C3: 5 }, known: { ATC_A1B2C3: { mac: "?", cfg: {}, log: { n: "a" } } } }, settings: { deep: { a: { b: { c: 1 } } } }, clockLog: { ATC_A1B2C3: { sets: "x" } } }));
+  assert.deepEqual(bad.readings, { ATC_A1B2C3: [[1790000000, 21.5, 55, 0]] });
+  assert.equal(bad.skipped, 2);
+  assert.deepEqual([bad.rooms, bad.known, bad.settings], [{}, { ATC_A1B2C3: {} }, {}]);
+  for (const text of ["", "no json", "[]", "{}", '{"app":"other","format":1,"readings":{}}']) assert.throws(() => core.parseBackup(text), /isn't a backup/);
+  assert.throws(() => core.parseBackup('{"app":"atc-companion","format":99,"readings":{}}'), /newer version/);
+});
+
+test("backup: clock records are joined", () => {
+  const m = core.mergeClockLog({ sets: [{ before: 31, at: 30 }], rate: null }, { sets: [{ before: 11, at: 10 }, { before: 99, at: 30 }], rate: 0.5 });
+  assert.deepEqual(m, { sets: [{ before: 11, at: 10 }, { before: 31, at: 30 }], rate: 0.5 });
+  assert.equal(core.mergeClockLog({ rate: 1 }, { rate: 2 }).rate, 1);
+});
+
+test("battery: level, trend and time left", () => {
+  const T0 = 1790000000, make = (days, f) => { const a = []; for (let i = 0; i < days * 24; i++) a.push([T0 + i * 3600, 20, 50, Math.round(f(i / 24))]); return a; };
+  assert.equal(core.batteryState([]), null);
+  assert.equal(core.batteryState([[T0, 20, 50, 0]]), null);
+  // Plateau: good, however the line would go on.
+  let b = core.batteryState(make(60, d => 2990 - d * 0.5));
+  assert.equal(b.level, "ok"); assert.equal(b.days, null); assert.ok(Math.abs(b.change + 15) <= 2);
+  // A new battery drops quickly in the first days: no false alarm.
+  b = core.batteryState(make(15, d => 3170 - d * 14));
+  assert.equal(b.level, "ok"); assert.equal(b.days, null);
+  // Falling: 5 mV a day from 2.75 V is 50 days to 2.5 V.
+  b = core.batteryState(make(40, d => 2950 - d * 5));
+  assert.ok(Math.abs(b.days - 50) < 3, String(b.days)); assert.equal(b.level, "ok");
+  assert.match(core.batteryText(b), /^2\.75 V · good · about 7 weeks left · down 15\d mV in 30 days$/);
+  // Falling fast: less than 30 days left.
+  assert.equal(core.batteryState(make(30, d => 3000 - d * 9)).level, "low");
+  assert.equal(core.batteryState(make(3, () => 2690)).level, "low");
+  assert.equal(core.batteryState(make(3, () => 2480)).level, "empty");
+  // A new battery in the meantime: the old one's fall is forgotten.
+  b = core.batteryState(make(30, d => d < 22 ? 2800 - d * 10 : 3000));
+  assert.equal(b.level, "ok"); assert.equal(b.mv, 3000); assert.equal(b.change, null);
+});
+
+test("chart labels are moved apart and kept inside", () => {
+  assert.deepEqual(core.spreadLabels([10, 100], 18, 0, 200), [10, 100]);
+  assert.deepEqual(core.spreadLabels([100, 100], 18, 0, 200), [91, 109]);
+  assert.deepEqual(core.spreadLabels([100, 101, 102], 18, 0, 200), [83, 101, 119]);
+  assert.deepEqual(core.spreadLabels([199, 200], 18, 0, 200), [182, 200]);
+  assert.deepEqual(core.spreadLabels([0, 1], 18, 0, 200), [0, 18]);
+  assert.deepEqual(core.spreadLabels([], 18, 0, 200), []);
+});
+
 test("small helpers", () => {
   assert.equal(core.fmtOffset(3600), "+01:00");
   assert.equal(core.fmtOffset(-16200), "-04:30");
