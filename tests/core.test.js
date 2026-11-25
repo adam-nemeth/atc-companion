@@ -290,6 +290,22 @@ test("chart labels are moved apart and kept inside", () => {
   assert.deepEqual(core.spreadLabels([], 18, 0, 200), []);
 });
 
+test("ZIP: written and read back", () => {
+  const zlib = require("node:zlib"), enc = new TextEncoder();
+  assert.equal(core.crc32(enc.encode("123456789")), 0xCBF43926);
+  const long = enc.encode("2026-11-25 10:00:00,+00:00,21.50,55.00,2990,\r\n".repeat(500));
+  const zip = core.makeZip([{ name: "Kitchen-ATC_A1B2C3-all.csv", data: enc.encode("a,b\r\n") }, { name: "x.csv", data: long, packed: new Uint8Array(zlib.deflateRawSync(long)) }, { name: "empty.csv", data: new Uint8Array(0) }]);
+  const [a, b, c] = core.readZip(zip);
+  assert.deepEqual([a.name, a.method, Buffer.from(a.body).toString(), a.size], ["Kitchen-ATC_A1B2C3-all.csv", 0, "a,b\r\n", 5]);
+  assert.equal(b.method, 8);
+  assert.deepEqual(new Uint8Array(zlib.inflateRawSync(b.body)), long);
+  assert.equal(b.crc, core.crc32(long));
+  assert.equal(c.size, 0);
+  assert.deepEqual(core.readZip(core.makeZip([])), []);
+  assert.throws(() => core.readZip(enc.encode("not a zip file at all, really not")), /ZIP/);
+  assert.throws(() => core.readZip(zip.slice(0, zip.length - 30)), /ZIP/);
+});
+
 test("small helpers", () => {
   assert.equal(core.fmtOffset(3600), "+01:00");
   assert.equal(core.fmtOffset(-16200), "-04:30");

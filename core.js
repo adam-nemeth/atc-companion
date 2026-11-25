@@ -491,6 +491,56 @@ function batteryText(b) {
 }
 const count1 = (n, what) => `${n} ${what}${n === 1 ? "" : "s"}`;
 
+// ===== ZIP files (for exporting several CSV files as one) =====
+let crcTable = null;
+function crc32(bytes) {
+  if (!crcTable) crcTable = Uint32Array.from({ length: 256 }, (_, n) => { for (let k = 0; k < 8; k++) n = n & 1 ? 0xEDB88320 ^ (n >>> 1) : n >>> 1; return n >>> 0; });
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = crcTable[(c ^ bytes[i]) & 255] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+// entries: [{ name, data: Uint8Array, packed?: the same data compressed with raw deflate, crc? }].
+function makeZip(entries, date = new Date()) {
+  const enc = new TextEncoder(), parts = [], central = [];
+  const time = date.getHours() << 11 | date.getMinutes() << 5 | date.getSeconds() >> 1;
+  const day = Math.max(0, date.getFullYear() - 1980) << 9 | (date.getMonth() + 1) << 5 | date.getDate();
+  const le = (...fields) => { const out = []; for (const [v, n] of fields) for (let i = 0; i < n; i++) out.push(Math.floor(v / 2 ** (8 * i)) & 255); return Uint8Array.from(out); };
+  let pos = 0;
+  for (const e of entries) {
+    const name = enc.encode(e.name), body = e.packed || e.data;
+    // version needed, flags (UTF-8 names), method, time, date, CRC, packed size, size, name length, extra length
+    const info = [[20, 2], [0x800, 2], [e.packed ? 8 : 0, 2], [time, 2], [day, 2], [e.crc != null ? e.crc : crc32(e.data), 4], [body.length, 4], [e.data.length, 4], [name.length, 2], [0, 2]];
+    const head = le([0x04034b50, 4], ...info);
+    central.push(le([0x02014b50, 4], [20, 2], ...info, [0, 2], [0, 2], [0, 2], [0, 4], [pos, 4]), name);
+    parts.push(head, name, body);
+    pos += head.length + name.length + body.length;
+  }
+  const size = central.reduce((n, c) => n + c.length, 0);
+  const all = [...parts, ...central, le([0x06054b50, 4], [0, 2], [0, 2], [entries.length, 2], [entries.length, 2], [size, 4], [pos, 4], [0, 2])];
+  const out = new Uint8Array(all.reduce((n, a) => n + a.length, 0));
+  let o = 0; for (const a of all) { out.set(a, o); o += a.length; }
+  return out;
+}
+// The files in a ZIP: [{ name, method: 0 stored / 8 deflate, body: Uint8Array, size, crc }].
+function readZip(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), bad = () => new Error("This isn't a ZIP file, or it's damaged.");
+  let end = -1;
+  for (let i = bytes.length - 22; i >= 0 && i > bytes.length - 66000; i--) if (dv.getUint32(i, true) === 0x06054b50) { end = i; break; }
+  if (end < 0) throw bad();
+  const out = []; let p = dv.getUint32(end + 16, true);
+  for (let n = dv.getUint16(end + 10, true); n > 0; n--) {
+    if (p + 46 > bytes.length || dv.getUint32(p, true) !== 0x02014b50) throw bad();
+    const nameLen = dv.getUint16(p + 28, true), packed = dv.getUint32(p + 20, true), at = dv.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(bytes.subarray(p + 46, p + 46 + nameLen));
+    if (at + 30 > bytes.length) throw bad();
+    const start = at + 30 + dv.getUint16(at + 26, true) + dv.getUint16(at + 28, true);
+    if (start + packed > bytes.length) throw bad();
+    out.push({ name, method: dv.getUint16(p + 10, true), body: bytes.subarray(start, start + packed), size: dv.getUint32(p + 24, true), crc: dv.getUint32(p + 16, true) });
+    p += 46 + nameLen + dv.getUint16(p + 30, true) + dv.getUint16(p + 32, true);
+  }
+  return out;
+}
+
 // Moves labels apart: the positions nearest to the wanted ones (ascending) that are at least `gap` apart and
 // inside lo…hi. Labels too close together are spread around their common middle.
 function spreadLabels(ys, gap, lo, hi) {
@@ -509,7 +559,7 @@ if (typeof module !== "undefined") module.exports = {
   CFG_NEW_LAYOUT_VER, fmtOffset, parseOffset, faceValue, macStr, toDataView, advEntries, parseAdv, le32,
   DRIFT_TOL, DRIFT_MAX_PER_DAY, driftCorrect, fmtDur, LOG_CAPACITY, logIntervalFromCfg, fmtDays,
   decodeCfg, FLG_BITS, FLG2_BITS, byteFromBits, encodeCfg, fmtNum, toCsv, parseCsv, histId,
-  timeTicks, utcOffsetMin, dstChanges, sampleKey, missingRecords, makeBackup, parseBackup, mergeClockLog, batteryState, batteryText, spreadLabels, withAtcPrefix, labelFor, downloadLabel,
+  timeTicks, utcOffsetMin, dstChanges, sampleKey, missingRecords, makeBackup, parseBackup, mergeClockLog, batteryState, batteryText, spreadLabels, crc32, makeZip, readZip, withAtcPrefix, labelFor, downloadLabel,
   sliceWidth, averageSlices, clampWindow,
   PERIODS, WEEK, MONTH, periodLabel, periodStart, periodEnd, periodKey, choosePeriod, periodProblem, closestPeriod, buildCandles,
 };

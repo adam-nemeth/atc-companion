@@ -130,7 +130,7 @@ button.chip::after { content: ""; position: absolute; inset: -5px 0; }
 button.chip[aria-pressed="true"] { color: var(--text); border-color: var(--muted); }
 .ln { display: inline-block; flex: none; width: 18px; height: 0; border-top: 3px solid var(--line); vertical-align: middle; }
 .ln.dash { border-top-style: dashed; }
-body:not(.comparing) #cmpChips, body.comparing .selwrap, body.comparing #styleSw, body.comparing #btnShareSel, body.comparing #btnForget { display: none !important; }
+body:not(.comparing) #cmpChips, body.comparing .selwrap, body.comparing #styleSw, body.comparing #btnForget { display: none !important; }
 #btnCompare[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 #readout .rv { display: inline-flex; align-items: center; gap: 5px; margin-right: 12px; white-space: nowrap; color: var(--text); }
 .stats td .ln { margin-right: 6px; }
@@ -218,14 +218,21 @@ body.devfirst[data-tab="single"] #rcol > section { order: 9; }
   body[data-tab="all"] #batchCard { grid-row: 6; } body[data-tab="all"] #dumpCard { grid-row: 7; } body[data-tab="all"] #batchOps { grid-row: 8; }
 }
 /* Dialogs and short confirmations */
-dialog#dlg { width: min(420px, calc(100vw - 32px)); padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--text); box-shadow: 0 12px 40px rgba(0,0,0,.28); }
-dialog#dlg::backdrop { background: rgba(0,0,0,.45); }
-#dlgTitle { font-size: 17px; font-weight: 650; margin: 0 0 8px; }
+dialog { width: min(420px, calc(100vw - 32px)); padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--text); box-shadow: 0 12px 40px rgba(0,0,0,.28); }
+dialog::backdrop { background: rgba(0,0,0,.45); }
+#dlgTitle, #expTitle { font-size: 17px; font-weight: 650; margin: 0 0 8px; }
 #dlgText { margin: 0 0 16px; white-space: pre-line; overflow-wrap: anywhere; max-height: 50vh; overflow: auto; }
 #dlgInput { width: 100%; font-size: 16px; margin: 0 0 16px; }
-#dlg .btns { display: flex; gap: 8px; }
-#dlg .btns button { flex: 1 1 0; padding: 9px 8px; }
-#dlg #dlgOk { flex-grow: 1.5; }
+dialog .btns { display: flex; gap: 8px; }
+dialog .btns button { flex: 1 1 0; padding: 9px 8px; }
+#dlgOk, #expOk { flex-grow: 1.5 !important; }
+#expList { max-height: 36vh; overflow: auto; border: 1px solid var(--line); border-radius: 10px; margin: 4px 0 10px; padding: 2px 10px; }
+#expList label { display: flex; align-items: center; gap: 8px; min-height: 38px; }
+#expList label + label { border-top: 1px solid var(--line); }
+#expList label > span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#expList label > i { font-style: normal; font-size: 12px; color: var(--muted); white-space: nowrap; }
+#expDlg .expHead { display: flex; gap: 14px; align-items: center; } #expDlg .expHead b { flex: 1; font-weight: 600; }
+#expDlg select { max-width: 100%; } #expSum { margin: 10px 0 14px; }
 button.dangerfill { background: var(--err); border-color: var(--err); color: var(--card); font-weight: 600; }
 #toast { position: fixed; z-index: 60; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(-50%); width: max-content; max-width: calc(100vw - 32px);
   padding: 10px 14px; border-radius: 10px; background: var(--text); color: var(--bg); font-size: 14px; line-height: 1.4; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
@@ -426,7 +433,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
     </div>
     <div class="row only-all" style="margin-top:8px">
       <button id="bDump" class="primary">Download</button>
-      <button id="bShareAll">Share all sensors…</button>
+      <button id="bExport">Export CSV…</button>
     </div>
     <div class="row"><span id="dumpStatus" class="muted"></span></div>
     <div class="progress" id="dumpProg"><div></div></div>
@@ -532,14 +539,13 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
     <div class="stats" id="stats"></div>
     <div class="hist-extra">
     <div class="row" style="margin-top:10px">
-      <button id="btnShareSel" class="primary needs-data">Share this sensor…</button>
-      <button id="btnShareAll" class="needs-data">Share all sensors…</button>
+      <button id="btnExport" class="primary needs-data">Export CSV…</button>
       <button id="btnExportRaw" class="needs-data" disabled>Share last download (raw)…</button>
     </div>
-    <div class="row needs-data"><span id="shareMsg" class="muted">Opens the iPhone share sheet: Mail, Messages, AirDrop, Save to Files… CSV times are UTC.</span></div>
+    <div class="row needs-data"><span id="shareMsg" class="muted">One or more sensors, also as one ZIP file. Opens the iPhone share sheet: Mail, Messages, AirDrop, Save to Files…</span></div>
     <div class="row">
-      <button id="btnImport">Import CSV…</button>
-      <input type="file" id="fileImport" accept=".csv,text/csv" multiple class="hidden">
+      <button id="btnImport">Import CSV or ZIP…</button>
+      <input type="file" id="fileImport" accept=".csv,text/csv,.zip,application/zip" multiple class="hidden">
     </div>
     <div class="row needs-data"><button id="btnForget" class="danger">Forget this sensor's stored data…</button></div>
     </div>
@@ -685,10 +691,20 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
   <input id="dlgInput" class="hidden" autocomplete="off" autocapitalize="off" spellcheck="false">
   <div class="btns"><button id="dlgCancel"></button><button id="dlgOk" class="primary"></button></div>
 </dialog>
+<dialog id="expDlg" aria-labelledby="expTitle">
+  <p id="expTitle">Export readings as CSV</p>
+  <div class="expHead"><b>Sensors</b><button class="linkbtn info" id="expAll">All</button><button class="linkbtn info" id="expNone">None</button></div>
+  <div id="expList"></div>
+  <div class="row"><label class="fld">Readings <select id="expRange"></select></label></div>
+  <div class="row"><label class="fld">Format <select id="expLocale"><option value="en">en: comma, dot decimals</option><option value="hu">hu: semicolon, comma decimals</option></select></label></div>
+  <div class="row" id="expZipRow"><label><input type="checkbox" id="expZip"> Put them in one ZIP file</label></div>
+  <p class="muted" id="expSum"></p>
+  <div class="btns"><button id="expCancel">Cancel</button><button id="expOk" class="primary">Export…</button></div>
+</dialog>
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=119"></script>
+<script src="core.js?v=120"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -796,7 +812,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 119;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 120;  // also bump core.js?v= in the <script> tag above
 const APP_DATE = "2026-11-25";  // release date of this version
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
@@ -2408,7 +2424,7 @@ function shareMsg(text, cls) { const m = $("shareMsg"); m.textContent = text; m.
 // onDone (backups): called once the files were shared, or the user says the downloads were saved.
 function shareFiles(items, subject, onDone) {
   if (!items.length) { shareMsg("Nothing to share yet.", "status warn"); toast("Nothing to share yet", "warn"); return; }
-  const files = items.map(it => new File([it.text], it.name, { type: it.type || "text/csv" }));
+  const files = items.map(it => new File([it.data || it.text], it.name, { type: it.type || "text/csv" }));
   const rows = items.reduce((n, it) => n + it.rows, 0);
   const body = `${subject}\n${items.map(it => `${it.name} (${it.rows} rows)`).join("\n")}`;
   const done = () => { dbg("Share completed"); const txt = `Shared ${count(files.length, "file")}, ${count(rows, "row")}`; shareMsg(txt + ".", "status ok"); toast(txt); if (onDone) onDone(); };
@@ -2425,7 +2441,7 @@ function shareFiles(items, subject, onDone) {
   };
   let canFiles = false;
   try { canFiles = !!(navigator.canShare && navigator.canShare({ files })); } catch (e) { dbg(`canShare threw: ${describeErr(e)}`); }
-  dbg(`Share "${subject}": ${items.map(it => `${it.name} ${it.rows} rows ${it.text.length} B`).join("; ")}; canShare(files)=${canFiles}, share=${!!navigator.share}`);
+  dbg(`Share "${subject}": ${items.map(it => `${it.name} ${it.rows} rows ${(it.data || it.text).length} B`).join("; ")}; canShare(files)=${canFiles}, share=${!!navigator.share}`);
   if (canFiles) {
     navigator.share({ files, title: subject, text: body }).then(done, failed);
   } else if (navigator.share && items.length === 1 && !items[0].fileOnly) {
@@ -2439,7 +2455,7 @@ function shareFiles(items, subject, onDone) {
 }
 function downloadFiles(items) {
   for (const it of items) {
-    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([it.text], { type: it.type || "text/csv" }));
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([it.data || it.text], { type: it.type || "text/csv" }));
     a.download = it.name; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 15000);
   }
@@ -2452,24 +2468,111 @@ function fileLabel(id) {
   const desc = (rooms[id] || "").trim().replace(/[\s-]+/g, "_").replace(/[^A-Za-z0-9._]+/g, "_").replace(/^_+|_+$/g, "");
   return desc ? `${desc}-${id}` : id;
 }
-function csvAllFor(dev) {
-  const s = histCache.get(dev) || [];
-  return { name: `${fileLabel(dev)}-all.csv`, rows: s.length,
-    text: toCsv(s.map(([t, tm, hm, v, st]) => [faceValue(t), "+00:00", tm, hm, v, st != null && st !== t ? faceValue(st) : ""]), prefs.csvLocale) };
+// ===== Export readings as CSV: one file per sensor, or all of them in one ZIP =====
+// What's needed is prepared (and compressed) while the dialog is open, because the share sheet only
+// opens straight from the tap; whatever isn't ready by then is made on the spot, uncompressed.
+let expFiles = new Map(), expRun = 0;  // "sensor|from|to|format" -> { name, rows, data, crc, packed }
+const expPicked = () => [...document.querySelectorAll("#expList input:checked")].map(i => i.value);
+function expPeriod() {
+  const v = $("expRange").value, now = Date.now() / 1000;
+  if (v === "chart") { const d = view || rangeDomain(); if (d) return [d.a, d.b]; }
+  return +v > 0 ? [now - v * 86400, Infinity] : [-Infinity, Infinity];
 }
-function shareSelected() {
-  const dev = $("histDev").value; if (!dev) { shareMsg("No stored data yet.", "status warn"); return; }
-  shareFiles([csvAllFor(dev)], `Thermometer readings: ${histLabel(dev)}`);
+const expKey = dev => [dev, ...expPeriod(), $("expLocale").value].join("|");
+function expRows(dev) { const [a, b] = expPeriod(); return (histCache.get(dev) || []).filter(s => s[0] >= a && s[0] <= b); }
+function expMake(dev) {
+  const key = expKey(dev); if (expFiles.has(key)) return expFiles.get(key);
+  const rows = expRows(dev), whole = $("expRange").value === "0", day = t => faceValue(Math.round(t)).slice(0, 10).replace(/-/g, "");
+  const data = new TextEncoder().encode(toCsv(rows.map(([t, tm, hm, v, st]) => [faceValue(t), "+00:00", tm, hm, v, st != null && st !== t ? faceValue(st) : ""]), $("expLocale").value));
+  const f = { name: `${fileLabel(dev)}-${whole || !rows.length ? "all" : `${day(rows[0][0])}-${day(rows[rows.length - 1][0])}`}.csv`, rows: rows.length, data };
+  expFiles.set(key, f);
+  return f;
 }
-function shareAllDevices() {
-  const items = [...histCache.keys()].sort().map(csvAllFor).filter(it => it.rows);
-  const counts = Object.fromEntries([...histCache].map(([d, s]) => [d, s.length]));
-  // Sharing every sensor's full history counts as a backup (once the share sheet reports success).
-  shareFiles(items, `Thermometer readings: ${items.length} sensor(s)`, () => noteBackup(counts));
+async function expPrepare() {
+  const run = ++expRun, zip = expZipOn();
+  for (const dev of expPicked()) {
+    await sleep(0); if (run !== expRun) return;
+    const f = expMake(dev);
+    if (!zip || f.packed !== undefined) continue;
+    f.packed = null; f.crc = crc32(f.data);
+    try {
+      const p = new Uint8Array(await new Response(new Blob([f.data]).stream().pipeThrough(new CompressionStream("deflate-raw"))).arrayBuffer());
+      if (p.length < f.data.length) f.packed = p;
+    } catch (e) { dbg(`Compressing isn't possible here: ${describeErr(e)}`); }
+  }
+  if (run === expRun) expSummary(true);
+}
+const expZipOn = () => $("expZip").checked && expPicked().length > 1;
+function expSummary(ready) {
+  const devs = expPicked(), rows = devs.reduce((n, d) => n + expRows(d).length, 0);
+  $("expZipRow").classList.toggle("hidden", devs.length < 2);
+  const bytes = ready ? devs.reduce((n, d) => { const f = expMake(d); return n + (expZipOn() && f.packed || f.data).length; }, 0) : 0;
+  $("expSum").textContent = !devs.length ? "Tick at least one sensor." : !rows ? "No readings in that period." :
+    `${count(rows, "reading")} · ${expZipOn() ? `${devs.length} CSV files in one ZIP` : count(devs.length, "CSV file")}${bytes ? ` · ${bytes < 1e6 ? `${Math.max(1, Math.round(bytes / 1000))} KB` : `${(bytes / 1e6).toFixed(1)} MB`}` : ""} · times in UTC`;
+  $("expOk").disabled = !rows;
+}
+function expChanged() { expSummary(false); expPrepare(); }
+// picked: the sensors ticked at first; chart: offer the period shown in the chart.
+function openExport(picked, chart) {
+  const devs = cmpAll(), d = $("expDlg");
+  if (!devs.length) { toast("No readings to export yet", "warn"); return; }
+  expFiles = new Map();
+  $("expList").replaceChildren(...devs.map(id => {
+    const l = document.createElement("label"), c = document.createElement("input"), s = document.createElement("span"), n = document.createElement("i");
+    c.type = "checkbox"; c.value = id; c.checked = picked.includes(id); c.onchange = expChanged;
+    s.textContent = histLabel(id); n.textContent = histCache.get(id).length.toLocaleString(LOCALE); l.append(c, s, n); return l;
+  }));
+  const dom = chart ? view || rangeDomain() : null, day = t => new Date(t * 1000).toLocaleDateString(LOCALE, { day: "numeric", month: "short" });
+  $("expRange").replaceChildren(new Option("All", "0"), ...(dom ? [new Option(`Shown in the chart (${day(dom.a)} – ${day(dom.b)})`, "chart")] : []),
+    new Option("Last 7 days", "7"), new Option("Last 30 days", "30"), new Option("Last year", "365"));
+  $("expLocale").value = prefs.csvLocale; $("expZip").checked = prefs.expZip !== false;
+  expChanged();
+  if (typeof d.showModal === "function") d.showModal(); else doExport();  // very old browsers: straight away
+}
+function doExport() {
+  const d = $("expDlg"), devs = expPicked(), zip = expZipOn(), all = $("expRange").value === "0" && devs.length === cmpAll().length;
+  const made = devs.map(expMake).filter(f => f.rows), rows = made.reduce((n, f) => n + f.rows, 0), subject = `Thermometer readings: ${made.length === 1 ? histLabel(devs.find(x => expMake(x).rows)) : count(made.length, "sensor")}`;
+  expRun++;
+  const items = zip && made.length > 1 ? [{ name: `ATC-Companion-readings-${stamp()}.zip`, rows, data: makeZip(made), type: "application/zip", fileOnly: true }]
+    : made.map(f => ({ name: f.name, rows: f.rows, data: f.data, text: new TextDecoder().decode(f.data) }));
+  // Every sensor's full history counts as a backup (once the share sheet reports success).
+  const counts = Object.fromEntries([...histCache].map(([k, s]) => [k, s.length]));
+  if (d.open) d.close();
+  shareFiles(items, subject, all ? () => noteBackup(counts) : null);
+}
+function setupExport() {
+  const tick = on => () => { document.querySelectorAll("#expList input").forEach(i => i.checked = on); expChanged(); };
+  $("expAll").onclick = tick(true); $("expNone").onclick = tick(false);
+  $("expRange").onchange = expChanged;
+  $("expLocale").onchange = () => { prefs.csvLocale = $("csvLocale").value = $("expLocale").value; savePrefs(); expChanged(); };
+  $("expZip").onchange = () => { prefs.expZip = $("expZip").checked; savePrefs(); expChanged(); };
+  $("expCancel").onclick = () => $("expDlg").close();
+  $("expDlg").addEventListener("close", () => { expRun++; expFiles = new Map(); });
+  $("expOk").onclick = doExport;
+  $("btnExport").onclick = () => openExport(compareOn() ? cmpShown().map(s => s.id) : [$("histDev").value], true);
+  $("bExport").onclick = () => openExport(cmpAll(), false);
+}
+// The CSV files inside a ZIP, as { name, text() } like the files of a file picker.
+async function csvFromZip(file) {
+  const out = [];
+  for (const e of readZip(new Uint8Array(await file.arrayBuffer()))) {
+    const name = e.name.split("/").pop();
+    if (!/\.csv$/i.test(name) || /^__MACOSX\//.test(e.name) || name.startsWith("._")) continue;
+    if (e.size > 1e8) throw new Error(`${name} is too big.`);
+    let data = e.body;
+    if (e.method === 8) {
+      if (typeof DecompressionStream !== "function") throw new Error("This browser can't open compressed ZIP files. Unzip it first (in the Files app, tap it), then import the CSV files.");
+      data = new Uint8Array(await new Response(new Blob([e.body]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+    } else if (e.method !== 0) throw new Error(`${name} is packed in a way this app can't read. Unzip it first.`);
+    if (data.length !== e.size || crc32(data) !== e.crc) throw new Error(`${name} is damaged.`);
+    out.push({ name, text: async () => new TextDecoder().decode(data) });
+  }
+  if (!out.length) throw new Error("There are no CSV files in it.");
+  return out;
 }
 // ===== Backup reminder =====
 // The history exists only in this browser's storage on this phone, and iOS may clear it (Bluefy
-// isn't granted persistent storage). "Back up" and "Share all sensors" (CSV) both count for the reminder.
+// isn't granted persistent storage). "Back up" and exporting all sensors (CSV) both count for the reminder.
 // counts: how many readings of each sensor the backup holds. Stored readings only ever grow, so whatever
 // a sensor has beyond that isn't backed up - also old readings that were downloaded after the backup.
 function noteBackup(counts) {
@@ -2497,7 +2600,7 @@ function shareBackup() {
   if (!rows && !knownNames().length) { toast("Nothing to back up yet", "warn"); return; }
   const text = makeBackup({ version: APP_VERSION, created: new Date().toISOString(),
     sensors: { rooms, known, removed: [...removedSensors], selected: [...batchSel] }, settings: prefs, clockLog: lsGet("clockLog", {}), readings });
-  shareFiles([{ name: `ATC-Companion-backup-${stamp()}.json`, rows, text, type: "application/json", fileOnly: true }],
+  shareFiles([{ name: `ATC-Companion-backup-v${APP_VERSION}-${stamp()}.json`, rows, text, type: "application/json", fileOnly: true }],
     `ATC Companion backup: ${count(Object.keys(readings).length, "sensor")}, ${count(rows, "reading")}`, () => noteBackup(counts));
 }
 // Adds a backup to what's here: nothing is deleted, and what this phone knows about a sensor goes first.
@@ -2507,7 +2610,7 @@ async function restoreBackup(file) {
   try { b = parseBackup(await file.text()); } catch (e) { tell(e.message, "Can't restore this file"); return; }
   const when = b.created ? new Date(b.created).toLocaleString(LOCALE, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "Date unknown";
   const ids = Object.keys(b.readings), sensors = new Set([...Object.keys(b.known), ...Object.keys(b.rooms), ...ids]).size;
-  if (!await ask(`${when} · ${count(sensors, "sensor")} · ${count(b.count, "reading")}\n\nReadings and sensors are added to those already here, and the settings are replaced. The app then reloads.`,
+  if (!await ask(`${when}${Number.isFinite(b.version) ? ` · made with v${b.version}` : ""}\n${count(sensors, "sensor")} · ${count(b.count, "reading")}\n\nReadings and sensors are added to those already here, and the settings are replaced. The app then reloads.`,
     { title: "Restore this backup?", ok: "Restore" })) return;
   if (busy) { toast("Wait until the sensor is done", "warn"); return; }
   await withBusy(async () => {
@@ -2532,7 +2635,7 @@ async function restoreBackup(file) {
     for (const [n, v] of Object.entries(b.clockLog)) clocks[n] = mergeClockLog(clocks[n] || {}, v);
     lsSet("clockLog", clocks); lsSet("rooms", rooms); saveKnown(); saveSel(); saveRemoved();
     Object.assign(prefs, b.settings); savePrefs();
-    log(`Restored ${file.name} (${when}): ${added} readings added, ${b.skipped} skipped, ${sensors} sensors`);
+    log(`Restored ${file.name} (${when}, v${b.version}): ${added} readings added, ${b.skipped} skipped, ${sensors} sensors`);
     flushLog(true);
     await tell(`${count(added, "reading")} added${b.count > added ? `, ${(b.count - added).toLocaleString(LOCALE)} were already here` : ""}.${b.skipped ? ` ${count(b.skipped, "damaged reading")} left out.` : ""}`, "Backup restored");
     if (DEMO) await refreshDeviceList(); else location.reload();
@@ -2556,7 +2659,12 @@ function shareRaw() {
 }
 async function importFiles(files) {
   let last = null, imported = 0;
+  const all = [];
   for (const f of files) {
+    if (!/\.zip$/i.test(f.name)) { all.push(f); continue; }
+    try { all.push(...await csvFromZip(f)); } catch (e) { await tell(e.message, `Can't import ${f.name}`); }
+  }
+  for (const f of all) {
     // The sensor is the ATC_xxxxxx in the name: "<Description>-ATC_xxxxxx-<kind>.csv" (current),
     // or the older "history_ATC_xxxxxx[__<Description>]_<kind>.csv".
     const id = /(ATC_[0-9A-F]{6})(?![0-9A-Za-z])/i.exec(f.name);
@@ -3043,7 +3151,7 @@ function drawChart() {
   const cursor = el("line", { x1: 0, x2: 0, y1: T, y2: T + ph, stroke: col("--muted"), "stroke-dasharray": "3 3", visibility: "hidden" });
   const markerLayer = el("g", {});   // value labels next to the marker (showReadoutAt)
   plotted = { pts: inWin.length ? inWin : pts, x, cursor, L, pw, T, ph, yT, yH, showT, showH, markerLayer,
-    candles, colT: col("--temp"), colH, colBg: col("--card"), colText: col("--text"),
+    candles, colT: col("--temp"), colH, colBg: col("--card"), colText: col("--text"), colLine: col("--line"), colMuted: col("--muted"),
     unitH, decH: bat ? 3 : 0, decH1: bat ? 3 : 1, dataRange: { t: range(1), h: range(2) } };
   // Note under the chart while points are averages (or candles are shown).
   const note = $("avgNote");
@@ -3197,7 +3305,7 @@ function drawCompare(svg, W, H, col, dom) {
   const cursor = el("line", { x1: 0, x2: 0, y1: T, y2: T + ph, stroke: col("--muted"), "stroke-dasharray": "3 3", visibility: "hidden" });
   const markerLayer = el("g", {});
   const times = []; for (const s of series) for (const p of s.pts) if (p[0] >= t0 && p[0] <= t1) times.push(p[0]);
-  plotted = { compare: series, pts: times.map(t => [t]), x, y, cursor, L, pw, T, ph, showT: m === "t", showH: m === "h", markerLayer, colBg: col("--card"), colText: col("--text"), unit, dec,
+  plotted = { compare: series, pts: times.map(t => [t]), x, y, cursor, L, pw, T, ph, showT: m === "t", showH: m === "h", markerLayer, colBg: col("--card"), colText: col("--text"), colLine: col("--line"), colMuted: col("--muted"), unit, dec,
     dataRange: { t: dataRange, h: dataRange } };
   const tooMuch = wanted && period !== wanted ? `${periodLabel(wanted)} doesn't fit this range, so ${period ? `it's ${periodLabel(period)} here` : "the resolution is automatic here"}. ` : "";
   note.textContent = tooMuch + (anyAvg ? `Each point is an average of ${period ? periodLabel(period) : fmtDuration(slice)}.` : "");
@@ -3250,7 +3358,7 @@ function setFull(on, auto = false) {
 }
 function setupFull() {
   $("fullBtn").onclick = () => setFull(!document.body.classList.contains("chartfull"));
-  addEventListener("keydown", e => { if (e.key === "Escape" && !$("dlg").open) setFull(false); });
+  addEventListener("keydown", e => { if (e.key === "Escape" && !document.querySelector("dialog[open]")) setFull(false); });
   if (!window.matchMedia) return;
   const side = matchMedia("(orientation: landscape) and (max-height: 500px) and (pointer: coarse)");
   side.addEventListener?.("change", () => {
@@ -3258,7 +3366,7 @@ function setupFull() {
     const tab = document.body.dataset.tab, r = $("chart").getBoundingClientRect(), a = document.activeElement;
     const typing = a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== "checkbox";
     const seen = tab === "history" || (tab === "single" && r.height && r.top < innerHeight && r.bottom > 0);
-    if (seen && histData.length && !typing && !$("dlg").open) setFull(true, true);
+    if (seen && histData.length && !typing && !document.querySelector("dialog[open]")) setFull(true, true);
   });
 }
 
@@ -3326,8 +3434,8 @@ function drawTimeTag(cx, text) {
   const P = plotted, ns = "http://www.w3.org/2000/svg", w = measureText11()(text, true) + 12;
   const bx = Math.max(P.L, Math.min(P.L + P.pw - w, cx - w / 2));
   const mk = (tag, attrs, txt) => { const e = document.createElementNS(ns, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (txt != null) e.textContent = txt; P.markerLayer.appendChild(e); };
-  mk("rect", { x: bx, y: P.T - 19, width: w, height: 17, rx: 4, fill: P.colText });
-  mk("text", { x: bx + w / 2, y: P.T - 7, "text-anchor": "middle", "font-size": 11, "font-weight": 600, fill: P.colBg }, text);
+  mk("rect", { x: bx, y: P.T - 19, width: w, height: 17, rx: 4, fill: P.colBg, stroke: P.colLine, "stroke-width": 1 });
+  mk("text", { x: bx + w / 2, y: P.T - 7, "text-anchor": "middle", "font-size": 11, "font-weight": 600, fill: P.colMuted }, text);
 }
 // "Sun 22 Nov, 02:55" (with the year if it's another one); time: false = the day only.
 function tagTime(t, time = true) {
@@ -3599,8 +3707,7 @@ function updateStatusBar() {
   $("btnSelAll").onclick = () => { knownNames().filter(n => reachable.has(n)).forEach(n => batchSel.add(n)); saveSel(); renderKnown(); };
   $("btnSelNone").onclick = () => { batchSel.clear(); saveSel(); renderKnown(); };
   $("bDump").onclick = () => withBusy(BATCH.dump);
-  // Straight from the tap (iOS only opens the share sheet then); same files as Readings → Share all sensors.
-  $("bShareAll").onclick = shareAllDevices;
+  setupExport();
   $("bGetTime").onclick = () => withBusy(BATCH.getTime);
   $("bSetTime").onclick = () => withBusy(BATCH.setTime);
   $("bGetCfg").onclick = () => withBusy(BATCH.getCfg);
@@ -3641,8 +3748,6 @@ function updateStatusBar() {
   document.addEventListener("visibilitychange", () => { if (document.hidden) { stopLive(); saveKnown(); } else { startLive(); renderKnown(); } });
   renderKnown();
   $("histDev").onchange = loadChart;
-  $("btnShareSel").onclick = shareSelected;
-  $("btnShareAll").onclick = shareAllDevices;
   $("btnExportRaw").onclick = shareRaw;
   $("btnImport").onclick = () => $("fileImport").click();
   $("fileImport").onchange = async e => { await importFiles([...e.target.files]); e.target.value = ""; };
