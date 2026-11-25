@@ -15,7 +15,7 @@ It talks to the sensors directly over Bluetooth: no app, no gateway, no cloud.
 
 ## Setup
 
-Python 3.9 or newer, plus one package:
+A current Python 3 (it's tested with the latest release), plus one package:
 
 ```
 pip install bleak

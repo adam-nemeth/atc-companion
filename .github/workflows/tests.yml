@@ -21,17 +21,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-24.04  # the newest image has no Python 3.9
-            python: "3.9"
-          - os: ubuntu-latest
-            python: "3.13"
-          - os: windows-latest
-            python: "3.13"
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python }}
+          python-version: "3.x"  # the latest release
       - run: python -m unittest discover -s tests
