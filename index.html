@@ -417,11 +417,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
       <span class="drift"><label><input type="checkbox" id="driftCorr"> Correct clock drift</label>
         <button class="linkbtn info" data-more="driftHelp">Why?</button></span>
     </div>
-    <div class="muted hidden" id="setEraseHelp">
-      <p style="margin:8px 0">Once every reading is saved on this phone, the sensor's clock is set and its log is erased. The two belong together: the new log then starts right after a clock set, so clock drift can be corrected for every reading in it.</p>
-      <p style="margin:8px 0">Setting only the clock would leave readings from before and after in one log, with a jump in time. Erasing only would start a new log with a clock that may already be off.</p>
-      <p style="margin:8px 0">To do just one of them, use <span class="only-single">“Set clock now” or “Erase sensor log…”</span><span class="only-all">“Set clocks” below, or “Erase sensor log…” on the Sensor tab</span>.</p>
-    </div>
+    <p class="muted hidden" id="setEraseHelp">Done once your readings are saved. Together, they make the sensor's new log start with a correct clock, so clock drift can be corrected. For just one, use <span class="only-single">“Set clock now” or “Erase sensor log…”</span><span class="only-all">“Set clocks” below, or “Erase sensor log…” on the Sensor tab</span>.</p>
     <p class="muted hidden" id="driftHelp">A sensor's clock can run fast or slow. The clock is read before downloading and, if it's off, the readings since the last clock set are shifted to the right time; the sensor's own times stay in the sensor_timestamp column. It works best with <b>“Set clock &amp; erase”</b> ticked, because the log then always starts right after a clock set.</p>
     <p class="muted hidden" id="setEraseHint"></p>
     <div class="row only-single" style="margin-top:8px">
@@ -683,7 +679,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=115"></script>
+<script src="core.js?v=116"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -791,7 +787,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 115;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 116;  // also bump core.js?v= in the <script> tag above
 const APP_DATE = "2026-11-25";  // release date of this version
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
@@ -1758,8 +1754,8 @@ function updateDownloadButtons() {
   $("btnDump").textContent = label; $("bDump").textContent = label;
   const all = downloadPlan().count === 0xffff, on = $("optSetErase").checked, hint = $("setEraseHint");
   $("optSetErase").disabled = !all;
-  hint.textContent = !all ? "Only after downloading all stored readings: the others would be lost."
-    : on ? "" : `The sensor's log stays and fills up${prefs.driftCorr === false ? "." : ", and clock drift can be corrected less well."}`;
+  hint.textContent = !all ? "Only when downloading all stored readings."
+    : on ? "" : `The log keeps filling up${prefs.driftCorr === false ? "." : ", and clock drift is harder to correct."}`;
   hint.classList.toggle("hidden", !hint.textContent);
 }
 // Returns { n, total, finished, deleted } (or null if cancelled). opts.skipConfirm: batch already asked.
@@ -1768,8 +1764,8 @@ async function dump(opts = {}) {
   const { count: cnt, sync, erase: del } = opts.plan || downloadPlan();
   if (del && !opts.plan) {
     const target = sensorName;
-    if (!await ask(`Once every reading has arrived and is saved on this phone, the sensor's clock is set (${prefs.timeMode === "utc" ? "UTC" : "local time"}) and its log is erased permanently.`,
-      { title: `Download from ${shownName(target)}, set its clock and erase it?`, ok: "Download & erase", danger: true })) return null;
+    if (!await ask(`Once your readings are saved, the clock is set (${prefs.timeMode === "utc" ? "UTC" : "local time"}) and the log is erased permanently.`,
+      { title: `Download, set clock and erase ${shownName(target)}?`, ok: "Download & erase", danger: true })) return null;
     if (!stillConnected(target)) return null;
   }
   const result = { n: 0, total: 0, finished: false, deleted: false };
@@ -2112,7 +2108,7 @@ const BATCH = {
   async dump() {
     // Both are fixed here: the confirmation is for exactly these sensors and options.
     const plan = downloadPlan(), targets = batchTargets();
-    if (plan.erase && !await ask(`Their whole logs are downloaded, then the clocks are set (${prefs.timeMode === "utc" ? "UTC" : "local time"}) and the logs erased permanently.\n\nA sensor is only erased if its download finished completely and is saved on this phone.\n\n${targets.map(sensorLabel).join(", ")}`,
+    if (plan.erase && !await ask(`Once each sensor's readings are saved, its clock is set (${prefs.timeMode === "utc" ? "UTC" : "local time"}) and its log is erased permanently.\n\n${targets.map(sensorLabel).join(", ")}`,
       { title: `Download, set clock and erase ${count(targets.length, "sensor")}?`, ok: "Download & erase", danger: true })) return;
     await runBatch(downloadLabel(plan).replace("…", ""), async (name, onProgress) => {
       const r = await dump({ plan, onProgress });
@@ -3416,10 +3412,10 @@ function updateStatusBar() {
   $("optSetErase").onchange = async e => {
     const box = e.target, want = box.checked;
     box.checked = !want;  // only changes once confirmed
-    const yes = want ? await ask("After each complete download, once every reading is saved on this phone, the sensor's clock is set and its log is erased permanently.\n\nYou're asked again before every download.",
+    const yes = want ? await ask("Done once your readings are saved. You're asked again before every download.",
         { title: "Set the clock and erase after downloading?", ok: "Turn on" })
-      : await ask("The clock is not set and nothing is erased.\n\n• The sensor's log keeps filling up, until the oldest readings are overwritten.\n• Clock drift can be corrected less well, because the log no longer starts at a clock set.\n• The next download takes longer: it includes these readings again (they are not stored twice).",
-        { title: "Only download, and keep the log on the sensor?", ok: "Keep the log" });
+      : await ask("The sensor's log keeps filling up, and clock drift is harder to correct.",
+        { title: "Don't set the clock or erase?", ok: "Only download" });
     if (yes) { box.checked = want; prefs.dlSetErase = want; savePrefs(); log(`Option "Set clock & erase": ${want ? "on" : "off"}`); }
     updateDownloadButtons();
   };
