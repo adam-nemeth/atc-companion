@@ -21,18 +21,21 @@
   --bg: #f4f5f7; --card: #ffffff; --text: #16181d; --muted: #646b79; --line: #e3e5e9;
   --accent: #2563eb; --accent-text: #ffffff; --temp: #cb421d; --hum: #1f6fc0; --batt: #27793a;
   --ok: #15803d; --warn: #b45309; --err: #b91c1c; --input: #f9fafb;
+  --c1: #2a78d6; --c2: #1baf7a; --c3: #eda100; --c4: #e87ba4;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #0f1115; --card: #181b21; --text: #e8eaee; --muted: #9aa1ad; --line: #2a2e36;
     --accent: #4f8cff; --accent-text: #0b0d10; --temp: #ff7a52; --hum: #5aa9ff; --batt: #5fd07a;
     --ok: #4ade80; --warn: #fbbf24; --err: #f87171; --input: #11141a;
+    --c1: #3987e5; --c2: #1baf7a; --c3: #c98500; --c4: #c2406f;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0f1115; --card: #181b21; --text: #e8eaee; --muted: #9aa1ad; --line: #2a2e36;
   --accent: #4f8cff; --accent-text: #0b0d10; --temp: #ff7a52; --hum: #5aa9ff; --batt: #5fd07a;
   --ok: #4ade80; --warn: #fbbf24; --err: #f87171; --input: #11141a;
+  --c1: #3987e5; --c2: #1baf7a; --c3: #c98500; --c4: #c2406f;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text);
@@ -83,8 +86,8 @@ a::after { content: ""; position: absolute; inset: -12px -6px; }
 #readout { font-size: 13px; min-height: 20px; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 13px; color: var(--muted); }
 /* Legend entries are toggle buttons: tap to hide/show that line. All three stay on one line (iPhone mini). */
-.legend .lgs { display: flex; flex: 0 1 auto; gap: 6px; white-space: nowrap; }
-.legend button.lg { font-size: 13px; padding: 0 9px; border-radius: 999px; background: transparent; }
+.legend .lgs { display: flex; flex: 0 1 auto; gap: 5px; white-space: nowrap; }
+.legend button.lg { font-size: 13px; padding: 0 7px; border-radius: 999px; background: transparent; }
 .legend button.lg::before { content: ""; display: inline-block; width: 9px; height: 3px; margin-right: 5px; vertical-align: middle; background: currentColor; }
 .legend .t { color: var(--temp); border-color: var(--temp); } .legend .h { color: var(--hum); border-color: var(--hum); }
 .legend .b { color: var(--batt); border-color: var(--batt); }
@@ -98,7 +101,7 @@ a::after { content: ""; position: absolute; inset: -12px -6px; }
 .selshow .px { color: var(--muted); opacity: .75; }
 .selshow::after { content: ""; flex: none; width: 7px; height: 7px; border: solid var(--muted); border-width: 0 2px 2px 0; transform: translateY(-2px) rotate(45deg); }
 .selwrap:focus-within .selshow { outline: 2px solid var(--accent); outline-offset: 1px; }
-#stepBtns { margin-top: 6px; }
+#stepBtns, #rangeBtns { margin-top: 8px; }
 #stepBtns .nav { padding: 0 14px; }
 #stepBtns #resSel { margin-left: auto; height: 34px; padding: 0 8px; font-size: 14px; max-width: 100%; }
 .legend .scalesw + .scalesw { margin-left: 8px; }
@@ -112,7 +115,42 @@ a::after { content: ""; position: absolute; inset: -12px -6px; }
 @media (max-width: 480px) { .legend .scalesw { margin-left: 0; } }
 #scFit { padding: 0 10px; font-size: 13px; }
 #scFit[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
-.legend { flex-wrap: wrap; align-items: center; row-gap: 10px; margin-top: 8px; }
+.legend { flex-wrap: wrap; align-items: center; gap: 10px 6px; margin-top: 8px; }
+/* Icon buttons at the end of the range row (full screen) and the legend row (options) */
+button.icon { padding: 0; width: 34px; flex: none; margin-left: auto; display: inline-flex; align-items: center; justify-content: center; }
+button.icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.legend button.icon[aria-expanded="true"], .legend button.icon.changed { border-color: var(--accent); color: var(--accent); }
+#chartOpts { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+#chartOpts .scalesw { margin-left: 0; }
+/* Comparing sensors: a chip per sensor, with a piece of its line */
+#cmpChips { display: flex; flex-wrap: wrap; gap: 10px 6px; margin: 8px 0 2px; }
+button.chip { position: relative; display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 10px; font-size: 13px; border-radius: 999px; background: transparent; color: var(--muted); }
+button.chip::after { content: ""; position: absolute; inset: -5px 0; }
+button.chip[aria-pressed="true"] { color: var(--text); border-color: var(--muted); }
+.ln { display: inline-block; flex: none; width: 18px; height: 0; border-top: 3px solid var(--line); vertical-align: middle; }
+.ln.dash { border-top-style: dashed; }
+body:not(.comparing) #cmpChips, body.comparing .selwrap, body.comparing #styleSw, body.comparing #btnShareSel, body.comparing #btnForget { display: none !important; }
+#btnCompare[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+#readout .rv { display: inline-flex; align-items: center; gap: 5px; margin-right: 12px; white-space: nowrap; color: var(--text); }
+.stats td .ln { margin-right: 6px; }
+.stats.cmp td:first-child { overflow-wrap: anywhere; color: var(--text); }
+/* Full-screen chart (the button, or turning the phone sideways) */
+body.chartfull { overflow: hidden; }
+body.chartfull #histCard { position: fixed; inset: 0; z-index: 50; margin: 0; border: 0; border-radius: 0; display: flex; flex-direction: column; overflow: hidden;
+  padding: calc(10px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left)); }
+body.chartfull #histCard > :is(h2, .hist-extra, #avgNote, #stats, #zoomRow, #noData), body.chartfull #histCount { display: none !important; }
+body.chartfull #chartWrap { flex: 1 1 0; min-height: 120px; touch-action: none; }
+body.chartfull #chart { position: absolute; inset: 0; height: 100%; }
+@media (orientation: landscape) and (max-height: 500px) {
+  body.chartfull #histCard { display: grid; grid-template-columns: auto auto 1fr; grid-template-rows: auto minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; }
+  body.chartfull #histCard > .row { margin: 0; flex-wrap: nowrap; }
+  body.chartfull #selRow { grid-area: 1 / 1; min-width: 0; } body.chartfull #selRow .selwrap { max-width: 150px; }
+  body.chartfull #stepBtns { grid-area: 1 / 2; } body.chartfull #rangeBtns { grid-area: 1 / 3; }
+  body.chartfull #resSel, body.chartfull #btnCompare, body.chartfull #histCard > .legend { display: none !important; }
+  body.chartfull #chartWrap { grid-area: 2 / 1 / 3 / -1; align-self: stretch; min-height: 0; margin: 0; }
+  body.chartfull #cmpChips { grid-area: 3 / 1 / 4 / -1; flex-wrap: nowrap; overflow: auto hidden; margin: 0; } body.chartfull .chip { flex: none; } body.chartfull .chip::after { inset: 0; }
+  body.chartfull #readout { grid-area: 2 / 1 / 3 / -1; place-self: start center; z-index: 1; min-height: 0; margin: 0 44px; padding: 0 6px; font-size: 12px; background: var(--card); pointer-events: none; }
+}
 /* Stats under the chart: a table - rows Latest / Lowest / Highest / Average, a column per measurement. */
 .stats { margin-top: 8px; }
 .stats table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
@@ -413,16 +451,19 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
     <p class="muted hist-extra" style="margin-top:0"><span id="storageShort">Saved only on this phone.</span> <button class="linkbtn info" data-more="storageInfo">Where exactly?</button></p>
     <p class="muted hist-extra hidden" id="storageInfo"></p>
     <p id="noData">No readings yet. Connect to a sensor on the Sensor tab and download from it, or import a CSV file here. <a href="?demo&amp;tab=history">See the demo</a>.</p>
-    <div class="row">
+    <div class="row" id="selRow">
       <span class="selwrap"><span class="selshow" id="histDevShow" aria-hidden="true"></span><select id="histDev" aria-label="Sensor"><option value="">(no data yet)</option></select></span>
+      <button class="seg" id="btnCompare" aria-pressed="false">Compare</button>
       <span class="muted" id="histCount"></span>
     </div>
+    <div id="cmpChips" role="group" aria-label="Sensors to compare"></div>
     <div class="row" id="rangeBtns">
       <button class="seg" data-h="24">24 h</button>
       <button class="seg on" data-h="168">7 d</button>
       <button class="seg" data-h="720">30 d</button>
       <button class="seg" data-h="8760">1 y</button>
       <button class="seg" data-h="0">All</button>
+      <button class="seg icon" id="fullBtn" aria-label="Full screen" title="Full screen"><svg viewBox="0 0 16 16"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg></button>
     </div>
     <div class="row" id="stepBtns">
       <button class="nav" id="btnPrev" title="Back one period">◀</button>
@@ -435,7 +476,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
     <div id="chartWrap">
       <svg id="chart" role="img" aria-label="Temperature and humidity chart"></svg>
     </div>
-    <div class="row" style="margin-top:4px">
+    <div class="row" id="zoomRow" style="margin-top:4px">
       <span id="zoomInfo" class="muted">Tap or hold to read values · drag sideways to move · pinch to zoom · double-tap to reset</span>
       <button id="btnZoomReset" class="seg hidden">Reset zoom</button>
     </div>
@@ -445,7 +486,9 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
         <button class="lg h" id="lgHum" aria-pressed="true" title="Show only humidity (tap again for both)">Humidity</button>
         <button class="lg b" id="lgBatt" aria-pressed="false" title="Show the battery voltage (tap again for temperature and humidity)">Battery</button>
       </span>
-      <span class="scalesw" role="group" aria-label="Chart style" title="Candles: first, highest, lowest and last reading per period">
+      <button class="seg icon" id="optBtn" aria-label="Chart options" title="Chart options: style and scale" aria-expanded="false" aria-controls="chartOpts"><svg viewBox="0 0 16 16"><path d="M2 4.5h6M12 4.5h2M2 11.5h2M8 11.5h6"/><circle cx="10" cy="4.5" r="1.9"/><circle cx="6" cy="11.5" r="1.9"/></svg></button>
+      <span id="chartOpts" class="hidden">
+      <span class="scalesw" id="styleSw" role="group" aria-label="Chart style" title="Candles: first, highest, lowest and last reading per period">
         <span class="muted">Style</span>
         <button class="seg" id="stLine" aria-pressed="true">Line</button><button class="seg" id="stCandle" aria-pressed="false">Candles</button>
       </span>
@@ -455,6 +498,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
         <button class="seg" id="scAuto" aria-pressed="true">Auto</button><button class="seg" id="scFixed" aria-pressed="false">Fixed</button>
       </span>
       <button class="seg" id="scFit" aria-pressed="false" disabled title="Set the fixed scale to the data shown now. Tap Fixed to go back to the limits in Settings.">Fit scale</button>
+      </span>
       </span>
     </div>
     <div id="readout" class="muted"></div>
@@ -609,7 +653,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=111"></script>
+<script src="core.js?v=112"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -717,7 +761,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 111;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 112;  // also bump core.js?v= in the <script> tag above
 const APP_DATE = "2026-11-25";  // release date of this version
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
@@ -2450,9 +2494,12 @@ function showHistDev() {
 async function loadChart() {
   showHistDev();
   const dev = $("histDev").value; lsSet("histDev", dev);
-  histData = dev ? (histCache.get(dev) || await loadHistory(dev)) : [];
+  syncCompare();
+  // Comparing: all the shown sensors' readings in one timeline (for the time range and the ◀ ▶ buttons).
+  const cmp = compareOn();
+  histData = cmp ? cmpShown().flatMap(s => histCache.get(s.id)).sort((a, b) => a[0] - b[0]) : dev ? (histCache.get(dev) || await loadHistory(dev)) : [];
   view = null; updateZoomUi();
-  $("histCount").textContent = histData.length ? `${histData.length} readings · ${localStr(histData[0][0])} → ${localStr(histData[histData.length - 1][0])}` : "";
+  $("histCount").textContent = cmp ? `${cmpShown().length} of ${count(cmpAll().length, "sensor")}` : histData.length ? `${histData.length} readings · ${localStr(histData[0][0])} → ${localStr(histData[histData.length - 1][0])}` : "";
   drawChart();
 }
 let plotted = null;
@@ -2493,7 +2540,7 @@ function scalePrefs() {
 // limits in Settings stay as they are.
 let fitScale = null;
 function fitFixedScale() {
-  if (!plotted || !plotted.dataRange || !scalePrefs().on || prefs.showB) return;
+  if (!plotted || !plotted.dataRange || !scalePrefs().on || $("scFit").disabled) return;
   const { t, h } = plotted.dataRange, f = Object.assign({}, fitScale);
   if (plotted.showT) { f.tLo = Math.floor(t[0]); f.tHi = Math.max(Math.ceil(t[1]), f.tLo + 1); }
   if (plotted.showH) { f.hLo = Math.floor(h[0]); f.hHi = Math.max(Math.ceil(h[1]), f.hLo + 1); }
@@ -2553,6 +2600,12 @@ function syncResolution(span, maxCount, minCount, shown) {
   }
   if ($("resSel").value !== String(shown)) $("resSel").value = String(shown);
 }
+function syncLegend() {
+  const b = prefs.showB === true, c = compareOn() ? cmpPrefs().m : null;
+  $("lgTemp").setAttribute("aria-pressed", String(c ? c === "t" : !b && prefs.showT !== false));
+  $("lgHum").setAttribute("aria-pressed", String(c ? c === "h" : !b && prefs.showH !== false));
+  $("lgBatt").setAttribute("aria-pressed", String(c ? c === "b" : b));
+}
 function syncStyleToggle() {
   const c = prefs.chartStyle === "candle";
   $("stLine").setAttribute("aria-pressed", String(!c));
@@ -2563,8 +2616,10 @@ function syncScaleToggle() {
   $("scAuto").setAttribute("aria-pressed", String(!on));
   $("scFixed").setAttribute("aria-pressed", String(on));
   // Only for the fixed scale, which the battery view doesn't use.
-  $("scFit").disabled = !on || !!prefs.showB || !histData.length;
-  $("scFit").setAttribute("aria-pressed", String(on && !prefs.showB && !!fitScale));
+  const bat = compareOn() ? cmpPrefs().m === "b" : !!prefs.showB;
+  $("scFit").disabled = !on || bat || !histData.length;
+  $("scFit").setAttribute("aria-pressed", String(on && !bat && !!fitScale));
+  $("optBtn").classList.toggle("changed", on || (!compareOn() && prefs.chartStyle === "candle"));  // something other than the defaults
 }
 // Visible time window {a, b} (UTC seconds) while zoomed/panned; null = follow the range buttons.
 let view = null;
@@ -2573,7 +2628,8 @@ function rangeDomain() {
   const first = histData[0][0], last = histData[histData.length - 1][0];
   return { a: prefs.range ? Math.max(first, last - prefs.range * 3600) : first, b: last };
 }
-function lowerIdx(t) { let lo = 0, hi = histData.length; while (lo < hi) { const m = (lo + hi) >> 1; if (histData[m][0] < t) lo = m + 1; else hi = m; } return lo; }
+function lowerIn(arr, t) { let lo = 0, hi = arr.length; while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m][0] < t) lo = m + 1; else hi = m; } return lo; }
+const lowerIdx = t => lowerIn(histData, t);
 // ◀ / ▶ only when there is older / newer data outside the visible window; Today only with data.
 function syncStepButtons() {
   const prev = $("btnPrev"), next = $("btnNext"), today = $("btnToday"); if (!prev) return;
@@ -2583,14 +2639,84 @@ function syncStepButtons() {
   next.disabled = !dom || dom.b >= last - 1;
   today.disabled = !dom;
 }
+// "Nice" axis steps: 1, 2, 2.5 or 5 × 10ⁿ.
+const niceStep = raw => { const e = Math.pow(10, Math.floor(Math.log10(raw))); for (const f of [1, 2, 2.5, 5, 10]) if (f * e >= raw - 1e-12) return f * e; return 10 * e; };
+// Parts of every chart. env: { el, col, x, L, T, pw, ph, t0, t1, span, clipX } of the chart being drawn.
+function drawNight({ el, col, T, ph, t0, t1, span, clipX }) {
+  // Night shading (Settings, default 23:00-07:00 local) when a week or less is shown - makes daily rhythms easy to see.
+  if (prefs.nightShade !== false && span <= 8 * 86400) {
+    const [fh, fm] = nightHours().from, [th, tm] = nightHours().to;
+    const overnight = fh * 60 + fm >= th * 60 + tm;   // e.g. 23:00 → 07:00 runs into the next day
+    const d = new Date(t0 * 1000); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - 1);
+    while (d.getTime() / 1000 < t1) {
+      const s = new Date(d); s.setHours(fh, fm, 0, 0);
+      const e = new Date(d); if (overnight) e.setDate(e.getDate() + 1); e.setHours(th, tm, 0, 0);
+      const [xa, xb] = clipX(s / 1000, e / 1000);
+      if (xb > xa) el("rect", { x: xa, y: T, width: xb - xa, height: ph, fill: col("--muted"), "fill-opacity": 0.07 });
+      d.setDate(d.getDate() + 1);
+    }
+  }
+}
+function drawTimeAxis({ el, col, x, L, T, pw, ph, t0, t1, span }) {
+  // Time axis: ticks at round local times (15 min … 12 h, midnights, Mondays, 1st of month), labels
+  // in English like the rest of the app, on two lines: time/day on top, date/month/year below where it changes.
+  const fmt = o => new Intl.DateTimeFormat(LOCALE, o);
+  const formatsFor = unit => [
+    unit === "subday" ? fmt({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+      : unit === "day" ? fmt({ weekday: "short", day: "numeric" })
+      : unit === "week" ? fmt({ day: "numeric", month: "short" }) : fmt({ month: "short" }),
+    unit === "subday" ? fmt({ weekday: "short", day: "numeric", month: "short" })
+      : unit === "day" ? fmt({ month: "short" }) : fmt({ year: "numeric" })];
+  // Labels are measured (not guessed), so long names like "Wed 17" or "17 Nov" never overlap on a small
+  // phone: start from the width-based tick count and use fewer ticks until every top-line label fits.
+  const textW = measureText11();
+  const anchorOf = xx => xx - L < 18 ? "start" : L + pw - xx < 18 ? "end" : "middle";
+  const extent = (xx, w) => { const a = anchorOf(xx); return a === "start" ? [xx, xx + w] : a === "end" ? [xx - w, xx] : [xx - w / 2, xx + w / 2]; };
+  const fits = (ticks, f, bold) => { let right = -Infinity;
+    for (const t of ticks) { const [l, r] = extent(x(t), textW(f.format(new Date(t * 1000)), bold)); if (l < right + 6) return false; right = r; }
+    return true; };
+  let tk, f1, f2;
+  for (let n = Math.max(3, Math.floor(pw / 56)), m = Math.max(3, Math.floor(pw / 42)); ; n--, m--) {
+    tk = timeTicks(t0, t1, Math.max(1, n), Math.max(1, m)); [f1, f2] = formatsFor(tk.unit);
+    if (fits(tk.ticks, f1, false) || (n <= 1 && m <= 1)) break;
+  }
+  const key2 = d => tk.unit === "subday" ? d.toDateString() : tk.unit === "day" ? `${d.getFullYear()}-${d.getMonth()}` : String(d.getFullYear());
+  let prevKey = null, right2 = -Infinity;
+  for (const t of tk.ticks) {
+    const xx = x(t), d = new Date(t * 1000);
+    const isMidnight = d.getHours() === 0 && d.getMinutes() === 0;
+    // Vertical gridline: stronger at day starts (or month starts for long ranges).
+    el("line", { x1: xx, x2: xx, y1: T, y2: T + ph, stroke: col(isMidnight && tk.unit === "subday" ? "--muted" : "--line"),
+      "stroke-width": 1, "stroke-opacity": isMidnight && tk.unit === "subday" ? 0.45 : 1 });
+    const anchor = anchorOf(xx);
+    el("text", { x: xx, y: T + ph + 14, "text-anchor": anchor, "font-size": 11, fill: col("--muted") }, f1.format(d));
+    const k2 = key2(d);
+    if (k2 !== prevKey) {
+      // Second line (date / month / year where it changes): skipped if it would run into the previous one.
+      const s2 = f2.format(d), [l2, r2] = extent(xx, textW(s2, true));
+      if (l2 >= right2 + 6) { el("text", { x: xx, y: T + ph + 28, "text-anchor": anchor, "font-size": 11, "font-weight": 600, fill: col("--text") }, s2); right2 = r2; }
+      prevKey = k2;
+    }
+  }
+  // Daylight-saving changes in view: a dotted line, labelled while the view is short enough to have room.
+  for (const c of dstChanges(t0, t1)) {
+    const xx = x(c.t), h = Math.abs(c.delta) / 60, nearRight = xx > L + pw - 100;
+    el("line", { x1: xx, x2: xx, y1: T, y2: T + ph, stroke: col("--warn"), "stroke-width": 1.2, "stroke-dasharray": "2 3" });
+    if (span <= 60 * 86400)
+      el("text", { x: xx + (nearRight ? -4 : 4), y: T + 11, "text-anchor": nearRight ? "end" : "start", "font-size": 10, "font-weight": 600, fill: col("--warn") },
+        `clocks ${c.delta < 0 ? "back" : "forward"} ${h} h`);
+  }
+}
 function drawChart() {
   syncStepButtons(); syncScaleToggle();
-  const svg = $("chart"); const W = svg.clientWidth || 600, H = 276;
+  const svg = $("chart"); const W = svg.clientWidth || 600, H = Math.max(120, svg.clientHeight || 276);
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.innerHTML = "";
   const css = getComputedStyle(document.documentElement);
   const col = n => css.getPropertyValue(n).trim();
   const dom = view || rangeDomain();
   $("stats").innerHTML = ""; $("readout").textContent = "";
+  if (compareOn()) { drawCompare(svg, W, H, col, dom); return; }
+  $("stats").className = "stats";
   // Samples inside the window (for stats) plus one neighbour on each side so lines reach the edges.
   const i0 = dom ? lowerIdx(dom.a) : 0, i1 = dom ? lowerIdx(dom.b + 1e-6) : 0;
   // Battery view: the second line (normally humidity) carries the battery voltage instead - same
@@ -2652,7 +2778,6 @@ function drawChart() {
   // "Nice" axes: a round step (1, 2, 2.5 or 5 × 10ⁿ) and a range snapped to whole steps, so labels read
   // 19 / 20 / 21 or 45 / 50 / 55. Both axes get the same number of steps so they share the gridlines.
   const nTarget = Math.max(3, Math.min(8, Math.floor(ph / 42)));
-  const niceStep = raw => { const e = Math.pow(10, Math.floor(Math.log10(raw))); for (const f of [1, 2, 2.5, 5, 10]) if (f * e >= raw - 1e-12) return f * e; return 10 * e; };
   const fixed = Object.assign(scalePrefs(), fitScale);
   const axis = (i, minSpan) => {
     let [lo, hi] = range(i);
@@ -2714,19 +2839,8 @@ function drawChart() {
   hp.appendChild(hl); defs.appendChild(hp);
   const clipX = (a, b) => [Math.max(L, x(a)), Math.min(L + pw, x(b))];
 
-  // Night shading (Settings, default 23:00-07:00 local) when a week or less is shown - makes daily rhythms easy to see.
-  if (prefs.nightShade !== false && span <= 8 * 86400) {
-    const [fh, fm] = nightHours().from, [th, tm] = nightHours().to;
-    const overnight = fh * 60 + fm >= th * 60 + tm;   // e.g. 23:00 → 07:00 runs into the next day
-    const d = new Date(t0 * 1000); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - 1);
-    while (d.getTime() / 1000 < t1) {
-      const s = new Date(d); s.setHours(fh, fm, 0, 0);
-      const e = new Date(d); if (overnight) e.setDate(e.getDate() + 1); e.setHours(th, tm, 0, 0);
-      const [xa, xb] = clipX(s / 1000, e / 1000);
-      if (xb > xa) el("rect", { x: xa, y: T, width: xb - xa, height: ph, fill: col("--muted"), "fill-opacity": 0.07 });
-      d.setDate(d.getDate() + 1);
-    }
-  }
+  const env = { el, col, x, L, T, pw, ph, t0, t1, span, clipX };
+  drawNight(env);
 
   // Gaps: stretches with no readings (longer than 6x the usual spacing, and at least an hour).
   const rawGaps = []; for (let i = 1; i < lineData.length && rawGaps.length < 2000; i++) rawGaps.push(lineData[i][0] - lineData[i - 1][0]);
@@ -2742,54 +2856,7 @@ function drawChart() {
     if (xb - xa >= 2) el("rect", { x: xa, y: T, width: xb - xa, height: ph, fill: "url(#gapHatch)" });
   }
 
-  // Time axis: ticks at round local times (15 min … 12 h, midnights, Mondays, 1st of month), labels
-  // in English like the rest of the app, on two lines: time/day on top, date/month/year below where it changes.
-  const fmt = o => new Intl.DateTimeFormat(LOCALE, o);
-  const formatsFor = unit => [
-    unit === "subday" ? fmt({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
-      : unit === "day" ? fmt({ weekday: "short", day: "numeric" })
-      : unit === "week" ? fmt({ day: "numeric", month: "short" }) : fmt({ month: "short" }),
-    unit === "subday" ? fmt({ weekday: "short", day: "numeric", month: "short" })
-      : unit === "day" ? fmt({ month: "short" }) : fmt({ year: "numeric" })];
-  // Labels are measured (not guessed), so long names like "Wed 17" or "17 Nov" never overlap on a small
-  // phone: start from the width-based tick count and use fewer ticks until every top-line label fits.
-  const textW = measureText11();
-  const anchorOf = xx => xx - L < 18 ? "start" : L + pw - xx < 18 ? "end" : "middle";
-  const extent = (xx, w) => { const a = anchorOf(xx); return a === "start" ? [xx, xx + w] : a === "end" ? [xx - w, xx] : [xx - w / 2, xx + w / 2]; };
-  const fits = (ticks, f, bold) => { let right = -Infinity;
-    for (const t of ticks) { const [l, r] = extent(x(t), textW(f.format(new Date(t * 1000)), bold)); if (l < right + 6) return false; right = r; }
-    return true; };
-  let tk, f1, f2;
-  for (let n = Math.max(3, Math.floor(pw / 56)), m = Math.max(3, Math.floor(pw / 42)); ; n--, m--) {
-    tk = timeTicks(t0, t1, Math.max(1, n), Math.max(1, m)); [f1, f2] = formatsFor(tk.unit);
-    if (fits(tk.ticks, f1, false) || (n <= 1 && m <= 1)) break;
-  }
-  const key2 = d => tk.unit === "subday" ? d.toDateString() : tk.unit === "day" ? `${d.getFullYear()}-${d.getMonth()}` : String(d.getFullYear());
-  let prevKey = null, right2 = -Infinity;
-  for (const t of tk.ticks) {
-    const xx = x(t), d = new Date(t * 1000);
-    const isMidnight = d.getHours() === 0 && d.getMinutes() === 0;
-    // Vertical gridline: stronger at day starts (or month starts for long ranges).
-    el("line", { x1: xx, x2: xx, y1: T, y2: T + ph, stroke: col(isMidnight && tk.unit === "subday" ? "--muted" : "--line"),
-      "stroke-width": 1, "stroke-opacity": isMidnight && tk.unit === "subday" ? 0.45 : 1 });
-    const anchor = anchorOf(xx);
-    el("text", { x: xx, y: T + ph + 14, "text-anchor": anchor, "font-size": 11, fill: col("--muted") }, f1.format(d));
-    const k2 = key2(d);
-    if (k2 !== prevKey) {
-      // Second line (date / month / year where it changes): skipped if it would run into the previous one.
-      const s2 = f2.format(d), [l2, r2] = extent(xx, textW(s2, true));
-      if (l2 >= right2 + 6) { el("text", { x: xx, y: T + ph + 28, "text-anchor": anchor, "font-size": 11, "font-weight": 600, fill: col("--text") }, s2); right2 = r2; }
-      prevKey = k2;
-    }
-  }
-  // Daylight-saving changes in view: a dotted line, labelled while the view is short enough to have room.
-  for (const c of dstChanges(t0, t1)) {
-    const xx = x(c.t), h = Math.abs(c.delta) / 60, nearRight = xx > L + pw - 100;
-    el("line", { x1: xx, x2: xx, y1: T, y2: T + ph, stroke: col("--warn"), "stroke-width": 1.2, "stroke-dasharray": "2 3" });
-    if (span <= 60 * 86400)
-      el("text", { x: xx + (nearRight ? -4 : 4), y: T + 11, "text-anchor": nearRight ? "end" : "start", "font-size": 10, "font-weight": 600, fill: col("--warn") },
-        `clocks ${c.delta < 0 ? "back" : "forward"} ${h} h`);
-  }
+  drawTimeAxis(env);
   // break lines on gaps > 6x median spacing
   const gaps = []; for (let i = 1; i < pts.length; i++) gaps.push(pts[i][0] - pts[i - 1][0]);
   const med = gaps.slice().sort((a, b) => a - b)[gaps.length >> 1] || 1;
@@ -2885,11 +2952,190 @@ function drawChart() {
       `<td><b>${esc(c[r][0])}</b>${r > 0 && c[r][1] ? `<span class="when">${esc(c[r][1])}</span>` : ""}</td>`).join("")}</tr>`).join("");
   $("stats").innerHTML = `<table>${head}${body}</table>`;
 }
+// ===== Comparing sensors: one measurement, a line per sensor =====
+// prefs.cmp = { on, m: "t" | "h" | "b", sel: { sensor ID: slot } }. A sensor keeps its slot (colour and
+// line style) while it's shown, whatever else is switched on or off: 4 colours (told apart with every
+// kind of colour vision), solid for slots 0-3 and dashed for 4-7.
+const CMP_MAX = 8;
+function cmpPrefs() { return Object.assign({ on: false, m: "t", sel: null }, prefs.cmp || {}); }
+const compareOn = () => cmpPrefs().on && cmpAll().length > 1;
+const cmpAll = () => [...histCache.keys()].filter(id => histCache.get(id).length).sort((a, b) => byText(histLabel(a), histLabel(b)));
+function cmpSel() {
+  const all = cmpAll(), sel = cmpPrefs().sel;
+  if (!sel) return Object.fromEntries(all.slice(0, 4).map((id, i) => [id, i]));  // first time: up to four
+  return Object.fromEntries(Object.entries(sel).filter(([id]) => all.includes(id)));
+}
+const cmpShown = () => { const s = cmpSel(); return cmpAll().filter(id => id in s).map(id => ({ id, slot: s[id] })); };
+const slotColor = slot => `--c${slot % 4 + 1}`;
+function setCmp(upd) { prefs.cmp = Object.assign(cmpPrefs(), upd); savePrefs(); }
+function lineSample(slot) {
+  const i = document.createElement("i"); i.className = "ln" + (slot >= 4 ? " dash" : ""); i.setAttribute("aria-hidden", "true");
+  if (slot != null) i.style.borderTopColor = `var(${slotColor(slot)})`;
+  return i;
+}
+function syncCompare() {
+  const on = compareOn(), all = cmpAll();
+  document.body.classList.toggle("comparing", on);
+  $("btnCompare").classList.toggle("hidden", all.length < 2);
+  $("btnCompare").setAttribute("aria-pressed", String(on));
+  syncLegend();
+  if (!on) return;
+  const sel = cmpSel();
+  $("cmpChips").replaceChildren(...all.map(id => {
+    const b = document.createElement("button"); b.className = "chip"; b.setAttribute("aria-pressed", String(id in sel));
+    b.append(lineSample(sel[id]), histLabel(id));
+    b.onclick = () => {
+      const s = cmpSel();
+      if (id in s) delete s[id];
+      else {
+        const used = Object.values(s), slot = [...Array(CMP_MAX).keys()].find(k => !used.includes(k));
+        if (slot == null) { toast(`Up to ${CMP_MAX} sensors at once`, "warn"); return; }
+        s[id] = slot;
+      }
+      setCmp({ sel: s });
+      const keep = view; loadChart().then(() => { if (keep && histData.length) { view = keep; drawChart(); updateZoomUi(); } });
+    };
+    return b;
+  }));
+}
+function drawCompare(svg, W, H, col, dom) {
+  const m = cmpPrefs().m, unit = { t: "°C", h: "%", b: "V" }[m], dec = { t: 2, h: 1, b: 3 }[m];
+  const get = m === "b" ? s => s[3] / 1000 : m === "h" ? s => s[2] : s => s[1];
+  const L = 40, R = 14, T = 22, B = 40, pw = W - L - R, ph = H - T - B;
+  const note = $("avgNote"); note.classList.add("hidden"); plotted = null;
+  const shown = cmpShown(), empty = text => { svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" fill="${col("--muted")}" font-size="14">${text}</text>`; };
+  if (!shown.length) { syncResolution(0, 1, 1, prefs.resolution || 0); empty("Tap a sensor above to show it"); return; }
+  if (!dom || dom.b - dom.a <= 0) { empty("No data in this range"); return; }
+  const t0 = dom.a, t1 = dom.b, span = Math.max(1, t1 - t0);
+  // Resolution as in the line chart: the chosen period (or the closest that fits), else slices or single readings.
+  const steps = [];
+  for (const { id } of shown) { const a = histCache.get(id); for (let i = Math.max(1, a.length - 60); i < a.length; i++) steps.push(a[i][0] - a[i - 1][0]); }
+  const interval = steps.length ? steps.sort((a, b) => a - b)[steps.length >> 1] : 600;
+  const wanted = prefs.resolution || 0, period = wanted ? closestPeriod(wanted, span, pw * 4, 2) : 0;
+  syncResolution(span, pw * 4, 2, wanted ? period : 0);
+  const slice = period ? 0 : sliceWidth(span, Math.max(50, Math.floor(W / 2)), interval), grouped = !!(period || slice);
+  const pStart = t => period ? periodStart(t, period) : Math.floor(t / slice) * slice, pEnd = s => period ? periodEnd(s, period) : s + slice;
+  let anyAvg = false;
+  const series = shown.map(({ id, slot }) => {
+    const arr = histCache.get(id), i0 = lowerIn(arr, t0), i1 = lowerIn(arr, t1 + 1e-6);
+    // The window plus a neighbour on each side; whole groups, so points don't change while dragging.
+    let j0 = Math.max(0, (grouped ? lowerIn(arr, pStart(t0)) : i0) - 1), j1 = Math.min(arr.length, (grouped ? lowerIn(arr, pEnd(pStart(t1))) : i1) + 1);
+    if (grouped && j1 > j0) { j0 = lowerIn(arr, pStart(arr[j0][0])); j1 = lowerIn(arr, pEnd(pStart(arr[j1 - 1][0]))); }
+    const ok = s => m !== "b" || s[3] > 0, part = arr.slice(j0, j1).filter(ok);
+    const pts = grouped ? averageSlices(part.map(s => [s[0], get(s), 0, 0]), period ? periodKey(period) : slice).map(p => [p[0], p[1], p[3]]) : part.map(s => [s[0], get(s), 1]);
+    if (pts.some(p => p[2] > 1)) anyAvg = true;
+    return { id, slot, color: col(slotColor(slot)), dash: slot >= 4 ? "6 4" : null, pts, raw: arr.slice(i0, i1).filter(ok) };
+  });
+  let lo = Infinity, hi = -Infinity;
+  for (const s of series) for (const p of s.pts) if (p[0] >= t0 && p[0] <= t1) { lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]); }
+  if (lo > hi) { empty("No data in this range"); return; }
+  const dataRange = [lo, hi], fixed = Object.assign(scalePrefs(), fitScale);
+  if (fixed.on && m !== "b") [lo, hi] = m === "t" ? [fixed.tLo, fixed.tHi] : [fixed.hLo, fixed.hHi];
+  const minSpan = { t: 1, h: 5, b: 0.05 }[m];
+  if (hi - lo < minSpan) { const c = (lo + hi) / 2; lo = c - minSpan / 2; hi = c + minSpan / 2; }
+  let step = niceStep((hi - lo) / Math.max(3, Math.min(8, Math.floor(ph / 42))));
+  if (m === "t") step = [1, 2, 5, 10, 20, 50].find(s => s >= step - 1e-9) || step;
+  const aLo = Math.floor(lo / step + 1e-9) * step, n = Math.max(1, Math.ceil((hi - aLo) / step - 1e-9)), aHi = aLo + n * step;
+  const decimals = Math.abs(step - Math.round(step)) < 1e-9 ? 0 : Math.abs(step * 10 - Math.round(step * 10)) < 1e-9 ? 1 : 2;
+  const x = t => L + (t - t0) / span * pw, y = v => T + (1 - (v - aLo) / (aHi - aLo)) * ph;
+  const ns = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs, text) => { const e = document.createElementNS(ns, tag); for (const k in attrs) if (attrs[k] != null) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; svg.appendChild(e); return e; };
+  const clipX = (a, b) => [Math.max(L, x(a)), Math.min(L + pw, x(b))];
+  const cf = comfortPrefs();
+  if (cf.on && m !== "b") {
+    const [a, b] = m === "t" ? [cf.tLo, cf.tHi] : [cf.hLo, cf.hHi], top = Math.max(T, y(b)), bot = Math.min(T + ph, y(a));
+    if (bot > top) el("rect", { x: L, y: top, width: pw, height: bot - top, fill: col("--muted"), "fill-opacity": 0.08 });
+  }
+  for (let k = 0; k <= n; k++) {
+    const yy = T + ph * (1 - k / n);
+    el("line", { x1: L, x2: W - R, y1: yy, y2: yy, stroke: col("--line"), "stroke-width": 1 });
+    el("text", { x: L - 5, y: yy + 4, "text-anchor": "end", "font-size": 11, fill: col("--muted") }, (aLo + k * step).toFixed(decimals));
+  }
+  el("text", { x: L - 5, y: T - 9, "text-anchor": "end", "font-size": 11, "font-weight": 600, fill: col("--muted") }, unit);
+  const defs = el("defs", {}), cp = document.createElementNS(ns, "clipPath"), cr = document.createElementNS(ns, "rect");
+  cp.setAttribute("id", "plotClip"); [["x", L], ["y", T - 2], ["width", pw], ["height", ph + 4]].forEach(([k, v]) => cr.setAttribute(k, v)); cp.appendChild(cr); defs.appendChild(cp);
+  const env = { el, col, x, L, T, pw, ph, t0, t1, span, clipX };
+  drawNight(env); drawTimeAxis(env);
+  for (const s of series) {
+    const gaps = []; for (let i = 1; i < s.pts.length; i++) gaps.push(s.pts[i][0] - s.pts[i - 1][0]);
+    s.gap = Math.max((gaps.sort((a, b) => a - b)[gaps.length >> 1] || 1) * 6, 3600);  // the line is broken there
+    const d = s.pts.map((p, i) => `${i && p[0] - s.pts[i - 1][0] <= s.gap ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join("");
+    el("path", { d, fill: "none", stroke: s.color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-dasharray": s.dash, "clip-path": "url(#plotClip)" });
+    if (s.pts.length <= 40) for (const p of s.pts) el("circle", { cx: x(p[0]), cy: y(p[1]), r: 2.5, fill: s.color, "clip-path": "url(#plotClip)" });
+  }
+  const cursor = el("line", { x1: 0, x2: 0, y1: T, y2: T + ph, stroke: col("--muted"), "stroke-dasharray": "3 3", visibility: "hidden" });
+  const markerLayer = el("g", {});
+  const times = []; for (const s of series) for (const p of s.pts) if (p[0] >= t0 && p[0] <= t1) times.push(p[0]);
+  plotted = { compare: series, pts: times.map(t => [t]), x, y, cursor, L, pw, T, ph, showT: m === "t", showH: m === "h", markerLayer, colBg: col("--card"), unit, dec,
+    dataRange: { t: dataRange, h: dataRange } };
+  const tooMuch = wanted && period !== wanted ? `${periodLabel(wanted)} doesn't fit this range, so ${period ? `it's ${periodLabel(period)} here` : "the resolution is automatic here"}. ` : "";
+  note.textContent = tooMuch + (anyAvg ? `Each point is an average of ${period ? periodLabel(period) : fmtDuration(slice)}.` : "");
+  note.classList.toggle("hidden", !note.textContent);
+  // Table: a row per sensor, from the raw readings in view.
+  const tb = document.createElement("table"), head = tb.insertRow();
+  for (const h of ["", "Latest", "Lowest", "Highest", "Average"]) { const th = document.createElement("th"); th.textContent = h === "Latest" ? `Latest ${unit}` : h; head.append(th); }
+  for (const s of series) {
+    const r = tb.insertRow(), c0 = r.insertCell(); c0.append(lineSample(s.slot), histLabel(s.id));
+    const v = s.raw.map(get), f = q => v.length ? q.toFixed(dec) : "–";
+    let mi = Infinity, ma = -Infinity, sum = 0; for (const q of v) { mi = Math.min(mi, q); ma = Math.max(ma, q); sum += q; }
+    for (const q of [v[v.length - 1], mi, ma, sum / v.length]) { const b = document.createElement("b"); b.textContent = f(q); r.insertCell().append(b); }
+  }
+  $("stats").className = "stats cmp"; $("stats").replaceChildren(tb);
+}
+// Compare: the value of every line at the point in time nearest to the finger.
+function showCompareAt(px) {
+  const P = plotted; if (!P.pts.length) return;
+  let t = P.pts[0][0]; for (const [q] of P.pts) if (Math.abs(P.x(q) - px) < Math.abs(P.x(t) - px)) t = q;
+  P.cursor.setAttribute("x1", P.x(t)); P.cursor.setAttribute("x2", P.x(t)); P.cursor.setAttribute("visibility", "visible");
+  P.markerLayer.innerHTML = "";
+  const when = document.createElement("span"); when.className = "rv"; when.textContent = localStrZ(t);
+  const out = [when];
+  for (const s of P.compare) {
+    if (!s.pts.length) continue;
+    let k = Math.min(s.pts.length - 1, lowerIn(s.pts, t)); if (k && Math.abs(s.pts[k - 1][0] - t) < Math.abs(s.pts[k][0] - t)) k--;
+    const p = s.pts[k]; if (Math.abs(p[0] - t) > s.gap) continue;  // no reading near this time
+    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    for (const [a, v] of [["cx", P.x(p[0])], ["cy", P.y(p[1])], ["r", 4], ["fill", s.color], ["stroke", P.colBg], ["stroke-width", 2], ["clip-path", "url(#plotClip)"]]) c.setAttribute(a, v);
+    P.markerLayer.append(c);
+    const v = document.createElement("span"); v.className = "rv"; v.append(lineSample(s.slot), `${histLabel(s.id)} ${p[1].toFixed(P.dec)} ${P.unit}`); out.push(v);
+  }
+  $("readout").replaceChildren(...out);
+}
+
+// ===== Full-screen chart =====
+// The button, or turning the phone sideways while the chart is on screen (turning it back closes it).
+let fullAuto = false, fullScroll = 0;
+function setFull(on, auto = false) {
+  const c = document.body.classList;
+  if (on === c.contains("chartfull")) return;
+  if (on) fullScroll = scrollY;
+  c.toggle("chartfull", on); fullAuto = on && auto;
+  const b = $("fullBtn"), label = on ? "Close full screen" : "Full screen";
+  b.setAttribute("aria-label", label); b.title = label;
+  b.querySelector("path").setAttribute("d", on ? "M3 3l10 10M13 3L3 13" : "M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4");
+  if (!on) scrollTo(0, fullScroll);
+  drawChart(); updateZoomUi();
+}
+function setupFull() {
+  $("fullBtn").onclick = () => setFull(!document.body.classList.contains("chartfull"));
+  addEventListener("keydown", e => { if (e.key === "Escape" && !$("dlg").open) setFull(false); });
+  if (!window.matchMedia) return;
+  const side = matchMedia("(orientation: landscape) and (max-height: 500px) and (pointer: coarse)");
+  side.addEventListener?.("change", () => {
+    if (!side.matches) { if (fullAuto) setFull(false); return; }
+    const tab = document.body.dataset.tab, r = $("chart").getBoundingClientRect(), a = document.activeElement;
+    const typing = a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== "checkbox";
+    const seen = tab === "history" || (tab === "single" && r.height && r.top < innerHeight && r.bottom > 0);
+    if (seen && histData.length && !typing && !$("dlg").open) setFull(true, true);
+  });
+}
+
 // Time marker + reading under the chart, at the point nearest to a screen x position.
 function showReadoutAt(clientX) {
   if (!plotted) return;
   const svg = $("chart"), r = svg.getBoundingClientRect();
   const px = (clientX - r.left) * (svg.viewBox.baseVal.width / r.width);
+  if (plotted.compare) { showCompareAt(px); return; }
   const { pts, x, cursor } = plotted;
   if (plotted.candles && plotted.candles.length) {
     // Candle mode: snap to the nearest candle; label its close (last reading).
@@ -2968,7 +3214,7 @@ function clampShift(a, span) {
 function updateZoomUi() {
   const zr = $("btnZoomReset"), zi = $("zoomInfo"); if (!zr) return;
   zr.classList.toggle("hidden", !view);
-  zi.textContent = view ? `${localStr(view.a)} → ${localStr(view.b)}` : "Tap or hold to read values · drag sideways to move · pinch to zoom · double-tap to reset";
+  zi.textContent = view ? `${localStr(view.a)} → ${localStr(view.b)}` : (prefs.hintUses || 0) >= 5 ? "" : "Tap or hold to read values · drag sideways to move · pinch to zoom · double-tap to reset";
   document.querySelectorAll("#rangeBtns .seg").forEach(x => x.classList.toggle("on", !view && +x.dataset.h === prefs.range));
 }
 let drawQueued = false;
@@ -3027,6 +3273,8 @@ function setupChartGestures() {
     if (g && g.holdTimer) clearTimeout(g.holdTimer);
     // A quick tap (no movement, released before the hold) shows the reading at that point.
     if (g && g.mode === "?" && e.touches.length === 0 && e.type === "touchend") showReadoutAt(g.x0);
+    // The hint under the chart goes away once the gestures have been used a few times.
+    if (g && ["pan", "pinch", "scrub"].includes(g.mode) && e.type === "touchend" && (prefs.hintUses || 0) < 5) { prefs.hintUses = (prefs.hintUses || 0) + 1; savePrefs(); }
     if (e.touches.length === 0 || (g && g.mode === "pinch")) g = null;
     if (e.touches.length === 0) chartTouching = false;
   };
@@ -3090,6 +3338,7 @@ async function copyLog() {
 
 function showTab(t) {
   if (!["single", "all", "history", "settings"].includes(t)) t = "single";
+  setFull(false);
   document.body.dataset.tab = t;
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.go === t));
   lsSet("tab", t);
@@ -3237,16 +3486,11 @@ function updateStatusBar() {
   };
   $("chart").addEventListener("pointermove", onChartPointer);
   setupChartGestures();
-  // Legend toggles: hide/show temperature or humidity (at least one stays visible).
-  const syncLegend = () => {
-    const b = prefs.showB === true;
-    $("lgTemp").setAttribute("aria-pressed", String(!b && prefs.showT !== false));
-    $("lgHum").setAttribute("aria-pressed", String(!b && prefs.showH !== false));
-    $("lgBatt").setAttribute("aria-pressed", String(b));
-  };
   // Tap a legend entry to show only that line; tap it again (while it's the only one) to show both.
   // Battery is shown on its own (its own axis in volts); tapping it again goes back to the other two.
+  // Comparing sensors: the entry chooses the measurement.
   const toggleSeries = (key, other) => {
+    if (compareOn()) { setCmp({ m: key === "showT" ? "t" : "h" }); syncLegend(); drawChart(); return; }
     if (prefs.showB) { prefs.showB = false; prefs[key] = true; prefs[other] = false; }
     else { const onlyThis = prefs[key] !== false && prefs[other] === false; prefs[key] = true; prefs[other] = onlyThis; }
     savePrefs(); syncLegend(); drawChart();
@@ -3254,11 +3498,17 @@ function updateStatusBar() {
   $("lgTemp").onclick = () => toggleSeries("showT", "showH");
   $("lgHum").onclick = () => toggleSeries("showH", "showT");
   $("lgBatt").onclick = () => {
+    if (compareOn()) { setCmp({ m: "b" }); syncLegend(); drawChart(); return; }
     prefs.showB = !prefs.showB;
     if (!prefs.showB) { prefs.showT = true; prefs.showH = true; }
     savePrefs(); syncLegend(); drawChart();
   };
   syncLegend();
+  $("btnCompare").onclick = () => { setCmp({ on: !compareOn() }); loadChart(); };
+  const syncOpts = () => { $("chartOpts").classList.toggle("hidden", !prefs.chartOpts); $("optBtn").setAttribute("aria-expanded", String(!!prefs.chartOpts)); };
+  $("optBtn").onclick = () => { prefs.chartOpts = !prefs.chartOpts; savePrefs(); syncOpts(); };
+  syncOpts();
+  setupFull();
   setupChartSettings();
   $("chart").addEventListener("pointerdown", onChartPointer);
   window.addEventListener("resize", () => drawChart());
