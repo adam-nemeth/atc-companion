@@ -30,7 +30,7 @@ Your data stays on your phone. Nothing is sent anywhere. The app reminds you to 
 
 ## For developers
 
-The app is a single page, [`index.html`](index.html), with its logic in [`core.js`](core.js). Tests need no installs:
+The app is a single page, [`index.html`](index.html), with its logic in [`core.js`](core.js). Tests need no installs, and run on GitHub with every push:
 
 ```
 node --test tests/
