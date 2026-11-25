@@ -46,6 +46,7 @@ h2 { font-size: 16px; margin: 0 0 10px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .row + .row { margin-top: 8px; }
+.row:has(> span:only-child:empty) { display: none; }  /* a message that isn't there takes no room */
 button { font: inherit; border: 1px solid var(--line); background: var(--input); color: var(--text);
   border-radius: 9px; padding: 9px 14px; min-height: 42px; cursor: pointer; }
 button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
@@ -195,6 +196,26 @@ body:not(.nodata) #noData { display: none; }
 .br.ok .ic, .br.ok .tx { color: var(--ok); } .br.err .ic, .br.err .tx { color: var(--err); } .br.run .ic, .br.run .tx { color: var(--warn); }
 #batchHead { margin: 0 0 4px; }
 #batchCard { scroll-margin-top: 70px; }
+#rcol { display: contents; }
+body.devfirst[data-tab="single"] #rcol > section { order: 9; }
+/* Computer: sensors on the left, chart (or the batch) on the right */
+@media (min-width: 1000px) and (min-height: 501px) {
+  body:is([data-tab="single"], [data-tab="all"], [data-tab="history"]) main { max-width: 1240px; }
+  body:not(.chartfull) #histCard #chart { height: 380px; }
+  body:is([data-tab="single"], [data-tab="all"]) main, body.devfirst[data-tab="single"] main { display: grid; grid-template-columns: 380px minmax(0, 1fr); column-gap: 14px; align-items: start;
+    grid-template-rows: auto 54px repeat(8, auto) 1fr; }
+  main > h1, main > #demoBanner, main > #backupBanner, main > #noBle { grid-column: 1 / -1; }
+  main > h1 { grid-row: 1; } main > #demoBanner { grid-row: 3; } main > #backupBanner { grid-row: 4; } main > #noBle { grid-row: 5; }
+  main > .tabs { grid-column: 1 / -1; grid-row: 2 / -1; align-self: start; }  /* the whole height, so it stays at the top while scrolling */
+  body[data-tab="single"] main > section { grid-column: 1; }
+  body[data-tab="single"] #rcol { display: block; grid-column: 2; grid-row: 6 / -1; }
+  #roomsCard { grid-row: 6; } #knownCard { grid-row: 7; } #deviceCard { grid-row: 8; } #dumpCard { grid-row: 9; } #clockCard { grid-row: 10; }
+  body.devfirst[data-tab="single"] #deviceCard { grid-row: 6; } body.devfirst[data-tab="single"] #dumpCard { grid-row: 7; } body.devfirst[data-tab="single"] #clockCard { grid-row: 8; }
+  body.devfirst[data-tab="single"] #knownCard { grid-row: 9; } body.devfirst[data-tab="single"] #roomsCard { grid-row: 10; }
+  body[data-tab="all"] #knownCard { grid-column: 1; grid-row: 6 / -1; }
+  body[data-tab="all"] main > section:not(#knownCard) { grid-column: 2; }
+  body[data-tab="all"] #batchCard { grid-row: 6; } body[data-tab="all"] #dumpCard { grid-row: 7; } body[data-tab="all"] #batchOps { grid-row: 8; }
+}
 /* Dialogs and short confirmations */
 dialog#dlg { width: min(420px, calc(100vw - 32px)); padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--text); box-shadow: 0 12px 40px rgba(0,0,0,.28); }
 dialog#dlg::backdrop { background: rgba(0,0,0,.45); }
@@ -410,7 +431,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
   </section>
 
   <!-- Batch operations -->
-  <section class="card" data-tab="all">
+  <section class="card" data-tab="all" id="batchOps">
     <h2>Batch operations</h2>
     <p class="muted">Ticked sensors are handled one after another: connect, do the job, disconnect, next.</p>
     <h3 class="sub">Clocks</h3>
@@ -445,6 +466,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
     <p class="muted" style="margin:8px 0 0"><span id="tzShort"></span> <button class="linkbtn info" onclick="showTab('settings'); $('timeMode').scrollIntoView({ block: 'center' })">Change in Settings</button></p>
   </section>
 
+  <div id="rcol">  <!-- right column on a computer -->
   <!-- History -->
   <section class="card" data-tab="single history" id="histCard">
     <h2>Stored readings</h2>
@@ -548,6 +570,8 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
       <div id="cfgForm" class="cfg-grid" style="margin-top:12px"></div>
     </details>
   </section>
+
+  </div>
 
   <!-- Settings -->
   <section class="card" data-tab="settings">
@@ -653,7 +677,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=112"></script>
+<script src="core.js?v=113"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -761,7 +785,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 112;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 113;  // also bump core.js?v= in the <script> tag above
 const APP_DATE = "2026-11-25";  // release date of this version
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);

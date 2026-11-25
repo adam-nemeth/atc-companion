@@ -7,6 +7,7 @@ A companion for [pvvx's ATC firmware](https://github.com/pvvx/ATC_MiThermometer)
 <p>
   <img src="screenshots/sensor.png" width="270" alt="Sensor tab: latest values per sensor, sensor list with log fill level">
   <img src="screenshots/history.png" width="270" alt="Readings tab: temperature and humidity chart with min/max table">
+  <img src="screenshots/compare.png" width="270" alt="Readings tab: the temperatures of three sensors compared in one chart">
 </p>
 
 ## Tribute
@@ -18,8 +19,8 @@ This only works thanks to [**pvvx/ATC_MiThermometer**](https://github.com/pvvx/A
 1. Flash the pvvx firmware onto the sensor (see the [pvvx project](https://github.com/pvvx/ATC_MiThermometer)).
 2. On the iPhone, install the free **Bluefy** browser (Safari has no Web Bluetooth) and open the link above.
 3. **Sensor** tab: *Connect…* → pick the sensor → *Download, set clock & erase…* (setting the clock and erasing the sensor's log are optional; the button says what it will do).
-4. **Readings** tab: chart (pinch to zoom, drag to move, tap for values), min/max/average, and *Share* to export CSV.
-5. **Batch** tab: the same for all your sensors in one go.
+4. **Readings** tab: chart (pinch to zoom, drag to move, tap for values, turn the phone sideways for full screen), min/max/average, *Compare* for several sensors in one chart, and *Share* to export CSV.
+5. **Batch** tab: the same for all your sensors in one go, with a retry for those that failed.
 
 Your data stays on your phone. Nothing is sent anywhere. The app reminds you to save a backup copy (to Files, iCloud Drive, mail…) now and then.
 
