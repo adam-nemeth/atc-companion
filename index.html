@@ -709,7 +709,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=121"></script>
+<script src="core.js?v=122"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -817,7 +817,7 @@ async function mergeInto(dev, newSamples) {
 // ===== Logging =====
 // Detailed debug log: every BLE packet in hex, connection-step timings, browser capabilities, errors
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
-const APP_VERSION = 121;  // also bump core.js?v= in the <script> tag above
+const APP_VERSION = 122;  // also bump core.js?v= in the <script> tag above
 const APP_DATE = "2026-11-25";  // release date of this version
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
@@ -3342,7 +3342,7 @@ function showCompareAt(px) {
     const p = s.pts[k]; if (Math.abs(p[0] - t) > s.gap) continue;  // no reading near this time
     const yy = P.y(p[1]);  // (a fixed scale can leave a line outside the plot: no tag there)
     if (yy >= P.T - 2 && yy <= P.T + P.ph + 2) tags.push({ y: yy, cx: P.x(p[0]), text: P.unit === "°C" ? `${p[1].toFixed(1)}°` : P.unit === "%" ? `${p[1].toFixed(0)}%` : `${p[1].toFixed(2)} V`,
-      color: s.color, ink: P.colText, dash: s.slot >= 4 ? "3 2" : null });
+      name: histLabel(s.id), color: s.color, ink: P.colText, dash: s.slot >= 4 ? "3 2" : null });
     const v = document.createElement("span"); v.className = "rv"; v.append(lineSample(s.slot), `${histLabel(s.id)} ${p[1].toFixed(P.dec)} ${P.unit}`); out.push(v);
   }
   drawTags(P.x(t), tags); drawTimeTag(P.x(t), tagTime(t));
@@ -3432,7 +3432,12 @@ function drawTags(cx, tags) {
   tags.sort((a, b) => a.y - b.y);
   const ty = spreadLabels(tags.map(t => t.y), Math.min(18, (P.ph - 16) / Math.max(1, tags.length - 1)), P.T + 8, P.T + P.ph - 8);
   const measure = measureText11();
-  tags.forEach(t => t.w = Math.round(measure(t.text, true)) + 11);
+  // name (comparing): the sensor's description in front of the value, shortened to fit the chart.
+  const room = P.pw * 0.45;
+  tags.forEach(t => {
+    if (t.name) { let n = t.name; while (n.length > 3 && measure(n) > room) n = n.slice(0, -2).trimEnd() + "…"; t.nm = n; t.nw = Math.round(measure(n)) + 5; }
+    t.w = Math.round(measure(t.text, true)) + 11 + (t.nw || 0);
+  });
   const widest = Math.max(0, ...tags.map(t => t.w)), left = cx + 7 + widest > P.L + P.pw + 6;
   // A tag that had to move away from its dot is joined to it by a thin line.
   tags.forEach((t, i) => { if (Math.abs(ty[i] - t.y) > 9) mk("line", { x1: cx, y1: t.y, x2: left ? cx - 7 : cx + 7, y2: ty[i], stroke: t.color, "stroke-width": 1 }); });
@@ -3440,7 +3445,8 @@ function drawTags(cx, tags) {
   tags.forEach((t, i) => {
     const w = t.w, bx = left ? cx - 7 - w : cx + 7;
     mk("rect", { x: bx, y: ty[i] - 8, width: w, height: 16, rx: 4, fill: P.colBg, stroke: t.color, "stroke-width": t.ink ? 1.5 : 1, "stroke-dasharray": t.dash });
-    mk("text", { x: bx + w / 2, y: ty[i] + 4, "text-anchor": "middle", "font-size": 11, "font-weight": 700, fill: t.ink || t.color }, t.text);
+    if (t.nm) mk("text", { x: bx + 5.5, y: ty[i] + 4, "font-size": 11, fill: P.colMuted }, t.nm);
+    mk("text", { x: bx + w - 5.5, y: ty[i] + 4, "text-anchor": "end", "font-size": 11, "font-weight": 700, fill: t.ink || t.color }, t.text);
   });
 }
 // The marker's time, on top of its line.
