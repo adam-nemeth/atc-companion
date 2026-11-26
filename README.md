@@ -13,7 +13,7 @@
 ## What you can do
 
 - **Download the sensor's own log** over Bluetooth: with the pvvx firmware, each sensor stores weeks to months of readings by itself, so you only need to come by now and then.
-- **Charts** of temperature, humidity and battery: zoom, scroll, tap for values, candles, min/max/average, night shading, full screen when you turn the phone.
+- **Charts** of temperature, humidity and battery: zoom, scroll, tap for values, candles, min/max/average, nights shaded from sunset to sunrise, full screen when you turn the phone.
 - **Compare rooms**: up to 8 sensors in one chart.
 - **Export CSV** for Excel, Numbers or Google Sheets: one or more sensors, a period of your choice, also as one ZIP file. CSV and ZIP files can be imported again.
 - **Many sensors at once**: download, set clocks and change settings for all of them in one go.

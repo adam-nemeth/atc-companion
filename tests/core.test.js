@@ -330,3 +330,51 @@ test("small helpers", () => {
   assert.equal(core.fmtDur(3725), "1 h 2 min");
   assert.equal(core.fmtDays(0.5), "12 h");
 });
+
+test("sunrise and sunset", () => {
+  const at = (iso, lat, lon) => core.sunTimes(Date.parse(iso) / 1000, lat, lon);
+  const near = (t, iso, what) => assert.ok(Math.abs(t - Date.parse(iso) / 1000) <= 180, `${what}: ${new Date(t * 1000).toISOString()} vs ${iso}`);
+  let s = at("2026-06-21T12:00Z", 47.5, 19.04);                     // Budapest, midsummer: 04:46 / 20:44 local
+  near(s.rise, "2026-06-21T02:46Z", "Budapest June rise"); near(s.set, "2026-06-21T18:44Z", "Budapest June set");
+  s = at("2026-12-21T12:00Z", 47.5, 19.04);                         // midwinter: 07:29 / 15:55 local
+  near(s.rise, "2026-12-21T06:29Z", "Budapest Dec rise"); near(s.set, "2026-12-21T14:55Z", "Budapest Dec set");
+  s = at("2026-12-21T03:00Z", -33.87, 151.21);                      // Sydney, its summer: 05:41 / 20:05 local
+  near(s.rise, "2026-12-20T18:41Z", "Sydney rise"); near(s.set, "2026-12-21T09:05Z", "Sydney set");
+  s = at("2026-03-20T12:00Z", 0, 0);                                // equator, equinox: about 12 h 7 min of day
+  near(s.rise, "2026-03-20T06:04Z", "equator rise"); near(s.set, "2026-03-20T18:11Z", "equator set");
+  assert.equal(at("2026-06-21T12:00Z", 69.65, 18.96).polar, "day");  // Tromsø: midnight sun
+  assert.equal(at("2026-12-21T12:00Z", 69.65, 18.96).polar, "night"); // polar night
+  assert.equal(at("2026-12-21T12:00Z", 47.5, 19.04).polar, null);
+  // Near the date line the day is still the one whose noon is closest.
+  s = at("2026-06-21T00:00Z", -13.83, -171.76);                       // Apia, Samoa (UTC+13), local noon
+  assert.ok(Math.abs(s.noon - Date.parse("2026-06-21T00:00Z") / 1000) < 3600);
+});
+
+test("dark spans: sunset to sunrise, joined across midnight", () => {
+  const t0 = Date.parse("2026-12-20T00:00Z") / 1000, t1 = t0 + 3 * 86400;
+  const spans = core.darkSpans(t0, t1, 47.5, 19.04);
+  assert.equal(spans.length, 4);                                     // before the 1st sunrise, 2 whole nights, after the last sunset
+  assert.equal(spans[0][0], t0); assert.equal(spans[3][1], t1);
+  for (const [a, b] of spans) assert.ok(b > a);
+  const night = spans[1][1] - spans[1][0];
+  assert.ok(night > 15.5 * 3600 && night < 16 * 3600, `${night / 3600} h`); // a Budapest midwinter night
+  for (let i = 1; i < spans.length; i++) assert.ok(spans[i][0] > spans[i - 1][1] + 6 * 3600); // days in between
+  assert.deepEqual(core.darkSpans(t0, t1, 69.65, 18.96), [[t0, t1]]);              // polar night: all dark
+  const june = Date.parse("2026-06-20T00:00Z") / 1000;
+  assert.deepEqual(core.darkSpans(june, june + 2 * 86400, 69.65, 18.96), []);       // midnight sun: no band
+});
+
+test("time zone places and typed locations", () => {
+  assert.deepEqual(core.tzPlace("Europe/Budapest"), { lat: 47.5, lon: 19.08, place: "Budapest" });
+  assert.equal(core.tzPlace("Asia/Calcutta").place, "Kolkata");      // an old name some browsers report
+  assert.equal(core.tzPlace("America/Argentina/Buenos_Aires").place, "Buenos Aires");
+  assert.ok(core.tzPlace("Australia/Sydney").lat < -33);
+  assert.equal(core.tzPlace("UTC"), null);
+  assert.equal(core.tzPlace(""), null);
+  assert.deepEqual(core.parseLatLon("47.50, 19.04"), { lat: 47.5, lon: 19.04 });
+  assert.deepEqual(core.parseLatLon(" -33.87 151.21 "), { lat: -33.87, lon: 151.21 });
+  assert.deepEqual(core.parseLatLon("47,5; 19,04"), { lat: 47.5, lon: 19.04 });
+  assert.deepEqual(core.parseLatLon("47,19"), { lat: 47, lon: 19 });
+  assert.equal(core.parseLatLon("95, 10"), null);
+  assert.equal(core.parseLatLon("Budapest"), null);
+});
