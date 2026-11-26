@@ -371,10 +371,54 @@ test("time zone places and typed locations", () => {
   assert.ok(core.tzPlace("Australia/Sydney").lat < -33);
   assert.equal(core.tzPlace("UTC"), null);
   assert.equal(core.tzPlace(""), null);
-  assert.deepEqual(core.parseLatLon("47.50, 19.04"), { lat: 47.5, lon: 19.04 });
-  assert.deepEqual(core.parseLatLon(" -33.87 151.21 "), { lat: -33.87, lon: 151.21 });
-  assert.deepEqual(core.parseLatLon("47,5; 19,04"), { lat: 47.5, lon: 19.04 });
-  assert.deepEqual(core.parseLatLon("47,19"), { lat: 47, lon: 19 });
-  assert.equal(core.parseLatLon("95, 10"), null);
-  assert.equal(core.parseLatLon("Budapest"), null);
+});
+
+test("locations typed or pasted from maps apps", () => {
+  const p = (s, ref) => core.parseLocation(s, ref);
+  const near = (got, lat, lon, tol = 1e-6) => assert.ok(got && Math.abs(got.lat - lat) < tol && Math.abs(got.lon - lon) < tol, JSON.stringify(got));
+  assert.deepEqual(p("47.50, 19.04"), { lat: 47.5, lon: 19.04 });                   // Google Maps
+  assert.deepEqual(p(" -33.87 151.21 "), { lat: -33.87, lon: 151.21 });
+  assert.deepEqual(p("47,5; 19,04"), { lat: 47.5, lon: 19.04 });
+  assert.deepEqual(p("47,19"), { lat: 47, lon: 19 });
+  near(p("47.49790° N, 19.04021° E"), 47.4979, 19.04021);                             // Apple Maps
+  near(p("33.86882° S, 151.20929° E"), -33.86882, 151.20929);
+  near(p("40.71280° N, 74.00600° W"), 40.7128, -74.006);
+  near(p("47,49790° É, 19,04021° K"), 47.4979, 19.04021);                             // Apple Maps in Hungarian
+  near(p("19.04021° E, 47.49790° N"), 47.4979, 19.04021);                             // longitude first
+  near(p(`47°29'52"N 19°2'25"E`), 47 + 29 / 60 + 52 / 3600, 19 + 2 / 60 + 25 / 3600);
+  near(p("47° 29′ 52″ N, 19° 2′ 25″ E"), 47 + 29 / 60 + 52 / 3600, 19 + 2 / 60 + 25 / 3600);
+  near(p("47.4979°, -19.04°"), 47.4979, -19.04);
+  assert.equal(p("47° N, 19° N"), null);
+  assert.equal(p("95, 10"), null);
+  assert.equal(p("Budapest"), null);
+  assert.equal(p(""), null);
+});
+
+test("Google plus codes (Open Location Code test data)", () => {
+  // code, south-west and north-east corners, from google/open-location-code test_data/decoding.csv
+  for (const row of ["7FG49Q00+,20.35,2.75,20.4,2.8", "7FG49QCJ+2V,20.37,2.782125,20.370125,2.78225",
+    "7FG49QCJ+2VX,20.3701,2.78221875,20.370125,2.78225", "7FG49QCJ+2VXGJ,20.370113,2.782234375,20.370114,2.78223632813",
+    "8FVC2222+22,47.0,8.0,47.000125,8.000125", "4VXPHWHV+,-30.4225,174.9425,-30.42,174.945",
+    "62G20000+,0.0,-180.0,1,-179", "22222222+22,-90.0,-180.0,-89.999875,-179.999875", "6FH32222+222,1,1,1.000025,1.00003125",
+    "84000000+,30,-140,50,-120", "849VGJQF+VX7QR3J7QR3J,37.5396691200,-122.3750698242,37.5396691600,-122.3750697021",
+    "8JV8RQR4+,47.84,66.755,47.8425,66.7575"]) {
+    const [code, a, b, c, d] = row.split(","), got = core.parseLocation(code);
+    assert.ok(got && Math.abs(got.lat - (+a + +c) / 2) < 1e-9 && Math.abs(got.lon - (+b + +d) / 2) < 1e-9, `${code}: ${JSON.stringify(got)}`);
+  }
+  // full code, reference place, short code, from test_data/shortCodeTests.csv
+  for (const row of ["9C3W9QCJ+2VX,51.3701125,-1.217765625,+2VX", "9C3W9QCJ+2VX,51.3708675,-1.217765625,CJ+2VX",
+    "9C3W9QCJ+2VX,51.3852125,-1.217765625,9QCJ+2VX", "8FJFW222+,42.899,9.012,22+", "796RXG22+,14.95125,-23.5001,22+",
+    "8FVC2GGG+GG,46.976,8.526,2GGG+GG", "8FRCXGGG+GG,47.026,8.526,XGGG+GG", "8FR9GXGG+GG,46.526,8.026,GXGG+GG",
+    "8FRCG2GG+GG,46.526,7.976,G2GG+GG", "CFX22222+22,89.6,0.0,2222+22", "2CXXXXXX+XX,-81.0,0.0,XXXXXX+XX",
+    "8FRCG2GG+GG,46.526,7.976,8frCG2GG+gG"]) {
+    const [full, lat, lon, short] = row.split(","), want = core.parseLocation(full), got = core.parseLocation(short, { lat: +lat, lon: +lon });
+    assert.ok(got && Math.abs(got.lat - want.lat) < 1e-9 && Math.abs(got.lon - want.lon) < 1e-9, `${short}: ${JSON.stringify(got)} vs ${JSON.stringify(want)}`);
+  }
+  // As Google Maps shows it: a short code and the area. A known place name wins over the reference.
+  const bp = core.parseLocation("F2PR+X6 Budapest, Hungary", { lat: -33.9, lon: 151.2 });
+  assert.equal(bp.near, "Budapest"); assert.ok(Math.abs(bp.lat - 47.5) < 0.1 && Math.abs(bp.lon - 19.04) < 0.1, JSON.stringify(bp));
+  assert.equal(core.parseLocation("F2PR+X6 Kőbánya", { lat: 47.5, lon: 19.08 }).near, "ref");
+  assert.equal(core.parseLocation("F2PR+X6"), null);                   // short, and nothing to place it near
+  assert.equal(core.parseLocation("F2PR0+X6"), null);
+  assert.equal(core.tzPlace("Europe/Budapest").place, "Budapest");
 });

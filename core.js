@@ -622,19 +622,85 @@ function tzPlace(zone) {
   return { lat: p.lat, lon: p.lon, place: z.slice(z.lastIndexOf("/") + 1).replace(/_/g, " ") };
 }
 
-// A typed or pasted location, e.g. "47.50, 19.04" or "47.5 19.04", → { lat, lon }, or null.
-function parseLatLon(s) {
-  const m = /^\s*(-?\d+(?:[.,]\d+)?)\s*[,;\s]\s*(-?\d+(?:[.,]\d+)?)\s*$/.exec(s || "");
-  if (!m) return null;
-  const lat = parseFloat(m[1].replace(",", ".")), lon = parseFloat(m[2].replace(",", "."));
-  return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? { lat, lon } : null;
+// A typed or pasted location → { lat, lon }, or null. Understands what maps apps give:
+//   "47.497913, 19.040236" (Google Maps; also with decimal commas: "47,4979; 19,0402"),
+//   "47.49790° N, 19.04021° E" (Apple Maps; also "47° 29′ 52″ N, 19° 2′ 25″ E" and Hungarian É/D/K/Ny),
+//   Google plus codes: full ("8FVXF2PR+X6") or short with the area after it ("F2PR+X6 Budapest, Hungary").
+// A short plus code only says where inside a small square it is, so it's placed in the square nearest to
+// the area named after it when that's a time zone's place (e.g. "Budapest"), or else nearest to `ref`
+// ({ lat, lon }); `near` then says which. Without either, a short code gives null.
+function parseLocation(s, ref) {
+  s = (s || "").trim();
+  if (!s) return null;
+  const ok = (lat, lon) => isFinite(lat) && isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? { lat, lon } : null;
+  const num = v => parseFloat(v.replace(",", "."));
+  // Plain decimal degrees.
+  let m = /^(-?\d+(?:[.,]\d+)?)\s*[,;\s]\s*(-?\d+(?:[.,]\d+)?)$/.exec(s);
+  if (m) return ok(num(m[1]), num(m[2]));
+  // Degrees (with or without minutes and seconds) and N/S/E/W letters.
+  const N = "(\\d+(?:[.,]\\d+)?)", H = "(NY|[NSEWÉDK])";
+  const re = new RegExp(`${H}?\\s*(-?)${N}\\s*°\\s*(?:${N}\\s*['′’]\\s*)?(?:${N}\\s*(?:"|″|”|''|′′)\\s*)?${H}?`, "gi");
+  const parts = [...s.toUpperCase().matchAll(re)];
+  if (parts.length === 2 && s.replace(re, "").replace(/[\s,;]/g, "") === "") {
+    const vals = parts.map(p => {
+      const h = p[1] || p[6] || "", v = num(p[3]) + (p[4] ? num(p[4]) / 60 : 0) + (p[5] ? num(p[5]) / 3600 : 0);
+      return { v: (p[2] || /^[SWD]$|^NY$/.test(h) ? -1 : 1) * v, axis: /^[NSÉD]$/.test(h) ? "lat" : h ? "lon" : "" };
+    });
+    if (vals[0].axis === "lon" || vals[1].axis === "lat") vals.reverse();
+    if (vals[0].axis === "lon" || vals[1].axis === "lat") return null;   // e.g. two latitudes
+    return ok(vals[0].v, vals[1].v);
+  }
+  // Google plus code (Open Location Code).
+  m = /^([23456789CFGHJMPQRVWX]{0,8}0*\+[23456789CFGHJMPQRVWX]*)(?:[\s,]+(.*))?$/i.exec(s);
+  return m ? plusCode(m[1].toUpperCase(), m[2] || "", ref) : null;
+}
+
+// Decodes a plus code (see https://github.com/google/open-location-code) to the middle of its area.
+function plusCode(code, area, ref) {
+  const A = "23456789CFGHJMPQRVWX", sep = code.indexOf("+");
+  if (sep > 8 || sep % 2) return null;
+  const digits = code.replace("+", "").replace(/0+$/, "").slice(0, 15);
+  if (/0/.test(digits) || (sep < 8 && /0/.test(code))) return null;
+  const pad = 8 - sep, cell = Math.pow(20, 2 - pad / 2);   // size of the square the left-out digits stand for
+  let lat = 0, lon = 0, latRes = cell, lonRes = cell, i = 0;
+  for (; i < digits.length && i < 10 - pad; i += 2) {
+    latRes /= 20; lonRes /= 20;
+    lat += A.indexOf(digits[i]) * latRes; lon += A.indexOf(digits[i + 1] || "2") * lonRes;
+  }
+  for (; i < digits.length; i++) {   // past 10 digits: a 4 × 5 grid each
+    const d = A.indexOf(digits[i]); latRes /= 5; lonRes /= 4;
+    lat += Math.floor(d / 4) * latRes; lon += (d % 4) * lonRes;
+  }
+  lat += latRes / 2; lon += lonRes / 2;
+  let near = null;
+  if (pad === 0) { lat -= 90; lon -= 180; }
+  else {
+    // A short code: put it in the square nearest to the area named after it, or to `ref`.
+    for (const w of area.split(/[,;]/)) { const p = tzPlaceNamed(w.trim()); if (p) { ref = p; near = p.place; break; } }
+    if (!ref || !isFinite(ref.lat) || !isFinite(ref.lon)) return null;
+    lat += Math.floor((ref.lat + 90) / cell) * cell - 90; lon += Math.floor((ref.lon + 180) / cell) * cell - 180;
+    if (ref.lat + cell / 2 < lat && lat - cell >= -90) lat -= cell; else if (ref.lat - cell / 2 > lat && lat + cell <= 90) lat += cell;
+    if (ref.lon + cell / 2 < lon) lon -= cell; else if (ref.lon - cell / 2 > lon) lon += cell;
+    if (lon > 180) lon -= 360; else if (lon < -180) lon += 360;
+  }
+  if (Math.abs(lat) > 90) return null;
+  return Object.assign({ lat, lon }, pad ? { near: near || "ref" } : {});
+}
+
+// The time zone place with this name (e.g. "Budapest", "new york"), or null.
+function tzPlaceNamed(name) {
+  if (!name) return null;
+  tzPlace("");   // builds the index
+  const key = name.toLowerCase().replace(/_/g, " ");
+  for (const [z, p] of tzIndex) if (!p.alias && z.slice(z.lastIndexOf("/") + 1).replace(/_/g, " ").toLowerCase() === key) return tzPlace(z);
+  return null;
 }
 
 if (typeof module !== "undefined") module.exports = {
   CFG_NEW_LAYOUT_VER, fmtOffset, parseOffset, faceValue, macStr, toDataView, advEntries, parseAdv, le32,
   DRIFT_TOL, DRIFT_MAX_PER_DAY, driftCorrect, fmtDur, LOG_CAPACITY, logIntervalFromCfg, fmtDays,
   decodeCfg, FLG_BITS, FLG2_BITS, byteFromBits, encodeCfg, fmtNum, toCsv, parseCsv, histId,
-  timeTicks, utcOffsetMin, dstChanges, sampleKey, missingRecords, makeBackup, parseBackup, mergeClockLog, batteryState, batteryText, spreadLabels, waitForNextLog, sunTimes, darkSpans, tzPlace, parseLatLon, crc32, makeZip, readZip, withAtcPrefix, labelFor, downloadLabel,
+  timeTicks, utcOffsetMin, dstChanges, sampleKey, missingRecords, makeBackup, parseBackup, mergeClockLog, batteryState, batteryText, spreadLabels, waitForNextLog, sunTimes, darkSpans, tzPlace, parseLocation, crc32, makeZip, readZip, withAtcPrefix, labelFor, downloadLabel,
   sliceWidth, averageSlices, clampWindow,
   PERIODS, WEEK, MONTH, periodLabel, periodStart, periodEnd, periodKey, choosePeriod, periodProblem, closestPeriod, buildCandles,
 };

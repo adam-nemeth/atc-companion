@@ -746,7 +746,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=2026-11-26.131"></script>
+<script src="core.js?v=2026-11-26.132"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -856,7 +856,7 @@ async function mergeInto(dev, newSamples) {
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
 // Version: the day it's published (Hungarian time), then the build number, counting every version ever published (v125 was the last plain one).
 // Also in core.js?v= (the <script> tag above) and VERSION in python/ATC_MiThermometer_tools.py when it changes.
-const APP_VERSION = "2026-11-26.131";
+const APP_VERSION = "2026-11-26.132";
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -2938,10 +2938,15 @@ function setupChartSettings() {
   $("nightMode").value = nightMode();
   $("nightMode").onchange = e => { prefs.nightMode = e.target.value; savePrefs(); syncSunSettings(); drawChart(); };
   $("sunAt").onchange = () => {
-    const v = $("sunAt").value.trim(), p = parseLatLon(v);
-    if (!v) delete prefs.sunAt; else if (p) prefs.sunAt = { lat: p.lat, lon: p.lon };
+    // Coordinates or a plus code; a short plus code is placed near the place named after it, or the current one.
+    const v = $("sunAt").value.trim(), before = sunPlace(), p = parseLocation(v, before);
+    const r4 = x => Math.round(x * 1e4) / 1e4;
+    if (!v) delete prefs.sunAt; else if (p) prefs.sunAt = { lat: r4(p.lat), lon: r4(p.lon) };
     if (!v || p) { savePrefs(); drawChart(); }
-    syncSunSettings(v && !p ? "Type the latitude and longitude, e.g. 47.50, 19.04 (or paste them from a maps app)." : "");
+    syncSunSettings(v && !p ? "Paste the coordinates or the plus code from Google Maps or Apple Maps (touch and hold the place), or type them, e.g. 47.50, 19.04."
+      : p && p.near === "ref" ? `The plus code was placed near ${before && before.from === "zone" ? before.place : "the location set before"}. If that's wrong, copy the code with its town, or the full code.`
+      : "");
+    if (v && !p) $("sunAt").value = v;   // keep what was typed, to correct it
   };
   $("sunTz").onclick = () => { delete prefs.sunAt; savePrefs(); syncSunSettings(); drawChart(); };
   $("sunGps").classList.toggle("hidden", !navigator.geolocation);
