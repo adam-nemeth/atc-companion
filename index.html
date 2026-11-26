@@ -267,6 +267,9 @@ h1.titlebar { display: flex; align-items: baseline; justify-content: space-betwe
 h1.titlebar > span:first-child { white-space: nowrap; }
 #statusBar { font-size: 13px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 h3.sub { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 6px; }
+/* Groups of unrelated settings in one card, divided by a line. */
+.sgroup > h3.sub:first-child { margin-top: 0; }
+.sgroup + .sgroup { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 14px; }
 .tabs { position: sticky; top: 0; z-index: 5; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
   background: var(--bg); padding: 6px 0 10px; }
 .tabs button { min-height: 38px; padding: 8px 4px; font-size: 14px; border-radius: 9px; }
@@ -662,15 +665,20 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
   <div id="scol2">  <!-- Settings: right column on a computer -->
   <section class="card" data-tab="settings">
     <h2>Chart</h2>
+    <div class="sgroup">
+    <h3 class="sub">Comfort bands</h3>
     <div class="row">
-      <label><input type="checkbox" id="cfOn"> Comfort bands</label>
+      <label><input type="checkbox" id="cfOn"> Shade the comfortable range</label>
     </div>
     <div class="row">
       <label>°C <input type="number" id="cfTLo" step="0.5" style="width:70px"> – <input type="number" id="cfTHi" step="0.5" style="width:70px"></label>
       <label>% <input type="number" id="cfHLo" step="1" style="width:70px"> – <input type="number" id="cfHHi" step="1" style="width:70px"></label>
     </div>
+    </div>
+    <div class="sgroup">
+    <h3 class="sub">Nights</h3>
     <div class="row">
-      <label>Shade nights <select id="nightMode">
+      <label>Shade <select id="nightMode">
         <option value="sun">Sunset to sunrise</option><option value="hours">Fixed hours</option><option value="off">Off</option>
       </select></label>
     </div>
@@ -684,12 +692,16 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
     <div class="row" id="nightRow">
       <label>Night <input type="time" id="nightFrom" aria-label="Night from" step="900" style="width:110px"> – <input type="time" id="nightTo" aria-label="Night to" step="900" style="width:110px"></label>
     </div>
+    </div>
+    <div class="sgroup">
+    <h3 class="sub">Scale</h3>
     <div class="row">
       <label><input type="checkbox" id="fsOn"> Fixed scale (same axes for every sensor and zoom)</label>
     </div>
     <div class="row">
       <label>°C <input type="number" id="fsTLo" step="1" style="width:70px"> – <input type="number" id="fsTHi" step="1" style="width:70px"></label>
       <label>% <input type="number" id="fsHLo" step="5" style="width:70px"> – <input type="number" id="fsHHi" step="5" style="width:70px"></label>
+    </div>
     </div>
   </section>
 
@@ -734,7 +746,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=2026-11-26.130"></script>
+<script src="core.js?v=2026-11-26.131"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -844,7 +856,7 @@ async function mergeInto(dev, newSamples) {
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
 // Version: the day it's published (Hungarian time), then the build number, counting every version ever published (v125 was the last plain one).
 // Also in core.js?v= (the <script> tag above) and VERSION in python/ATC_MiThermometer_tools.py when it changes.
-const APP_VERSION = "2026-11-26.130";
+const APP_VERSION = "2026-11-26.131";
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -3018,11 +3030,12 @@ const niceStep = raw => { const e = Math.pow(10, Math.floor(Math.log10(raw))); f
 function drawNight({ el, col, T, ph, t0, t1, span, clipX }) {
   // Night shading when a week or less is shown - makes daily rhythms easy to see. Sunset to sunrise (default) at
   // the location from Settings or the phone's time zone, or fixed night hours (default 23:00-07:00 local).
-  const mode = nightMode(), place = mode === "sun" ? sunPlace() : null;
-  const band = (a, b) => { const [xa, xb] = clipX(a, b); if (xb > xa) el("rect", { x: xa, y: T, width: xb - xa, height: ph, fill: col("--muted"), "fill-opacity": 0.07 }); };
+  // Left out when the days between the nights would be too narrow to see (they'd merge into one grey area).
+  const mode = nightMode(), place = mode === "sun" ? sunPlace() : null, bands = [];
+  const band = (a, b) => { const [xa, xb] = clipX(a, b); if (xb > xa) bands.push([xa, xb]); };
   if (span > 8 * 86400 || mode === "off") return;
-  if (place) { for (const [a, b] of darkSpans(t0, t1, place.lat, place.lon)) band(a, b); return; }
-  {  // fixed hours, also when no place is known
+  if (place) for (const [a, b] of darkSpans(t0, t1, place.lat, place.lon)) band(a, b);
+  else {  // fixed hours, also when no place is known
     const [fh, fm] = nightHours().from, [th, tm] = nightHours().to;
     const overnight = fh * 60 + fm >= th * 60 + tm;   // e.g. 23:00 → 07:00 runs into the next day
     const d = new Date(t0 * 1000); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - 1);
@@ -3033,6 +3046,8 @@ function drawNight({ el, col, T, ph, t0, t1, span, clipX }) {
       d.setDate(d.getDate() + 1);
     }
   }
+  for (let i = 1; i < bands.length; i++) if (bands[i][0] - bands[i - 1][1] < 8) return;
+  for (const [xa, xb] of bands) el("rect", { x: xa, y: T, width: xb - xa, height: ph, fill: col("--muted"), "fill-opacity": 0.07 });
 }
 function drawTimeAxis({ el, col, x, L, T, pw, ph, t0, t1, span }) {
   // Time axis: ticks at round local times (15 min … 12 h, midnights, Mondays, 1st of month), labels
