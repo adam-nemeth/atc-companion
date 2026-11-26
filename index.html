@@ -49,6 +49,8 @@ h2 { font-size: 16px; margin: 0 0 10px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .row + .row { margin-top: 8px; }
+.rownote { font-size: 12px; margin-top: 4px; }   /* a note under a row of settings */
+.rownote + .row { margin-top: 8px; }
 .row:has(> span:only-child:empty) { display: none; }  /* a message that isn't there takes no room */
 button { font: inherit; border: 1px solid var(--line); background: var(--input); color: var(--text);
   border-radius: 9px; padding: 9px 14px; min-height: 42px; cursor: pointer; }
@@ -672,13 +674,13 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
         <option value="sun">Sunset to sunrise</option><option value="hours">Fixed hours</option><option value="off">Off</option>
       </select></label>
     </div>
-    <div class="muted" style="font-size:12px;margin-top:-4px">When a week or less is shown.</div>
+    <div class="muted rownote">When a week or less is shown.</div>
     <div class="row" id="sunRow">
       <label>Location <input type="text" id="sunAt" inputmode="decimal" autocomplete="off" aria-label="Location: latitude, longitude" style="width:150px"></label>
       <button id="sunGps">Use my location</button>
       <button id="sunTz">Use time zone</button>
     </div>
-    <div class="muted" id="sunInfo" style="font-size:12px;margin-top:-4px"></div>
+    <div class="muted rownote" id="sunInfo"></div>
     <div class="row" id="nightRow">
       <label>Night <input type="time" id="nightFrom" aria-label="Night from" step="900" style="width:110px"> – <input type="time" id="nightTo" aria-label="Night to" step="900" style="width:110px"></label>
     </div>
@@ -732,7 +734,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=2026-11-26.129"></script>
+<script src="core.js?v=2026-11-26.130"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -842,7 +844,7 @@ async function mergeInto(dev, newSamples) {
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
 // Version: the day it's published (Hungarian time), then the build number, counting every version ever published (v125 was the last plain one).
 // Also in core.js?v= (the <script> tag above) and VERSION in python/ATC_MiThermometer_tools.py when it changes.
-const APP_VERSION = "2026-11-26.129";
+const APP_VERSION = "2026-11-26.130";
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
