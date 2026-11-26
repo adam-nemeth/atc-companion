@@ -723,7 +723,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=2026-11-25.126"></script>
+<script src="core.js?v=2026-11-26.127"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -833,7 +833,7 @@ async function mergeInto(dev, newSamples) {
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
 // Version: the day it's published (Hungarian time), then the build number, counting every version ever published (v125 was the last plain one).
 // Also in core.js?v= (the <script> tag above) and VERSION in python/ATC_MiThermometer_tools.py when it changes.
-const APP_VERSION = "2026-11-25.126";
+const APP_VERSION = "2026-11-26.127";
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -2964,7 +2964,8 @@ function drawTimeAxis({ el, col, x, L, T, pw, ph, t0, t1, span }) {
     const anchor = anchorOf(xx);
     el("text", { x: xx, y: T + ph + 14, "text-anchor": anchor, "font-size": 11, fill: col("--muted") }, f1.format(d));
     const k2 = key2(d);
-    if (k2 !== prevKey) {
+    // Times of day: the date only under midnight, so it says where the day starts (none if no midnight is in view).
+    if (tk.unit === "subday" ? isMidnight : k2 !== prevKey) {
       // Second line (date / month / year where it changes): skipped if it would run into the previous one.
       const s2 = f2.format(d), [l2, r2] = extent(xx, textW(s2, true));
       if (l2 >= right2 + 6) { el("text", { x: xx, y: T + ph + 28, "text-anchor": anchor, "font-size": 11, "font-weight": 600, fill: col("--text") }, s2); right2 = r2; }
@@ -3474,8 +3475,10 @@ function drawTags(cx, tags) {
   tags.forEach((t, i) => {
     const w = t.w, bx = left ? cx - 7 - w : cx + 7;
     mk("rect", { x: bx, y: ty[i] - 8, width: w, height: 16, rx: 4, fill: P.colBg, stroke: t.color, "stroke-width": t.ink ? 1.5 : 1, "stroke-dasharray": t.dash });
-    if (t.nm) mk("text", { x: bx + 5.5, y: ty[i] + 4, "font-size": 11, fill: P.colMuted }, t.nm);
-    mk("text", { x: bx + w - 5.5, y: ty[i] + 4, "text-anchor": "end", "font-size": 11, "font-weight": 700, fill: t.ink || t.color }, t.text);
+    // The value goes next to the marker line, the description on the far side.
+    const near = left ? bx + w - 5.5 : bx + 5.5, far = left ? bx + 5.5 : bx + w - 5.5;
+    if (t.nm) mk("text", { x: far, y: ty[i] + 4, "text-anchor": left ? "start" : "end", "font-size": 11, fill: P.colMuted }, t.nm);
+    mk("text", { x: near, y: ty[i] + 4, "text-anchor": left ? "end" : "start", "font-size": 11, "font-weight": 700, fill: t.ink || t.color }, t.text);
   });
 }
 // The marker's time, on top of its line.
