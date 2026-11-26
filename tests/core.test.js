@@ -309,6 +309,17 @@ test("ZIP: written and read back", () => {
   assert.throws(() => core.readZip(zip.slice(0, zip.length - 30)), /ZIP/);
 });
 
+test("before erasing: wait if the next reading is due within seconds", () => {
+  const log = [...Array(10)].map((_, i) => 1790000000 + i * 600), last = log[9];
+  assert.equal(core.waitForNextLog(log, last + 300), 0);         // 5 min to go
+  assert.equal(core.waitForNextLog(log, last + 590), 25);        // due in 10 s: wait until 15 s after it
+  assert.equal(core.waitForNextLog(log, last + 610), 5);         // due 10 s ago, maybe not logged yet
+  assert.equal(core.waitForNextLog(log, last + 700), 0);         // logged already: in the check
+  assert.equal(core.waitForNextLog(log, last + 1195), 20);       // the one after that
+  assert.equal(core.waitForNextLog(log.slice(0, 2), last + 590), 0);
+  assert.equal(core.waitForNextLog(log, null), 0);
+});
+
 test("small helpers", () => {
   assert.equal(core.fmtOffset(3600), "+01:00");
   assert.equal(core.fmtOffset(-16200), "-04:30");

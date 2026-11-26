@@ -110,9 +110,11 @@ class SensorConfig(unittest.TestCase):
 class FakeSensor:
     """Stands in for bleak's BleakClient: answers the clock (0x23), history (0x35) and erase
     (0x36) commands like a sensor with `n` readings, and records what was sent."""
-    def __init__(self, n=50, finish=True, lost=(), clock_fails=False):
+    def __init__(self, n=50, finish=True, lost=(), clock_fails=False, logs_during=0, due_in=300):
         self.n, self.finish, self.sent, self.erased_with_files = n, finish, [], None
         self.lost, self.clock_fails, self.clock_set = lost, clock_fails, False
+        self.logs_during, self.new = logs_during, 0  # readings logged while the first download runs
+        self.due_in = due_in  # seconds until the next reading is logged
         self.prefix_dir = None
 
     def __call__(self, address):  # used as BleakClient(address)
@@ -141,9 +143,14 @@ class FakeSensor:
                 raise OSError("simulated Bluetooth error")
             self.clock_set = True
         elif data[0] == 0x35:
-            for i in range(1, self.n + 1):  # like the firmware: numbered from 1, newest first
+            # Like the firmware: the log as it is now, newest first, numbered from 1, as many as asked for.
+            last = now + self.due_in - 600
+            times = [last + j * 600 for j in range(self.new, 0, -1)] + [last - i * 600 for i in range(self.n)]
+            for i, t in enumerate(times[:data[1] | data[2] << 8], 1):
                 if i not in self.lost:
-                    self.handler(None, bytearray(b"\x35" + T.struct.pack("<HIhHH", i, now - i * 600, 2150, 5000, 3000)))
+                    self.handler(None, bytearray(b"\x35" + T.struct.pack("<HIhHH", i, t, 2150, 5000, 3000)))
+            self.new += self.logs_during
+            self.logs_during = 0
             if self.finish:
                 self.handler(None, bytearray(b"\x35"))  # short packet = end of transfer
         elif data[0] == 0x36:
@@ -165,6 +172,8 @@ class DownloadAndErase(unittest.TestCase):
                 finished = T.asyncio.run(T.dump("A4:C1:38:A1:B2:C3", str(Path(d) / "Kitchen-ATC_A1B2C3"), count,
                                                 timeout, "en", "utc", erase, "source", ("all",), True))
                 files = sorted(p.name for p in Path(d).glob("*.csv"))
+                raw = [p for p in Path(d).glob("*-raw-*.csv")]
+                self.rows = len(T.read_csv_file(raw[0])[0]) if raw else 0
             finally:
                 T.BleakClient, T._warm_up, T.CLOCK_LOG, T.log = saved
         return finished, files
@@ -220,6 +229,39 @@ class DownloadAndErase(unittest.TestCase):
         ok, _files = self.run_dump(s)
         self.assertFalse(ok)
         self.assert_left_alone(s)
+
+    def test_reading_logged_during_the_download_is_saved_before_erasing(self):
+        for during in (1, 6):
+            s = FakeSensor(logs_during=during)
+            ok, files = self.run_dump(s)
+            self.assertTrue(ok)
+            self.assertIn(0x36, s.sent)
+            raw = [f for f in files if "-raw-" in f]
+            self.assertEqual(len(raw), 1)
+            self.assertEqual(s.sent.count(0x35), 2 if during < 4 else 3)
+            self.assertEqual(self.rows, 50 + during)
+
+    def test_waits_when_the_next_reading_is_due(self):
+        waits = []
+        async def fake_sleep(s):
+            waits.append(s)
+        real = T.asyncio.sleep
+        T.asyncio.sleep = fake_sleep
+        try:
+            s = FakeSensor(due_in=5)
+            ok, _files = self.run_dump(s)
+        finally:
+            T.asyncio.sleep = real
+        self.assertTrue(ok)
+        self.assertEqual([w for w in waits if w >= 1], [20])
+        self.assertIn(0x36, s.sent)
+
+    def test_wait_for_next_log_matches_the_app(self):
+        log = [1790000000 + i * 600 for i in range(10)]
+        last = log[-1]
+        for now, wait in ((300, 0), (590, 25), (610, 5), (700, 0), (1195, 20)):
+            self.assertEqual(T.wait_for_next_log(log, last + now), wait)
+        self.assertEqual(T.wait_for_next_log(log, None), 0)
 
     def test_missing_records(self):
         self.assertEqual(T.missing_records([]), 0)

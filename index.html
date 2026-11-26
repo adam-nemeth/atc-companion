@@ -723,7 +723,7 @@ body[data-tab="all"] #knownList .kc .sub { padding-left: 28px; }
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
 <!-- Pure logic (also used by the tests); the ?v= makes phones fetch the new copy with each release. -->
-<script src="core.js?v=2026-11-26.127"></script>
+<script src="core.js?v=2026-11-26.128"></script>
 <script>
 "use strict";
 const LOCALE = "en-GB";  // dates and numbers match the English texts, whatever the phone's language
@@ -833,7 +833,7 @@ async function mergeInto(dev, newSamples) {
 // with stacks. Kept across page reloads (last LOG_MAX lines) so a crash or iOS reload doesn't lose it.
 // Version: the day it's published (Hungarian time), then the build number, counting every version ever published (v125 was the last plain one).
 // Also in core.js?v= (the <script> tag above) and VERSION in python/ATC_MiThermometer_tools.py when it changes.
-const APP_VERSION = "2026-11-26.127";
+const APP_VERSION = "2026-11-26.128";
 const LOG_MAX = 4000;
 const logLines = lsGet("debugLog", []);
 let logDirty = false;
@@ -1887,12 +1887,33 @@ async function dump(opts = {}) {
     $("btnExportRaw").disabled = !raw.length;
     // Stored: [corrected time, t, h, mV, sensor's own time] - the sensor time identifies the reading,
     // so a later download (with a slightly different correction) replaces it instead of duplicating it.
-    const total = raw.length ? await mergeInto(key, raw.map(([e, t, h, v, , c]) => [c - offSec, t, h, v, e - offSec])) : (await loadHistory(key)).length;
+    let total = raw.length ? await mergeInto(key, raw.map(([e, t, h, v, , c]) => [c - offSec, t, h, v, e - offSec])) : (await loadHistory(key)).length;
     log(`Stored ${raw.length} new readings for ${key} (${total} total).`);
     // Set the clock and erase only now: every downloaded reading is in this phone's storage (checked by
     // reading it back). Both or neither: if setting the clock fails, nothing is erased.
     if (del && result.complete && !result.empty) {
-      if (!idb || (await loadHistory(key)).length < total) log("Not setting the clock or erasing the sensor: the readings couldn't be saved permanently on this phone.", "err");
+      // The sensor sends its log as it was when asked, so a reading logged during the download (or since)
+      // isn't in it, and erasing would lose it: ask for the newest readings once more and save any new ones.
+      // And if the next reading is due within seconds, wait until it's logged, so it's in that check.
+      const saved = (await loadHistory(key)).length >= total, now = saved ? await readSensorClock() : null;
+      const wait = now ? waitForNextLog(raw.map(r => r[0]), now.sensor) : 0;
+      if (wait) {
+        log(`The sensor's next reading is due in a few seconds: waiting ${wait} s, so it's saved before erasing.`);
+        const msg = `waiting ${wait} s for the sensor's next reading…`;
+        if (opts.onProgress) opts.onProgress(msg, null); else $("dumpStatus").textContent = msg[0].toUpperCase() + msg.slice(1);
+        clearInterval(ui);
+        await sleep(wait * 1000);
+      }
+      const extra = !saved ? [] : await newestSince(raw);
+      if (extra && extra.length) {
+        const newest = raw.reduce((a, r) => r[0] > a[0] ? r : a), shift = newest[0] - newest[5];  // its drift correction
+        for (const r of extra) { r[5] = r[0] - shift; raw.push(r); }
+        raw.sort((a, b) => a[5] - b[5]);
+        total = await mergeInto(key, extra.map(([e, t, h, v, , c]) => [c - offSec, t, h, v, e - offSec]));
+        log(`${count(extra.length, "reading")} logged during the download also saved (${total} total).`);
+      }
+      if (!extra) { result.problem = "couldn't check for a reading logged during the download"; log(`Not setting the clock or erasing the sensor: ${result.problem}.`, "warn"); }
+      else if (!idb || (await loadHistory(key)).length < total) log("Not setting the clock or erasing the sensor: the readings couldn't be saved permanently on this phone.", "err");
       else try {
         if (sync) {
           const t = deviceEpochNow(prefs.timeMode);
@@ -1923,6 +1944,23 @@ async function dump(opts = {}) {
   } finally { clearInterval(ui); listeners.delete(l); setTimeout(() => prog.style.display = "none", 1500); }
 }
 
+// The readings the sensor logged after the download was asked for: [] if none, null if it didn't answer.
+// The newest few are asked for (more if they're all new), and those not in `downloaded` are new. They're
+// numbered on from the download's numbers (0, -1, … = newer), like one log.
+async function newestSince(downloaded) {
+  const id = r => `${r[0]}|${r[1]}|${r[2]}|${r[3]}`, have = new Set(downloaded.map(id));
+  for (let n = 4; n <= 64; n *= 4) {
+    const got = []; let end = false;
+    const l = b => { if (b[0] !== 0x35) return; if (b.length < 13) { end = true; return; }
+      const dv = new DataView(b.buffer); got.push([dv.getUint32(3, true), dv.getInt16(7, true) / 100, dv.getUint16(9, true) / 100, dv.getUint16(11, true), dv.getUint16(1, true)]); };
+    listeners.add(l);
+    try { await write([0x35, n, 0, 0, 0]); if (!await waitIdle(() => end)) return null; } finally { listeners.delete(l); }
+    const fresh = got.filter(r => !have.has(id(r)));
+    dbg(`Newest ${n} readings asked for again: ${got.length} received, ${fresh.length} new`);
+    if (fresh.length < got.length || got.length < n) return fresh.map(r => (r[4] -= fresh.length, r));
+  }
+  return null;  // dozens of new readings in a minute or two: something isn't right
+}
 // Per-sensor record of clock sets this app made, and the last measured drift rate (s per s).
 function clockLog(id) { const all = lsGet("clockLog", {}); return all[id] || { sets: [], rate: null }; }
 function saveClockLog(id, upd) {

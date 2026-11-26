@@ -63,7 +63,10 @@ the new log then starts with a correct clock. If setting the clock fails,
 nothing is erased. Neither is done after an interrupted download, a partial
 one (--count), an empty one, or one with gaps: the firmware numbers the
 readings 1, 2, 3... (src/ble.c: send_memo_blk()), so readings that got lost
-on the way are noticed. Pass --keep-log to only download.
+on the way are noticed. The sensor sends its log as it was when asked, so
+before erasing, the newest readings are asked for again and any logged in the
+meantime are saved too; if the next one is due within seconds, the tool waits
+for it first. Pass --keep-log to only download.
 
 NOTE ON CLOCK DRIFT (--no-drift-correction): a sensor's clock can gain or
 lose time steadily (how much, and whether at all, is still being measured
@@ -178,6 +181,7 @@ import asyncio
 import csv
 import glob
 import json
+import math
 import re
 import struct
 import sys
@@ -968,6 +972,7 @@ async def dump(address: str, out_prefix: str, requested_count: int, timeout: flo
     or neither). Returns True if everything worked: nothing missing, and the clock set and the
     log erased if asked for."""
     samples = []
+    sink = [samples]  # where 0x35 records go (another list while the newest are asked for again)
     done = asyncio.Event()
     delete_done = asyncio.Event()
     clock_event = asyncio.Event()
@@ -983,7 +988,7 @@ async def dump(address: str, out_prefix: str, requested_count: int, timeout: flo
         if blkid == 0x35:
             if len(data) >= 13:
                 idx, tc, tm, hm, vb = struct.unpack_from("<HIhHH", data, 1)
-                samples.append((tc, tm / 100.0, hm / 100.0, vb, idx))
+                sink[0].append((tc, tm / 100.0, hm / 100.0, vb, idx))
             else:
                 done.set()  # short trailing packet = transfer complete
         elif blkid == 0x36:
@@ -1027,6 +1032,24 @@ async def dump(address: str, out_prefix: str, requested_count: int, timeout: flo
         complete = finished and not missing
         if missing:
             log(f"{missing} reading(s) got lost on the way. Download again to get them.")
+        # The sensor sends its log as it was when asked, so a reading logged during the download isn't
+        # in it, and erasing would lose it: ask for the newest readings once more and keep any new ones.
+        if set_and_erase and complete and cnt == 0xFFFF and samples:
+            # And if the next reading is due within seconds, wait until it's logged, so it's in that check.
+            now = await read_device_clock(client, clock_reply, clock_event, activity)
+            wait = wait_for_next_log([s[0] for s in samples], now[0] if now else None)
+            if wait:
+                log(f"The sensor's next reading is due in a few seconds: waiting {wait} s, so it's saved "
+                    "before erasing.")
+                await asyncio.sleep(wait)
+                activity.touch()
+            extra = await _newest_since(client, sink, done, activity, timeout, samples)
+            if extra is None:
+                complete = False
+                log("Couldn't check for a reading logged during the download.")
+            elif extra:
+                samples.extend(extra)
+                log(f"{len(extra)} reading(s) logged during the download also saved.")
         # Save the download to disk BEFORE anything else happens on the sensor, so erasing it
         # (the default) can never lose readings that didn't make it into a file.
         out_path, saved = None, 0
@@ -1054,6 +1077,48 @@ async def dump(address: str, out_prefix: str, requested_count: int, timeout: flo
     if merge_levels:
         _merge_and_report(prefix, locale, merge_tz, merge_levels)
     return ok
+
+
+def wait_for_next_log(times, sensor_now, margin=15) -> int:
+    """Before erasing: seconds to wait so the sensor's next reading isn't due right then (it would be
+    logged between the last check for new readings and the erase, and be lost). times: the log's own
+    times (sensor clock); sensor_now: the sensor clock now. 0 = go ahead. Same as waitForNextLog()
+    in the app's core.js."""
+    if len(times) < 3 or sensor_now is None:
+        return 0
+    s = sorted(times)
+    d = sorted(x for x in (b - a for a, b in zip(s, s[1:])) if 30 <= x <= 7200)
+    if not d:
+        return 0
+    period = d[len(d) // 2]
+    nxt = s[-1] + period
+    while nxt < sensor_now - margin:  # already logged: then it's in the check, the one after is next
+        nxt += period
+    return math.ceil(nxt - sensor_now + margin) if nxt - sensor_now <= margin else 0
+
+
+async def _newest_since(client, sink, done, activity, timeout, downloaded):
+    """The readings the sensor logged after the download was asked for: [] if none, None if it didn't
+    answer. The newest few are asked for (more if they're all new); those not in `downloaded` are new.
+    They're numbered on from the download's numbers (0, -1, ... = newer), like one log."""
+    have = {s[:4] for s in downloaded}
+    n = 4
+    while n <= 64:
+        got = []
+        sink[0], _ = got, done.clear()
+        try:
+            await client.write_gatt_char(CHAR_UUID, bytes([0x35, n, 0, 0, 0]))
+            activity.touch()
+            answered = await wait_idle(done, activity, timeout)
+        finally:
+            sink[0] = downloaded
+        if not answered:
+            return None
+        fresh = [s for s in got if s[:4] not in have]
+        if len(fresh) < len(got) or len(got) < n:
+            return [(s[0], s[1], s[2], s[3], s[4] - len(fresh)) for s in fresh]
+        n *= 4
+    return None  # dozens of new readings in a minute or two: something isn't right
 
 
 def missing_records(numbers) -> int:
@@ -1447,7 +1512,7 @@ examples:
 
 
 # Same pattern as the app: the day it's published, then the build number (all versions ever published).
-VERSION = "2026-11-25.126"
+VERSION = "2026-11-26.128"
 
 
 def main():

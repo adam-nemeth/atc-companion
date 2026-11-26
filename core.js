@@ -543,6 +543,21 @@ function readZip(bytes) {
   return out;
 }
 
+// Before erasing: seconds to wait so the sensor's next reading isn't due right then (it would be logged
+// between the last check for new readings and the erase, and be lost). times: the log's own times
+// (sensor clock); sensorNow: the sensor clock now. Readings are logged every `interval` give or take a
+// measurement, hence the margin. 0 = go ahead.
+function waitForNextLog(times, sensorNow, margin = 15) {
+  if (times.length < 3 || sensorNow == null) return 0;
+  const s = times.slice().sort((a, b) => a - b), d = [];
+  for (let i = 1; i < s.length; i++) { const x = s[i] - s[i - 1]; if (x >= 30 && x <= 7200) d.push(x); }
+  if (!d.length) return 0;
+  const P = d.sort((a, b) => a - b)[d.length >> 1];
+  let next = s[s.length - 1] + P;
+  while (next < sensorNow - margin) next += P;  // already logged: then it's in the check, the one after is next
+  return next - sensorNow <= margin ? Math.ceil(next - sensorNow + margin) : 0;
+}
+
 // Moves labels apart: the positions nearest to the wanted ones (ascending) that are at least `gap` apart and
 // inside lo…hi. Labels too close together are spread around their common middle.
 function spreadLabels(ys, gap, lo, hi) {
@@ -561,7 +576,7 @@ if (typeof module !== "undefined") module.exports = {
   CFG_NEW_LAYOUT_VER, fmtOffset, parseOffset, faceValue, macStr, toDataView, advEntries, parseAdv, le32,
   DRIFT_TOL, DRIFT_MAX_PER_DAY, driftCorrect, fmtDur, LOG_CAPACITY, logIntervalFromCfg, fmtDays,
   decodeCfg, FLG_BITS, FLG2_BITS, byteFromBits, encodeCfg, fmtNum, toCsv, parseCsv, histId,
-  timeTicks, utcOffsetMin, dstChanges, sampleKey, missingRecords, makeBackup, parseBackup, mergeClockLog, batteryState, batteryText, spreadLabels, crc32, makeZip, readZip, withAtcPrefix, labelFor, downloadLabel,
+  timeTicks, utcOffsetMin, dstChanges, sampleKey, missingRecords, makeBackup, parseBackup, mergeClockLog, batteryState, batteryText, spreadLabels, waitForNextLog, crc32, makeZip, readZip, withAtcPrefix, labelFor, downloadLabel,
   sliceWidth, averageSlices, clampWindow,
   PERIODS, WEEK, MONTH, periodLabel, periodStart, periodEnd, periodKey, choosePeriod, periodProblem, closestPeriod, buildCandles,
 };
